@@ -1,0 +1,27 @@
+[project]
+name = "tessera"
+version = "0.1.0"
+description = "Self-hosted task scheduling that respects the real shape of your day."
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+# Static enforcement of the layering rule (architecture-plan.md Section 2.1).
+# A violation fails CI, same as a failing test - not a lint warning.
+[tool.importlinter]
+root_package = "app"
+
+[[tool.importlinter.contracts]]
+name = "Layering"
+type = "layers"
+layers = [
+    "app.api",
+    "app.task_templates | app.task_instances | app.notifications | app.calendar_sync | app.auth | app.settings",
+    "app.db",
+]
+
+[[tool.importlinter.contracts]]
+name = "Scheduling engine stays pure"
+type = "independence"
+modules = ["app.scheduling_engine"]
