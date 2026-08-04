@@ -60,6 +60,18 @@ Tessera fits your flexible tasks into the gaps left by fixed commitments, deadli
    npm run lint  # Check linting
    ```
 
+### Running All Checks
+
+Before opening or merging a PR, run everything CI runs in one shot:
+
+```bash
+make check
+```
+
+This runs backend lint/format check, mypy, import-linter, and pytest, followed by frontend
+ESLint, TypeScript check, vitest, and a production build. Individual targets (`make backend-check`,
+`make frontend-test`, etc.) are also available - see the `Makefile` for the full list.
+
 ### Podman (or Docker)
 
 **With Podman (recommended for rootless containers):**

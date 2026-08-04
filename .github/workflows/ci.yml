@@ -82,12 +82,22 @@ jobs:
       - name: ESLint
         run: |
           cd frontend
-          npm run lint 2>/dev/null || echo "ESLint not configured yet"
+          npm run lint
 
       - name: TypeScript check
         run: |
           cd frontend
-          npm run type-check 2>/dev/null || echo "type-check not configured yet"
+          npm run type-check
+
+      - name: Vitest
+        run: |
+          cd frontend
+          npm run test
+
+      - name: Production build
+        run: |
+          cd frontend
+          npm run build
 
   docker:
     name: Container Build & Test
