@@ -1,9 +1,10 @@
 """Tessera task scheduling application."""
 
-from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
-import os
 import logging
+import os
+from typing import Any
+
+from fastapi import FastAPI
 
 logger = logging.getLogger(__name__)
 
@@ -18,19 +19,19 @@ app = FastAPI(
 
 
 @app.get("/health", tags=["health"])
-async def health_check():
+async def health_check() -> dict[str, str]:
     """Health check endpoint for container orchestration."""
     return {"status": "healthy"}
 
 
 @app.on_event("startup")
-async def startup_event():
+async def startup_event() -> None:
     """Run startup tasks."""
     logger.info("Tessera starting up")
 
 
 @app.on_event("shutdown")
-async def shutdown_event():
+async def shutdown_event() -> None:
     """Run shutdown tasks."""
     logger.info("Tessera shutting down")
 
@@ -43,6 +44,7 @@ async def shutdown_event():
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(
         app,
         host="0.0.0.0",

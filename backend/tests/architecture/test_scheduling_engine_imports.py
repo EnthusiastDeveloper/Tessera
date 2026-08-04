@@ -29,19 +29,13 @@ def test_scheduling_engine_has_no_fastapi_imports() -> None:
                         for alias in node.names:
                             module_name = alias.name.split(".")[0]
                             if module_name in forbidden:
-                                violations.append(
-                                    f"{spec.origin}: imports {alias.name}"
-                                )
+                                violations.append(f"{spec.origin}: imports {alias.name}")
                     elif isinstance(node, ast.ImportFrom):
                         if node.module:
                             base = node.module.split(".")[0]
                             if base in forbidden:
-                                violations.append(
-                                    f"{spec.origin}: from {node.module} import ..."
-                                )
+                                violations.append(f"{spec.origin}: from {node.module} import ...")
         except (ImportError, AttributeError, OSError):
             pass
 
-    assert not violations, f"scheduling_engine has forbidden imports:\n" + "\n".join(
-        violations
-    )
+    assert not violations, "scheduling_engine has forbidden imports:\n" + "\n".join(violations)
