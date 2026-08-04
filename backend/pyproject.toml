@@ -45,6 +45,7 @@ asyncio_mode = "auto"
 # A violation fails CI, same as a failing test - not a lint warning.
 [tool.importlinter]
 root_package = "app"
+include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "Layering"
@@ -57,9 +58,22 @@ layers = [
 
 [[tool.importlinter.contracts]]
 name = "Scheduling engine stays pure"
-type = "independence"
-modules = ["app.scheduling_engine"]
-forbidden_modules = ["fastapi", "sqlalchemy"]
+type = "forbidden"
+source_modules = ["app.scheduling_engine"]
+forbidden_modules = [
+    "fastapi",
+    "sqlalchemy",
+    "app.api",
+    "app.auth",
+    "app.calendar_sync",
+    "app.core",
+    "app.db",
+    "app.jobs",
+    "app.notifications",
+    "app.settings",
+    "app.task_instances",
+    "app.task_templates",
+]
 
 [tool.ruff]
 line-length = 130

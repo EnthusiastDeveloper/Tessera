@@ -1,4 +1,4 @@
-"""Architecture test: verify scheduling_engine has zero framework dependencies."""
+"""Architecture test: verify scheduling_engine has zero framework/app dependencies."""
 
 import ast
 import importlib.util
@@ -6,9 +6,18 @@ import pkgutil
 from pathlib import Path
 
 
-def test_scheduling_engine_has_no_fastapi_imports() -> None:
-    """Verify scheduling_engine contains no FastAPI imports."""
-    forbidden = {"fastapi", "sqlalchemy"}
+def _is_forbidden(module_name: str) -> bool:
+    """A module is forbidden if it's fastapi/sqlalchemy, or any app.* module
+    other than scheduling_engine itself (its own package)."""
+    if module_name in {"fastapi", "sqlalchemy"} or module_name.startswith(("fastapi.", "sqlalchemy.")):
+        return True
+    if module_name == "app" or module_name.startswith("app."):
+        return not (module_name == "app.scheduling_engine" or module_name.startswith("app.scheduling_engine."))
+    return False
+
+
+def test_scheduling_engine_has_no_forbidden_imports() -> None:
+    """Verify scheduling_engine imports nothing from FastAPI, SQLAlchemy, or the rest of app/."""
     violations: list[str] = []
 
     engine_path = Path(__file__).parent.parent.parent / "app" / "scheduling_engine"
@@ -27,14 +36,11 @@ def test_scheduling_engine_has_no_fastapi_imports() -> None:
                 for node in ast.walk(tree):
                     if isinstance(node, ast.Import):
                         for alias in node.names:
-                            module_name = alias.name.split(".")[0]
-                            if module_name in forbidden:
+                            if _is_forbidden(alias.name):
                                 violations.append(f"{spec.origin}: imports {alias.name}")
                     elif isinstance(node, ast.ImportFrom):
-                        if node.module:
-                            base = node.module.split(".")[0]
-                            if base in forbidden:
-                                violations.append(f"{spec.origin}: from {node.module} import ...")
+                        if node.module and node.level == 0 and _is_forbidden(node.module):
+                            violations.append(f"{spec.origin}: from {node.module} import ...")
         except (ImportError, AttributeError, OSError):
             pass
 
