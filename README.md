@@ -28,7 +28,7 @@ Tessera fits your flexible tasks into the gaps left by fixed commitments, deadli
 
 - Python 3.12+
 - Node.js 20+
-- Docker + Docker Compose (recommended for deployment)
+- Podman + podman-compose (or Docker + Docker Compose for deployment)
 
 ### Local Development
 
@@ -60,12 +60,23 @@ Tessera fits your flexible tasks into the gaps left by fixed commitments, deadli
    npm run lint  # Check linting
    ```
 
-### Docker
+### Podman (or Docker)
 
+**With Podman (recommended for rootless containers):**
 ```bash
-docker-compose up
+podman-compose up
 # Open http://localhost:8000
 # First run: set RESET_ADMIN_PASSWORD env var in .env and restart
+```
+
+**Or with Docker:**
+```bash
+docker-compose up
+```
+
+**Build only (without running):**
+```bash
+podman build -f docker/Dockerfile -t tessera:latest .
 ```
 
 ## Development
@@ -131,18 +142,18 @@ See `.env.example` for all required environment variables. Key ones:
 
 ## Deployment
 
-**Single Docker container, all-in-one:**
+**Single Podman/Docker container, all-in-one:**
 - Python backend (FastAPI)
 - React frontend (static assets served from Python)
 - SQLite database (on mounted volume)
 - Background job scheduling (APScheduler)
 
-**Multi-stage Docker build:**
-- Stage 1: Python dependencies
-- Stage 2: Node.js frontend build
-- Stage 3: Runtime (tiny, Python-only)
+**Multi-stage container build (Podman/Docker):**
+- Stage 1: Python 3.12 dependencies
+- Stage 2: Node.js 20 frontend build
+- Stage 3: Minimal Python runtime (lean, rootless-compatible)
 
-**Data persistence:** SQLite database lives on a Docker volume (`tessera_data`), not in the container. On container recreate, all data survives.
+**Data persistence:** SQLite database lives on a Podman/Docker volume (`tessera_data`), not in the container. On container recreate, all data survives. With Podman, volumes are user-local by default (rootless-safe).
 
 ## Development Status
 
