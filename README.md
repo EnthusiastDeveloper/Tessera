@@ -72,6 +72,18 @@ This runs backend lint/format check, mypy, import-linter, and pytest, followed b
 ESLint, TypeScript check, vitest, and a production build. Individual targets (`make backend-check`,
 `make frontend-test`, etc.) are also available - see the `Makefile` for the full list.
 
+### Running The App
+
+To build and start the full stack in a container and open it in your browser:
+
+```bash
+make run
+```
+
+This copies `.env.example` to `.env` on first run if one doesn't exist yet, builds and starts
+the container (via `podman-compose` or `docker-compose`, whichever is available), waits for
+the health check to pass, then opens `http://localhost:8000`.
+
 ### Podman (or Docker)
 
 **With Podman (recommended for rootless containers):**
