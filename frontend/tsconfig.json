@@ -13,6 +13,8 @@
     "jsx": "react-jsx",
     "moduleResolution": "bundler",
     "allowSyntheticDefaultImports": true,
+    "allowImportingTsExtensions": true,
+    "types": ["vitest/globals", "@testing-library/jest-dom"],
     "noImplicitAny": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,

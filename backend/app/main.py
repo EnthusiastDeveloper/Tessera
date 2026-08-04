@@ -2,11 +2,21 @@
 
 import logging
 import os
-from typing import Any
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
 logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """Manage application lifespan."""
+    logger.info("Tessera starting up")
+    yield
+    logger.info("Tessera shutting down")
+
 
 app = FastAPI(
     title="Tessera",
@@ -15,6 +25,7 @@ app = FastAPI(
     openapi_url="/api/v1/openapi.json",
     docs_url="/api/v1/docs",
     redoc_url="/api/v1/redoc",
+    lifespan=lifespan,
 )
 
 
@@ -22,18 +33,6 @@ app = FastAPI(
 async def health_check() -> dict[str, str]:
     """Health check endpoint for container orchestration."""
     return {"status": "healthy"}
-
-
-@app.on_event("startup")
-async def startup_event() -> None:
-    """Run startup tasks."""
-    logger.info("Tessera starting up")
-
-
-@app.on_event("shutdown")
-async def shutdown_event() -> None:
-    """Run shutdown tasks."""
-    logger.info("Tessera shutting down")
 
 
 # Placeholder: in Stage 9, serve the frontend build here
