@@ -1,0 +1,34 @@
+version: "3.8"
+
+services:
+  tessera:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: tessera
+    ports:
+      - "${PORT:-8000}:8000"
+    environment:
+      - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
+      - DATABASE_PATH=${DATABASE_PATH:-/app/data/tessera.db}
+      - APP_BASE_URL=${APP_BASE_URL:-http://localhost:8000}
+      - TZ=${TZ:-UTC}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - RESET_ADMIN_PASSWORD=${RESET_ADMIN_PASSWORD:-}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - OUTLOOK_CLIENT_ID=${OUTLOOK_CLIENT_ID:-}
+      - OUTLOOK_CLIENT_SECRET=${OUTLOOK_CLIENT_SECRET:-}
+    volumes:
+      - tessera_data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  tessera_data:
+    driver: local
