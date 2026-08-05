@@ -2,7 +2,11 @@
 __pycache__/
 *.pyc
 .venv/
+venv/
 *.egg-info/
+.coverage
+htmlcov/
+.pytest_cache/
 
 # Node
 node_modules/
