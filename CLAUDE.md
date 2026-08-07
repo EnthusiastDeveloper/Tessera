@@ -88,7 +88,7 @@ This is the high-risk piece. It's a greedy two-pass algorithm:
 - All dates/times computed in the user's IANA timezone, never UTC offsets (design-doc 14.1)
 
 ### Task Statuses (design-doc Section 4)
-`pending` → `scheduled` → `in_progress` → `completed` (terminal). Also: `blocked` (has incomplete dependencies), `missed` (flexible task's deadline elapsed before scheduling, design-doc 6.7).
+`pending` → `scheduled` → `in_progress` → `completed` (terminal). Also: `blocked` (has incomplete dependencies), `missed` (flexible task's deadline elapsed before scheduling, design-doc 6.7), and `dismissed` (terminal - "skip this occurrence", design-doc 3.8). **Neither `missed` nor `dismissed` satisfies a dependency** - a downstream task stays `blocked`.
 
 ### Notifications (design-doc Sections 3.4, 5)
 - `reminder`, `creation_conflict`, `sync_conflict`, `unschedulable`, `dependency_at_risk`, `overdue`, `budget_exceeded`, `deadline_missed` - all distinct from task status
@@ -145,7 +145,8 @@ APScheduler with persistent SQLite job store - **jobs are event-driven, not peri
 - `PATCH /api/v1/task-templates/{id}?scope=this_and_future` - "this and future" edit (touches template + conditionally live instance)
 - `DELETE /api/v1/task-instances/{id}` - delete (dependency unlink, not cascade)
 - `POST /api/v1/auth/login`, `/logout` - session-based auth
-- `POST /api/v1/auth/setup` - first-run account creation; `410 Gone` once a user exists
+- `POST /api/v1/task-instances/{id}/dismiss` - "skip this occurrence"; terminal, preserves the row, and for a completion-anchored template **must generate the successor** or the series silently ends
+- `POST /api/v1/auth/setup` - first-run account creation; requires the setup token logged at startup; `410 Gone` once a user exists
 - `DELETE /api/v1/task-instances/{id}?scope=this_occurrence|this_and_future` - deletion scope mirrors edit scope (design-doc 3.8); required for recurring templates
 - `GET /api/v1/task-instances?view=backlog` - the Backlog view is a filter, not its own resource
 

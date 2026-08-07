@@ -41,6 +41,8 @@ Findings resolved by the stakeholder since this review was filed. The decision t
 | B6 | 2026-08-06 | **Expected-values PATCH**: the client sends the value it read for each field it changes; the server compares only those fields and merges onto the current row, so concurrent job writes to untouched fields survive. No retry loop on either side. Amends B5 - `version` guards the write but is no longer the client-facing token. Requires genuinely partial PATCHes from the frontend. | arch Rev 3 (§3, §5, §5.1) |
 | B7 | 2026-08-06 | Add an **`ExternalEvent`** entity, unique on `(connection_id, provider_event_id)`, cached locally so the engine never makes a network call. Rolling **90-day** fetch horizon, **30-day** past retention, **soft deletes** so `sync_conflict` can auto-resolve. Retention covers the event cache only - **`TaskInstance` rows are never purged**, which Rev 9 must state outright. | design-doc Rev 9 (§3, §3.3, §6.4, §7), arch Rev 3 (§2) |
 | B10 | 2026-08-06 | **First-run setup wizard** (`POST /api/v1/auth/setup`, `410 Gone` once an account exists), not an env-var bootstrap - the wizard UI is the durable artifact and a token can harden it later. Username fixed as `admin`, 12-char minimum password. `RESET_ADMIN_PASSWORD` becomes recovery-only, which makes arch §7.1's "Optional" label correct. **Setup token recommended in the same Stage 3 work** to close the claim window. | design-doc Rev 9 (§3.6, §8.1, §14.2), arch Rev 3 (§3, §6, §7.1) |
+| B1 (dismiss) | 2026-08-07 | **`dismissed` is a distinct terminal status**, reached by "skip this occurrence", not collapsed into `DELETE ?scope=this_occurrence`. Preserves the row; does not satisfy a dependency; regenerates the successor for `completion`-anchored templates. Backlog 12.24 withdrawn. | design-doc Rev 9 (§3.3, §3.8, §4, §5, §6.6, §8.1, §10), arch Rev 3 (§3, §4.1, §8) |
+| B10 (token) | 2026-08-07 | **Setup token adopted for Stage 3**, not deferred. `secrets.token_urlsafe(32)` at startup while zero users exist, logged at `WARNING`, constant-time compare, in-memory only so a restart reissues it. | design-doc Rev 9 (§3.6, §8.1), arch Rev 3 (§3, §6) |
 | M9 | 2026-08-07 | **30-day absolute session TTL**, no idle timeout. Rotation on login; **all sessions revoked on any password change or reset** (without which `RESET_ADMIN_PASSWORD` locks nobody out); lazy cleanup of expired rows at login; distinct `401` code for expiry. | arch Rev 3 (§6) |
 | M10 | 2026-08-07 | Auth guard is **middleware with an explicit public allowlist** (default-deny), plus a test enumerating every route. Public: `/health` (minimal payload), static assets and SPA routes, login, setup. **Not** carve-outs: the OAuth callback (requires a session - what `SameSite=Lax` was chosen for) and logout. `/docs`, `/redoc`, `/openapi.json` disabled in production. | arch Rev 3 (§3, §6) |
 | B12 | 2026-08-07 | **`SameSite=Lax` alone**, no CSRF token - `Lax` covers every mutation, and a token can be added later without an API break. `Lax` **not** `Strict`, deliberately: `Strict` would withhold the cookie on the OAuth callback's cross-site top-level navigation and break calendar sync. Plus two safe corrections: no state-changing `GET`, and a mandatory OAuth `state` check. | arch Rev 3 (§3, §6) |
@@ -79,8 +81,8 @@ Consequences Rev 9 must state:
 - §3.8's dependency-unlink rule is unchanged and applies to whichever instances are removed.
 - **Re-anchoring on `this_occurrence` for a `completion`-anchored template:** deleting is not completing, so there is no `completed_at` to anchor from. Recommend anchoring the successor at `now + cadence` - the user has explicitly declined to do this one, so restarting the interval from the decision point matches the intent better than pretending it happened on the old nominal date.
 
-**Residual, still needs a rule:** `dismiss` must be added to the status model as a terminal disposition distinct from `completed` and from delete - §4's state diagram and §3.3's `status` enum both need it. Note also that `dismiss` and `delete (this_occurrence)` now have nearly identical effects; Rev 9 should decide whether they remain two actions (dismiss preserving the row for history, delete removing it) or collapse into one.
-**Disposition:** decided; one residual rule above. Blocks Stage 5.
+**Residual - resolved 2026-08-07.** `dismiss` **is** a distinct action with its own terminal status, not collapsed into deletion. Decided on two grounds: (i) the design doc archives templates (§3.8) and never purges instances (§3.12) precisely to preserve history, so hard-deleting an instance is the odd rule out; (ii) under `calendar` anchoring, clearing a stale occurrence is **routine** rather than exceptional, and making the routine action the destructive one is backwards. A status value is cheap to add later; destroyed rows cannot be recovered retroactively. Drafted into design-doc §3.3, §3.8, §4, §5, §6.6, §8.1 and Example P; backlog 12.24 withdrawn.
+**Disposition:** fully decided and drafted into Rev 9.
 
 ### B2 - Recurrence anchoring is undefined, and `recurrence` has no effect at all on flexible tasks
 **Where:** design-doc §3.2 (`recurrence`), §9.1, §9.2
@@ -304,15 +306,15 @@ Consequences Rev 9 must state:
 5. **Password rules:** minimum 12 characters, no composition requirements, validated at the setup endpoint.
 6. **The one-time marker (finding M8)** still governs `RESET_ADMIN_PASSWORD` on the recovery path. Recommend storing it as a row in a small `system_state` table rather than a file, so it shares the mounted volume with the data and cannot desynchronise from it.
 
-**Setup token - recommended in scope for the same Stage 3 work, not deferred:**
+**Setup token - ADOPTED 2026-08-07, in scope for Stage 3:**
 
 An unguarded wizard leaves a **claim window** between container start and the operator's first visit; whoever arrives first owns the account, the task history and the OAuth calendar connections. That window is more exposed now that plain-HTTP LAN is a supported deployment (B11), and §14.2 has already established that this app should not be open by default even on a trusted network.
 
 Recommended shape: on startup with zero users, generate a random single-use token, log it at `WARNING` level so it appears in default output, and require it in the setup request. Invalidate it once setup completes; regenerate per process start while still unconfigured. Roughly twenty lines, and it closes the window entirely.
 
-**If the token is deferred instead**, the app must at minimum log loudly and repeatedly that it is awaiting setup and is currently claimable, so the operator knows the window is open.
+Drafted into design-doc §3.6 and §8.1, and architecture-plan §3 and §6, with `secrets.token_urlsafe(32)`, constant-time comparison, and in-memory-only storage so a restart reissues it.
 
-**Disposition:** decided; token in scope pending confirmation. Drafting into design-doc §3.6, §8.1, §14.2 and architecture-plan §3, §6, §7.1. Blocks Stage 3 until drafted.
+**Disposition:** fully decided and drafted into Rev 9 / Rev 3.
 
 ### B11 - `secure` cookie + LAN-only HTTP deployment is a deployment-breaking contradiction
 **Where:** architecture-plan §1, §3 (Auth), §6 vs design-doc §2, §12.5, §13

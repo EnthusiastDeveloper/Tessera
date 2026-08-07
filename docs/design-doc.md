@@ -1,7 +1,7 @@
 # Tessera - Design Document (POC)
 ### Revision 9
 
-> **Revision 9 resolves the second implementation-readiness review.** `docs/implementation-readiness-review-2.md` (IRR-2) is the findings register and the reasoning trail behind the changes below; this document is authoritative for *what the system does*, IRR-2 for *why it says so*. Every IRR-2 finding gating Stages 1, 2 and 3 has been drafted in here. Findings gating Stage 5 and later (H2, H5, H6, H7, H9–H14, and the remaining Medium items) are **not yet resolved** and remain open against this revision - IRR-2 Section 6 lists which gates which stage. Section 11 below carries the two questions Revision 9 could not close.
+> **Revision 9 resolves the second implementation-readiness review.** `docs/implementation-readiness-review-2.md` (IRR-2) is the findings register and the reasoning trail behind the changes below; this document is authoritative for *what the system does*, IRR-2 for *why it says so*. Every IRR-2 finding gating Stages 1, 2 and 3 has been drafted in here, and Section 11 has no open items. Findings gating Stage 5 and later (H2, H5, H6, H7, H9–H14, and the remaining Medium items) are **not yet resolved** and remain open against this revision - IRR-2 Section 6 lists which gates which stage.
 
 ## 0. How to use this document
 
@@ -26,9 +26,9 @@ Full diffs are in git; IRR-2 (`docs/implementation-readiness-review-2.md`) holds
 | 6 | Resolved a batch of edge cases from the first readiness review: `completed_at` in the earliest-start calculation, `completed` reachable from any non-terminal status, feasibility validation (6.8), the Pass 2 slack tie-break, virtual Timeline projections (9.2), external-event filtering (Section 7), wall-clock `fixed_time_of_day` (14.1), and the `missed` state (6.7) |
 | 7 | **Reversed Revision 6's refusal of instance-level overrides.** Added 3.10 (Edit Scope & Propagation) and the `detached` flag, modelled on Google Calendar's edit-scope prompt. Also formalised fixed-task "reschedule" as a "this occurrence" edit |
 | 8 | Closed the last five `[UNCONFIRMED]` items, all confirmed as specified. Markup only, no behaviour change |
-| 9 | Resolved sixteen findings from the second readiness review (IRR-2) - see below |
+| 9 | Resolved eighteen findings from the second readiness review (IRR-2) - see below |
 
-**Revision 9 changelog.** Sixteen IRR-2 findings, following stakeholder decisions taken 2026-08-05 to 2026-08-07. Revision 8's "locked" status meant "no unilateral edits"; it did not mean "verified correct". IRR-2 records what each finding was and why it mattered; this lists only what the specification now says.
+**Revision 9 changelog.** Eighteen IRR-2 findings, following stakeholder decisions taken 2026-08-05 to 2026-08-07. Revision 8's "locked" status meant "no unilateral edits"; it did not mean "verified correct". IRR-2 records what each finding was and why it mattered; this lists only what the specification now says.
 
 *Recurrence (B1, B2):*
 - `recurrence.anchor` - `calendar` (the next occurrence lands where the rule says, regardless of the predecessor) or `completion` (`completed_at` + cadence). `completion` is valid on **flexible templates only** (3.2, 9.1).
@@ -52,7 +52,11 @@ Full diffs are in git; IRR-2 (`docs/implementation-readiness-review-2.md`) holds
 *Worked examples (M7):*
 - All examples are now concrete given/expected fixtures; G–K re-derived against the decisions above. New N, O and P cover the dependency chain and both recurrence anchors.
 
-*Reopened:* **Section 11 has two open items again** (8 and 9). This document is **not** fully locked at Revision 9.
+*Also settled in this revision (Section 11 items 8 and 9):*
+- **`dismissed` becomes a terminal status** (Section 4), reached by "skip this occurrence" (3.8). Preferred over hard deletion because this document archives templates and never purges instances precisely to keep history, and clearing a stale occurrence is routine rather than exceptional under `calendar` anchoring.
+- **The first-run setup wizard is guarded by a setup token** (3.6), generated at startup while zero users exist, logged at `WARNING`, held in memory only.
+
+*Status:* **Section 11 has no open items at Revision 9.** IRR-2 findings gating Stage 5 and later remain open against this revision and are tracked there.
 
 ---
 
@@ -203,7 +207,8 @@ interface TaskInstance {
   scheduled_time?: DateTime;        // set once placed on the timeline
   deadline?: DateTime;              // set at generation for flexible tasks
 
-  status: "pending" | "scheduled" | "in_progress" | "completed" | "blocked" | "missed";
+  status: "pending" | "scheduled" | "in_progress" | "completed" | "blocked"
+        | "missed" | "dismissed";   // "dismissed" added Rev 9 - see Section 4 and 3.8
   status_history: { status: string; at: DateTime }[];
 
   dependencies: string[];           // TaskInstance ids - this instance cannot
@@ -231,7 +236,7 @@ interface TaskInstance {
 Notes:
 - `completed` is a **terminal** state - an immutable historical record. Template edits never touch completed instances (3.10). *(Rev 7: this citation previously read "(3.6)" - see the Revision 7 changelog for why that was wrong.)*
 - No `owner` field in POC (single-user; collaboration deferred, Backlog 12.6).
-- **(Added Revision 6)** `status` gains a new value, `missed` - flexible-only, see Section 4 and new 6.7. `missed` is *not* equivalent to `completed` for dependency-graph purposes: a downstream instance depending on a `missed` instance stays `blocked` until the upstream instance is actually completed or the dependency link is removed via deletion (3.8).
+- **(Added Revision 6)** `status` gains a new value, `missed` - flexible-only, see Section 4 and new 6.7. `missed` is *not* equivalent to `completed` for dependency-graph purposes: a downstream instance depending on a `missed` instance stays `blocked` until the upstream instance is actually completed or the dependency link is removed via deletion (3.8). **(Added Revision 9)** The same applies to `dismissed`: skipping an occurrence closes it out, it does not do the work, so it cannot unblock anything downstream.
 - **(Added Revision 6)** An instance may be marked `completed` directly from `pending`, `blocked`, or `scheduled` - not only from `in_progress` - covering the "I already did this, don't bother scheduling/tracking it further" case. `completed_at` is always set on this transition regardless of whether `scheduled_time` was ever populated. `in_progress` remains an optional intermediate step, never mandatory.
 - **(Added Revision 6)** Because a candidate only becomes eligible for scheduling (`pending`, unblocked from `blocked`) once **all** its dependencies have reached `completed` (never merely `scheduled`), a dependency's `completed_at` is always populated by the time it's read in 6.2's earliest-start calculation. This also means: if an upstream dependency is later evicted back to `pending` by an external-sync collision (6.4) or an overdue revert (6.6), that eviction has **no cascading effect** on any downstream instance that already unblocked - unblocking was gated on the upstream's (terminal, immutable) completion, not on it remaining scheduled. There is nothing to cascade.
 - **(Added Revision 7)** `detached` is independent of `status` - a `pending`, `blocked`, or `scheduled` instance can be `detached`; the flag only concerns whether the instance's fields still track its template. See 3.10 for the full edit-scope and propagation rule, and for which fields it applies to (notably: not `type`, not `dependencies`, not `status`).
@@ -301,7 +306,14 @@ interface User {
 - `username` is fixed as `admin`. Single-user; a configurable username is a knob with no benefit.
 - Minimum password length **12 characters**, no composition rules, validated at the setup endpoint.
 
-A **setup token** guarding this flow is recorded as Section 11 item 8 - see there for the claim-window risk it addresses.
+**The wizard is guarded by a setup token (added Revision 9).** Without one it leaves a **claim window**: between container start and the operator's first visit, whoever reaches the app first owns the account, the task history and the OAuth calendar connections. 14.2 already establishes that this app is not open by default even on a trusted network, and plain-HTTP LAN is an explicitly supported deployment, which widens the exposure rather than narrowing it.
+
+- On startup with **zero `User` rows**, generate a **random, high-entropy, single-use token** and log it at `WARNING` level, so it appears in default output and the operator finds it with `docker logs` / `podman logs`.
+- `POST /api/v1/auth/setup` **requires** the token. Compare it in **constant time**.
+- The token is **held in memory only, never persisted**. A process restart therefore invalidates the old one and issues a fresh one - which is the desired behaviour, since a token that leaked but was never used should not stay valid indefinitely.
+- It is invalidated the moment setup completes successfully, along with the endpoint itself.
+
+This is roughly twenty lines and closes the window completely. It is not deferred: a control filed as "add later" is one that gets added after something has gone wrong.
 
 **Password reset (confirmed mechanism).** With the setup wizard above, this is purely a **recovery** path and is never used to create the initial account.
 
@@ -367,6 +379,27 @@ A per-day `null` in `active_hours` means **that day is fully excluded**, and the
 This applies to both task types and both recurrence anchors. For a `one_time` template the prompt is skipped, since the two scopes are equivalent. The dependency-unlink rule above is unchanged and applies to whichever instances are removed.
 
 **Re-anchoring on `this_occurrence` for a `completion`-anchored template.** Deleting is not completing, so there is no `completed_at` for 9.1 to anchor the successor against. The successor's nominal date is `now + cadence`: the user has explicitly declined to do this occurrence, so restarting the interval from that decision matches their intent better than pretending the work happened on the old nominal date.
+
+**Skipping an occurrence - `dismiss` (added Revision 9).** Deletion destroys the row. For the routine case - a stale occurrence you are simply not going to do - that is the wrong default, because it is the one place this document would hard-delete a `TaskInstance` while archiving templates (above) and never purging instances (3.12) specifically to preserve history. Under `calendar` anchoring the case is not rare either: it recurs every time an occurrence is missed.
+
+**"Skip this occurrence" transitions the instance to the terminal `dismissed` status (Section 4), preserving the row.** The two actions are distinguished by intent, not by effect:
+
+| Action | Meaning | Row |
+|---|---|---|
+| **Skip this occurrence** (`dismiss`) | "This one is not going to happen." Routine; the expected way to clear a stale predecessor (9.1) | Preserved, terminal |
+| **Delete, `this_occurrence`** | "Remove this from my records." Exceptional | Destroyed |
+| **Delete, `this_and_future`** | "End this series." | Instance destroyed, template archived |
+
+Side effects of a dismiss, all in the same service method:
+- **Cancel every job** for that instance - reminder, overdue, deadline-elapsed.
+- **Auto-resolve its open notifications** per 3.9 (`overdue`, `unschedulable`, `deadline_missed`): the condition has cleared because the user has closed the occurrence out.
+- **Dependents stay blocked.** `dismissed` does not satisfy a dependency (Section 4). The user unblocks them by completing the work, deleting the instance so the link is unlinked, or removing the dependency.
+- **For a `completion`-anchored template, generate the successor anchored at `now + cadence`**, identically to `this_occurrence` deletion above. Without this, dismissing would silently end the series - the exact dead-end 9.1 exists to prevent.
+- The instance leaves the Backlog view (8.1), being terminal.
+
+Dismissal is irreversible, like completion. Recovering from a mistaken skip means creating a new task, not un-dismissing.
+
+**Why "how often did I skip this?" is worth the extra status.** `status_history` (3.3) is immutable and instances are never purged (3.12), so dismissals accumulate into a real answer to that question. Deletion would leave nothing behind to count, and unlike a status value - cheap to add later - **destroyed rows cannot be recovered retroactively**.
 
 ### 3.9 Notification self-resolution
 
@@ -469,7 +502,13 @@ The distinction is what owns the data.
       │
       ├── user extends deadline ─────────► back to pending
       ├── user marks complete ───────────► completed
+      ├── user skips this occurrence ────► dismissed
       └── user deletes instance/template ─► removed (3.8)
+
+┌────────────┐
+│ dismissed  │  ◄── terminal, immutable. Reachable from ANY non-terminal
+└────────────┘      status via "skip this occurrence" (3.8). Added Rev 9.
+                    NOT equivalent to completed for dependencies.
 ```
 
 Rules:
@@ -480,6 +519,7 @@ Rules:
 - **(Added Revision 6)** `completed` is reachable directly from `pending`, `blocked`, or `scheduled` - not only via `in_progress` - see 3.3.
 - **(Added Revision 6)** `missed` is reachable from `pending` or `blocked` (flexible instances only) when the deadline elapses before the instance is scheduled or completed. See 6.7 for the full trigger logic and resolution paths. **[CONFIRMED - Revision 7, Section 11 item 6 - no change from the Revision 6 design.]**
 - **(Added Revision 7)** `detached` (3.3/3.10) is orthogonal to `status` - it does not add, remove, or gate any transition in this diagram. An instance can be `detached` in any non-terminal status.
+- **(Added Revision 9)** `dismissed` is a **second terminal state** alongside `completed`, reachable from any non-terminal status. It means "this occurrence is not going to happen; close it out" - the counterpart to `completed`'s "it did". Like `completed` it is immutable and cannot be reversed; unlike `completed` it **does not satisfy a dependency** - a downstream instance depending on a `dismissed` one stays `blocked`, exactly as for `missed` (3.3). See 3.8 for the action and its side effects.
 - **(Added Revision 9)** `blocked` is mutually exclusive with having a `scheduled_time`. The `blocked` → `pending` transition fires its placement **in the same transaction as the completion that unblocked it** (6.9), not on a later sweep.
 - **(Added Revision 9)** `blocked`, `missed`, and `pending`-with-an-active-`unschedulable`-notification are the three states surfaced in the Backlog view (8.1). That view is a query over this same state machine, not a parallel one - no instance is moved, copied, or given a different status by appearing in it.
 
@@ -494,7 +534,7 @@ Rules:
 | `sync_conflict` | External sync introduces an event colliding with a `scheduled` fixed task | Manual: user reschedules or dismisses |
 | `unschedulable` | Flexible task's placement search finds no valid slot before its deadline | User relaxes deadline/duration or intervenes manually |
 | `dependency_at_risk` | Deadline within 3 days (flat, POC threshold) with ≥1 incomplete dependency. **(Rev 9)** Risk is assessed by a speculative, non-persisting placement pass over the chain (6.3), since dependents are never placed in advance | Informational; user chases dependency or adjusts deadline |
-| `overdue` | `scheduled_time` has passed, instance not `completed` | Flexible: auto-reschedules, notification is informational. Fixed: action menu offers "reschedule" **and** "mark complete" (see 6.6) |
+| `overdue` | `scheduled_time` has passed, instance not `completed` | Flexible: auto-reschedules, notification is informational. Fixed: action menu offers "reschedule", "mark complete", **and (Rev 9) "skip this occurrence"** (see 6.6, 3.8) |
 | `budget_exceeded` | A flexible task was placed by overriding its day's `daily_time_budget_minutes` because no compliant slot existed before the deadline (see 6.2) | Informational; user may relax the deadline, move another task off that day, or accept it |
 | `deadline_missed` *(added Rev 6)* | A flexible instance's `deadline` elapses while status is `pending` or `blocked` (see 6.7) | User extends deadline, marks complete, or deletes the instance/template - auto-resolves when any of those happen (3.9) |
 
@@ -652,7 +692,7 @@ On each poll:
 
 Periodic check for instances where `scheduled_time` has passed and `status` is not `completed`:
 - **Flexible:** clear `scheduled_time`, set `status = "pending"` (re-enters 6.2 on next pass, subject to the 6.7 deadline-elapsed gate first), create an informational `overdue` Notification so the move isn't silent.
-- **Fixed:** status unchanged, create an `overdue` Notification whose action menu offers both **"reschedule"** (opens edit, subject to 6.5 validation for the new time) and **"mark complete"** - covering the case where the user simply forgot to check it off.
+- **Fixed:** status unchanged, create an `overdue` Notification whose action menu offers **"reschedule"** (opens edit, subject to 6.5 validation for the new time), **"mark complete"** - covering the case where the user simply forgot to check it off - and **(Rev 9) "skip this occurrence"**, transitioning the instance to `dismissed` (3.8), for the case where it genuinely did not happen and is not going to.
 
 **(Added Revision 7)** "Reschedule" on a fixed instance is formally a "this occurrence" edit (3.10) of `scheduled_time` - it sets `detached = true` on that instance. Practical consequence: after a manual reschedule, that instance is excluded from the timezone-change re-projection in 14.1 (the user's manually-chosen time is treated as deliberate and is not silently re-projected against a later timezone-setting change), and it will not be overwritten if the template's `fixed_time_of_day` is later edited with "this and future" scope.
 
@@ -740,11 +780,11 @@ WebUI only (Backlog 12.2 for IM bot).
 
 ### 8.1 Screens
 
-0. **First-run setup screen (added Rev 9)** - shown only while zero `User` rows exist (3.6). Sets the admin password (minimum 12 characters, confirmed twice). Unreachable once an account exists; every other screen redirects here until one does.
+0. **First-run setup screen (added Rev 9)** - shown only while zero `User` rows exist (3.6). Takes the **setup token** printed in the container log, and sets the admin password (minimum 12 characters, confirmed twice). The screen must say where to find the token. Unreachable once an account exists; every other screen redirects here until one does.
 1. **Login screen** - username/password (see 3.6, 14.2).
 2. **Timeline / Task list view** - calendar-style view of `scheduled` instances, **plus display-only virtual/"ghost" projections of upcoming recurring occurrences (9.2, added Revision 6)**, external busy-blocks overlaid read-only and visually distinguished (post-filtering per Section 7), blackout dates visibly marked.
 3. **Task creation/edit form** - for a new task, or when editing a one-time (`recurrence: one_time`) template, edits the `TaskTemplate` directly as in Revision 6. **(Rev 7)** For an existing recurring task, first prompts for edit scope - **"this occurrence"** vs. **"this and future occurrences"** (3.10) - before applying the edit; includes the optional active-hours override (3.2); surfaces the archival/deletion warning (3.8); surfaces the feasibility validation error on save if applicable (6.8, added Revision 6).
-4. **Task detail view** - single `TaskInstance`: status, status history, dependencies (with current status), a visible **`detached` indicator** when applicable (3.10, added Rev 7), actions: mark complete (from any non-terminal status, 3.3), mark in-progress, reschedule (for `sync_conflict`/`overdue` fixed tasks - a "this occurrence" edit per 3.10/6.6), extend deadline (for `missed` flexible tasks, 6.7 - also a "this occurrence" edit per 3.10).
+4. **Task detail view** - single `TaskInstance`: status, status history, dependencies (with current status), a visible **`detached` indicator** when applicable (3.10, added Rev 7), actions: mark complete (from any non-terminal status, 3.3), mark in-progress, **skip this occurrence (Rev 9 - transitions to `dismissed`, 3.8; the primary action on a stale recurring occurrence)**, reschedule (for `sync_conflict`/`overdue` fixed tasks - a "this occurrence" edit per 3.10/6.6), extend deadline (for `missed` flexible tasks, 6.7 - also a "this occurrence" edit per 3.10).
 5. **Notifications panel** - undismissed/unresolved `Notification` rows; auto-resolved ones show the "already resolved" state if opened (3.9).
 5a. **Backlog view (added Rev 9)** - everything that needs the user's attention and has no place on the Timeline: instances in `blocked`, `unschedulable` *(i.e. `pending` with an active `unschedulable` notification)*, and `missed`. This is a **filtered view over `TaskInstance`, not a separate entity** - a backlog item is an ordinary instance, and nothing is moved or copied when it enters or leaves the view. Making it an entity would put one task in two places with a migration between them, which is exactly the silent-desynchronisation failure the architecture is built to avoid.
    - The dependency relation is navigable **in both directions**: from a backlog item, see and edit what is blocking it; from any task, see what is waiting on it. This is what 3.3's join-table storage exists for.
@@ -792,7 +832,7 @@ Instances are generated **one at a time**, never as a pre-generated rolling wind
 The next instance is generated when its **occurrence boundary arrives**, regardless of the predecessor's state. Weekly team syncs, birthdays, a concert.
 
 - Generation is driven by a one-off job scheduled at the next occurrence's nominal time, not by a completion event.
-- **More than one live instance may exist at a time.** If Monday's stand-up was never ticked off, next Monday's is generated anyway and both are live. The stale predecessor keeps whatever status it had - a past-due fixed instance stays `scheduled` and carries an `overdue` notification (6.6) - and the user removes it with `DELETE ?scope=this_occurrence` (3.8), which does not disturb the series.
+- **More than one live instance may exist at a time.** If Monday's stand-up was never ticked off, next Monday's is generated anyway and both are live. The stale predecessor keeps whatever status it had - a past-due fixed instance stays `scheduled` and carries an `overdue` notification (6.6) - and the user clears it with **"skip this occurrence"**, which transitions it to `dismissed` (3.8) and does not disturb the series.
 - The nominal date comes from the recurrence rule itself, never from `completed_at`. Completing Monday's stand-up on Wednesday does not move next Monday.
 
 #### `anchor: "completion"` - upkeep work
@@ -992,7 +1032,9 @@ Had `anchor` been `"calendar"`, N+1 would instead have landed on **Wed 2026-04-0
 | Template | "Weekly team sync", `fixed`, `fixed_time_of_day: "09:00"`, `recurrence: {pattern: weekly, day_of_week: monday, anchor: "calendar"}` |
 | Instance | Mon 2026-03-02 09:00, never marked complete |
 
-**Expected:** the 6.6 overdue check fires an `overdue` Notification for the 2026-03-02 instance, which - being `fixed` - keeps its `scheduled` status. When the next occurrence boundary arrives on **Mon 2026-03-09**, that instance is generated **anyway**, and both are live simultaneously. The user clears the stale one with `DELETE ?scope=this_occurrence` (3.8), which removes that instance only and leaves the series running.
+**Expected:** the 6.6 overdue check fires an `overdue` Notification for the 2026-03-02 instance, which - being `fixed` - keeps its `scheduled` status. When the next occurrence boundary arrives on **Mon 2026-03-09**, that instance is generated **anyway**, and both are live simultaneously.
+
+The user clears the stale one with **"skip this occurrence"**: the 2026-03-02 instance becomes `dismissed`, its jobs are cancelled, its `overdue` notification auto-resolves (3.9), and the series runs on untouched. The row survives, so "how many stand-ups did I skip this quarter?" remains answerable.
 
 This is the case that makes 9.1's occurrence-boundary rule necessary: gating generation on a `completed` transition that never comes would silently end the series.
 
@@ -1000,24 +1042,19 @@ This is the case that makes 9.1's occurrence-boundary rule necessary: gating gen
 
 ## 11. Open Questions Requiring Stakeholder Sign-off
 
-**Status as of Revision 9: two open items (8 and 9 below). This document is NOT fully locked.**
+**Status as of Revision 9: no open items.** See the closing note below for why that is not the same as "the document is fully verified".
 
 Items 1–7 were raised by the first readiness review and resolved in Revisions 7 and 8; their outcomes are stated in the body of this document rather than restated here, and the full text is in git history. One is worth naming, because it was a **reversal** and a future reader is otherwise liable to reinstate the original position:
 
 - **Item 7, instance-level field overrides.** Revision 6 declined these as contradicting 3.1's "everything is a template" simplicity decision. Revision 7 **reversed that**, on stakeholder direction, modelled on Google Calendar's edit-scope prompt and adapted to this app's one-instance-at-a-time model (which collapses GCal's three scopes to two). Section 3.10 is the binding rule and `TaskInstance` carries a `detached` flag; Worked Examples L and M cover both paths. Revision 9 extended the same two-way scope to deletion (3.8).
 
-Revision 9 resolved sixteen findings from a second review (IRR-2) and, per this document's own convention, records below the two it would not decide unilaterally. Separately, IRR-2 findings gating Stage 5 and later are **open against this revision** but are not listed here, because they are review findings awaiting a decision rather than decisions awaiting confirmation. See IRR-2 Section 6.
+Revision 9 resolved eighteen findings from a second review (IRR-2). Two of them were raised here as `[UNCONFIRMED]` rather than decided unilaterally, and both were subsequently settled - items 8 and 9 below.
 
-8. **[UNCONFIRMED - added Revision 9, needs stakeholder sign-off] Does a separate `dismiss` action exist, distinct from `DELETE ?scope=this_occurrence`?**
-   Calendar-anchored templates can now leave a stale predecessor live alongside its successor (9.1), and the user needs a way to clear it. Revision 9 specifies that this is `DELETE ?scope=this_occurrence` (3.8) - one action, no new status. The alternative is a first-class **`dismiss`** that is *non-destructive*: it would need its own terminal value in `TaskInstance.status` (3.3) and its own node in Section 4's state machine, and it would preserve the row so that "I skipped this one" stays visible in history, rather than erasing the evidence that the occurrence ever existed.
-   **Recommendation:** ship deletion-only for POC and revisit if the history gap is felt in use. The two actions have nearly identical effects today, and adding a status value is cheap later but hard to remove.
-   **Blocks:** Stage 5.
+8. ~~**Does a separate `dismiss` action exist, distinct from scoped deletion?**~~ **RESOLVED - Revision 9: yes.** `dismissed` is a terminal status (Section 4) reached by "skip this occurrence" (3.8). Chosen over deletion-only because this document archives templates and never purges instances specifically to preserve history, and clearing a stale occurrence is **routine** under `calendar` anchoring rather than exceptional - making the weekly action the destructive one would have been backwards. A status value is cheap to add later; destroyed rows cannot be recovered retroactively. Backlog 12.24 is withdrawn.
 
-9. **[UNCONFIRMED - added Revision 9, needs stakeholder sign-off] Does the first-run setup wizard ship with a setup token?**
-   3.6's wizard, as specified, leaves a **claim window**: between container start and the operator's first visit, whoever reaches the app first owns the account, the task history and the OAuth calendar connections. That window is more exposed now that plain-HTTP LAN is a fully supported deployment (architecture-plan Revision 3), and 14.2 already established that this app should not be open by default even on a trusted network.
-   **Proposed shape if adopted:** on startup with zero users, generate a random single-use token, log it at `WARNING` level so it appears in default output, and require it in the setup request; invalidate it once setup completes, regenerating per process start while still unconfigured. Roughly twenty lines, and it closes the window entirely.
-   **Recommendation:** adopt it in the same Stage 3 work rather than deferring. Security controls filed as "add later" tend not to get added until something goes wrong. **If deferred**, the app must at minimum log loudly and repeatedly that it is awaiting setup and is currently claimable, so the operator knows the window is open.
-   **Blocks:** Stage 3.
+9. ~~**Does the first-run setup wizard ship with a setup token?**~~ **RESOLVED - Revision 9: yes, in the same Stage 3 work.** Random single-use token generated at startup while zero users exist, logged at `WARNING`, required by the setup endpoint, held in memory only so a restart reissues it. See 3.6. Deferring it would have shipped an open claim window on a deployment that 14.2 says should never be open by default.
+
+**Section 11 has no open items at Revision 9.** Note this is narrower than Revision 8's claim that the document was "fully locked": IRR-2 findings gating Stage 5 and later (H2, H5–H7, H9–H14, and several Medium items) remain **open against this revision** and are tracked in that register, not here. Section 11 tracks decisions awaiting confirmation; IRR-2 tracks findings awaiting a decision.
 
 Two related items were resolved **without** flagging, since they don't change load-bearing behavior and follow directly from rules already on the books:
 - Instances may be marked `completed` directly without first being `scheduled` (3.3/4) - this is a natural reading of "the user did the task," not a new mechanism.
@@ -1052,7 +1089,7 @@ Two related items were resolved **without** flagging, since they don't change lo
 | 12.21 | Per-template fixed-UTC-instant option for `fixed_time_of_day`, for tasks that should NOT re-project on a timezone change (e.g. a global webinar at a genuinely fixed absolute moment) | Additive to the wall-clock rule (14.1), not a replacement - layers on cleanly later as a per-template flag. Not requested for POC; raised and deliberately deferred during Section 11 item 5's resolution (Rev 8) |
 | 12.22 *(added Rev 9)* | Placing dependents against a prerequisite's *scheduled* time rather than its completion, so whole chains appear on the Timeline in advance | Genuinely better for previewing a plan, but it requires a dependency-invalidation cascade: placements are immovable (6.2), so moving a prerequisite would strand every dependent placed after it, needing re-placement, new job re-wiring, and a bounded exception to the immovability rule. That is a feature with its own design, not a side effect of deleting dead code. POC makes the work visible via the Backlog view (8.1) instead |
 | 12.23 *(added Rev 9)* | User-triggered "re-optimise my schedule" reflow - clear and re-place all `pending`/`scheduled` flexible instances in one global pass | The natural escape hatch for 6.2's accepted greedy corner-painting. Deferred because it must be explicit and user-initiated: an automatic reflow would silently move work the user has already planned around, which 6.2 rules out deliberately |
-| 12.24 *(added Rev 9)* | Non-destructive `dismiss` for a stale recurring occurrence, preserving the row in history | See Section 11 item 8. POC uses scoped deletion; whether history warrants a distinct terminal status is unresolved |
+| 12.24 *(added and withdrawn in Rev 9)* | ~~Non-destructive `dismiss` for a stale recurring occurrence~~ | **Withdrawn - built into the POC**, not deferred. Section 11 item 8 resolved in favour of a `dismissed` terminal status (3.8, Section 4). Number retained rather than reused, so existing citations do not silently repoint |
 
 ### 12.15 - Open questions to resolve before holiday calendars are taken into active development
 
