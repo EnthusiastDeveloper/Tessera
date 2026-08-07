@@ -7,11 +7,16 @@ and budgets stay exact, unquantised minutes (§6.2).
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from app.scheduling_engine.types import ActiveHoursWindow
 
 DEFAULT_GRID_MINUTES = 15
+
+# A fixed synthetic date for combining bare `time`-of-day values into `datetime`
+# objects so `ceil_to_grid` (which operates on `datetime`) can be reused for
+# time-of-day-only math. The date itself is arbitrary and never observed by callers.
+_REFERENCE_DAY = date(2000, 1, 1)
 
 
 def ceil_to_grid(moment: datetime, grid_minutes: int = DEFAULT_GRID_MINUTES) -> datetime:
@@ -21,7 +26,9 @@ def ceil_to_grid(moment: datetime, grid_minutes: int = DEFAULT_GRID_MINUTES) -> 
     """
     floor_minute = (moment.minute // grid_minutes) * grid_minutes
     floor_point = moment.replace(minute=floor_minute, second=0, microsecond=0)
-    if floor_point >= moment:
+    # floor_point can never be later than moment - it's built by flooring moment's
+    # own minute/second/microsecond - so this is an equality check, not a range.
+    if floor_point == moment:
         return floor_point
     return floor_point + timedelta(minutes=grid_minutes)
 
@@ -32,9 +39,9 @@ def usable_minutes(window: ActiveHoursWindow, grid_minutes: int = DEFAULT_GRID_M
     This is deliberately *not* `end - start`: a task can only ever be placed
     starting on a grid point, so a window whose start isn't grid-aligned (e.g.
     18:07) is effectively shorter than its raw span for feasibility purposes.
+    Built on `ceil_to_grid` rather than re-deriving the rounding rule, so the two
+    can't drift apart as that rule evolves.
     """
-    start_total = window.start.hour * 60 + window.start.minute
-    end_total = window.end.hour * 60 + window.end.minute
-    remainder = start_total % grid_minutes
-    grid_start = start_total if remainder == 0 else start_total - remainder + grid_minutes
-    return max(0, end_total - grid_start)
+    grid_start = ceil_to_grid(datetime.combine(_REFERENCE_DAY, window.start), grid_minutes)
+    window_end = datetime.combine(_REFERENCE_DAY, window.end)
+    return max(0, int((window_end - grid_start).total_seconds() // 60))
