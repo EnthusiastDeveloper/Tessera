@@ -14,56 +14,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Common Commands
 
-**Backend (Python 3.12 + FastAPI):**
-- `cd backend && pip install -e .` - install dev dependencies
-- `pytest` - run tests (configures testpaths in pyproject.toml)
-- `pytest tests/` - specific test directory
-- `pytest tests/unit/test_scheduling_engine.py -v` - single test file with verbose output
-- `lint-imports` - check layering violations (also runs in CI, blocking)
-- `python -m app.main` - run the app locally (requires `.env` with SECRET_KEY, DATABASE_PATH, etc.)
-
-**Frontend (React + Vite):**
-- `cd frontend && npm install` - install dependencies
-- `npm run dev` - local dev server
-- `npm run build` - production build
-- `npm run lint` - linting (if configured)
-
-**Docker:**
-- `docker-compose up` - full stack (backend + frontend, requires `.env` setup)
-- `docker build -f docker/Dockerfile .` - build the container image
-
-**Database:**
-- Alembic migrations in `backend/alembic/` - apply with `alembic upgrade head`
-- SQLite is the storage (single-user, zero extra containers)
+- `lint-imports` - check layering violations (also runs in CI, blocking); see `backend/pyproject.toml` and `frontend/package.json` for the rest of the standard install/test/build/lint commands.
 
 ---
 
-## Architecture Layers & Module Map
-
-**Binding rule:** backend architecture has three **strictly enforced** layers (import-linter blocks violations):
-
-```
-API layer (backend/app/api/)
-    ↓ (thin: request/response only, no business logic)
-Service layer (framework-agnostic pure Python)
-    ↓ (all scheduling, validation, CRUD rules, state transitions)
-Data access layer (backend/app/db/)
-    ↓ (SQLAlchemy models, repositories)
-```
-
-**Module structure mirrors design-doc sections:**
-- `backend/app/task_templates/` - TaskTemplate CRUD + schema (design-doc Section 3.2)
-- `backend/app/task_instances/` - TaskInstance CRUD + edit-scope logic (design-doc Sections 3.3, 3.10)
-- `backend/app/scheduling_engine/` - core placement algorithm (design-doc Section 6), **must be pure Python, zero FastAPI/SQLAlchemy imports**
-- `backend/app/notifications/` - notification types and state (design-doc Sections 3.4, 5)
-- `backend/app/calendar_sync/` - external calendar polling + conflict handling (design-doc Sections 3.5, 3.11, 6.4, 7). Note `ExternalEvent` (3.11) is a **local cache** the scheduler reads; the engine never makes a network call
-- `backend/app/auth/` - password hashing, session management (design-doc Sections 3.6, 6)
-- `backend/app/jobs/` - APScheduler adapter for background jobs (architecture-plan Section 4)
-- `backend/app/settings/` - user settings + active-hours windows (design-doc Section 3.7)
-
-**Key design decision:** The scheduling engine must have **zero imports of FastAPI, SQLAlchemy, or anything under `app/`** - it operates on plain Python data structures. This makes it unit-testable in isolation and keeps it swappable if the ORM/framework ever changes.
-
----
+Backend layering rules and module map: see `backend/CLAUDE.md`.
 
 ## Core Business Logic (Design Doc Essentials)
 
@@ -100,22 +55,7 @@ This is the high-risk piece. It's a greedy two-pass algorithm:
 
 ---
 
-## Background Jobs (architecture-plan Section 4)
-
-APScheduler with persistent SQLite job store - **jobs are event-driven, not periodic scans**:
-- **Reminder:** precise one-off job per reminder_offset, rescheduled on task reschedule
-- **Overdue check:** one-off job at `scheduled_time`
-- **Deadline-elapsed (`missed` state):** one-off job at `deadline`
-- **Dependency-at-risk scan:** one-off job at `deadline - 3 days`
-- **Recurring instance generation:** depends on the anchor. `completion` is an event hook (fires when the prior instance reaches `completed`); `calendar` is a **one-off job at the occurrence boundary**, because it must generate whether or not the predecessor was ever completed
-- **Dependency unblock:** a pure event hook, no job - when the last dependency completes, the dependent is placed in the *same* service method and transaction (design-doc 6.9)
-- **External calendar poll:** interval-based (per `refresh_interval_minutes`)
-
-**Critical:** Every mutation path that affects a task (`create`, `edit`, `reschedule`, `complete`, `delete`, `extend_deadline`) **must co-locate the DB write and job side-effect in one service method** (architecture-plan 4.1) - never in the route handler. This is what prevents orphaned or missing jobs.
-
-**Startup reconciliation (architecture-plan 4.2):** On app start, before serving traffic, reconcile the job store against `TaskInstance` rows - recreate any missing jobs, cancel any orphaned ones. This guards against crashes mid-batch leaving them out of sync.
-
----
+Background job wiring and reconciliation rules: see `backend/CLAUDE.md`.
 
 ## Testing Strategy (architecture-plan Section 8)
 
@@ -261,56 +201,13 @@ Consistent across all endpoints: HTTP status + machine-readable code + human mes
 
 ---
 
-## When Something Breaks
-
-1. **Scheduling behavior is wrong (task placed at wrong time)?**
-   - Check design-doc Section 6.2 (algorithm) and Section 14.1 (timezone handling)
-   - Run the Worked Examples (design-doc Section 10, A–K) as acceptance tests to isolate whether it's the algorithm or a data-layer issue
-   - Narrow to the scheduling_engine unit tests first (it's pure, deterministic, testable in isolation)
-
-2. **A reminder/overdue/deadline check didn't fire?**
-   - Check architecture-plan 4.1 and 4.2: did the mutation path wire the job? Did the reconciliation pass run at startup?
-   - Verify APScheduler job store isn't out of sync with `TaskInstance` rows (4.2 reconciliation should catch this, but look at the reconciliation test coverage)
-
-3. **Dependency graph seems broken (task stayed blocked when it should've unblocked)?**
-   - Check design-doc 3.8 (deletion rules) and Section 4 (status lifecycle)
-   - Remember: `missed` is not `completed` (design-doc 6.7) - a downstream task depending on a `missed` task stays blocked
-
-4. **API returned `409 Conflict` unexpectedly?**
-   - Check architecture-plan Section 5.1: background jobs and template propagation write to `TaskInstance` too
-   - The app tries to auto-retry if the fields don't overlap; real overlap shows a conflict UI in the frontend
-   - The mechanism is an expected-values PATCH (architecture-plan 5.1), not a server-side diff. If it fires too eagerly, the usual cause is the frontend sending a whole object instead of only dirty fields - fix that, don't bypass the check
-
-5. **External calendar events aren't blocking placement?**
-   - Check design-doc Section 7 (event filtering): transparent/"Free" events and all-day events are excluded from the obstacle set by default (display-only)
-   - All-day events show on Timeline but don't block scheduling in POC (design-doc 7, confirmed Rev 8)
-   - Webhook-based sync is backlog (12.5); POC uses polling
+Debugging playbook (scheduling bugs, missed jobs, stuck dependencies, unexpected 409s, calendar filtering): use the `debug-tessera` skill.
 
 ---
 
-## Code Review Checklist (for you or a collaborator)
+Code review checklist: use the `tessera-code-review` skill.
 
-- [ ] Does the change touch layering (Section 2)? Run `lint-imports` and check it passes.
-- [ ] Does the change touch job wiring (architecture-plan 4.1)? Is the DB write + job side-effect co-located in one service method?
-- [ ] Does the change touch `scheduling_engine/`? Verify zero imports of FastAPI, SQLAlchemy, or `app/`.
-- [ ] Does the change affect timezone handling? Verify all persisted timestamps are UTC; user timezone is IANA name; re-projection uses a timezone-aware library, never raw offsets.
-- [ ] Does the change add a mutation to `TaskInstance` or `TaskTemplate`? Verify detach-flag logic if it's instance-scoped (design-doc 3.10), template propagation if it's template-scoped.
-- [ ] Does the change add a new error case? Verify the API returns a machine-readable error code (not just a generic 400), and the frontend handles it distinctly if needed.
-- [ ] Does the change touch backlog scope (Sections 12–13 of design-doc)? **Reject it.** POC scope is locked.
-
----
-
-## Frontend Notes
-
-React + Vite, same-origin served from the FastAPI app (no CORS). Key features:
-- Timeline view uses FullCalendar or equivalent, overlaying scheduled instances + external busy-blocks + blackout dates + virtual recurring projections (design-doc 9.2)
-- Task creation/edit form prompts for edit scope ("this occurrence" vs. "this and future") for recurring tasks (design-doc 3.10, 8.1)
-- Notifications panel with auto-resolved state display (design-doc 3.9)
-- Backlog view: `blocked` / `unschedulable` / `missed` instances, with bidirectional dependency navigation (design-doc 8.1)
-- Duration inputs are value-plus-unit controls with human-readable display - the user never types or reads a raw minute count (design-doc 8.1a)
-- Settings screen: timezone, active-hours per day-of-week, blackout dates, daily budget, budget enforcement toggle, first-day-of-week display preference (design-doc 8.1, 3.7)
-
-The frontend hasn't been built yet (skeleton only at this point), so detailed patterns TBD.
+Frontend notes: see `frontend/CLAUDE.md`.
 
 ---
 
