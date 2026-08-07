@@ -1,5 +1,7 @@
 # Tessera - Architecture & Implementation Plan
-### Companion to: Tessera - Design Document (POC), Revision 7
+### Companion to: Tessera - Design Document (POC), Revision 8
+
+> **Open review:** `docs/implementation-readiness-review-2.md` (IRR-2) records findings against this document that are not yet applied. **B5, B6, B7, B10, B11, B12, M9 and M10 have all been decided** (see IRR-2 §0's decision log) but are **not yet drafted into this document** - until Revision 3 lands, IRR-2 is authoritative for those areas, notably §5.1's conflict mechanism (replaced by expected-values PATCH), the session cookie's `Secure` derivation and CSRF posture, session lifetime, and the auth guard's public-route allowlist. Still undecided: H9 (no job misfire policy), H14 (single-worker constraint unenforced), M12 (SQLite WAL). Resolve those before the stage that consumes them.
 
 ## 0. Purpose of this document
 
@@ -239,7 +241,13 @@ This generalizes cleanly to the two writers that already existed (user, schedule
 | End-to-end tests | Small set of critical flows only: login, create-with-conflict, create-flexible-and-schedule, complete-task, extend-a-missed-deadline, **(added Rev 2)** edit-a-recurring-task-both-scopes-and-verify-detach | Not exhaustive - e2e suites get expensive to maintain if over-built |
 | Overall backend | - | ~80% - chasing full coverage past this tends to produce low-value tests rather than catching real bugs |
 
-The design doc's **Worked Examples A–K (Section 10)** become the initial acceptance-test suite for the scheduling engine directly - each one is already a concrete input/expected-output scenario. **(Added Rev 2)** Examples L and M (design doc 3.10) are a different kind of test: they exercise edit-scope/detach/propagation logic, which lives in the `task_instances`/`task_templates` service-layer modules (Section 2), not the pure `scheduling_engine/` module - so they belong in the service-layer test suite, not bundled into the scheduling-engine's isolated build-and-test-first phase (Section 8's build order above).
+The design doc's **Worked Examples (Section 10)** are the initial acceptance-test suite - but they split across two suites, and not all of them are engine tests:
+- **Scheduling-engine suite (pure, Stage 1):** A, B, C (placement half only), E, G, H, I, J, and K's `is_deadline_elapsed` predicate only.
+- **Service-layer suite (Stage 5/6):** D (dependency deletion), F (overdue + mark-complete), C's sync-eviction half, K's `missed`-transition orchestration, and L/M (below).
+
+Note also that A, B, C and E are currently written as qualitative prose, not as concrete input/expected-output fixtures - unlike G, H, I and J. They need explicit given-settings / given-obstacles / expected-`scheduled_time` tables before they can be transcribed into tests without inventing fixture data (IRR-2 finding M7).
+
+**(Added Rev 2)** Examples L and M (design doc 3.10) are a different kind of test: they exercise edit-scope/detach/propagation logic, which lives in the `task_instances`/`task_templates` service-layer modules (Section 2), not the pure `scheduling_engine/` module - so they belong in the service-layer test suite, not bundled into the scheduling-engine's isolated build-and-test-first phase (Section 8's build order above).
 
 ---
 

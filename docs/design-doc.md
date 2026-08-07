@@ -1,6 +1,8 @@
 # Tessera - Design Document (POC)
 ### Revision 8
 
+> **⚠ Open review against this revision - read before implementing.** `docs/implementation-readiness-review-2.md` (IRR-2) records unresolved findings against Revision 8, including twelve rated BLOCKER. Revision 8 declares this document "locked", and it is - no edits have been made in response to IRR-2, per Section 0's rule that changes go back to the stakeholder first. But "locked" here means "no unilateral edits", not "verified correct": several load-bearing rules below are internally contradictory or undefined (notably §6.2's obstacle set, §9.1's recurrence generation, `Duration`, and `active_hours_override`'s null semantics). Resolving IRR-2 into a Revision 9 is the intended next step.
+
 ## 0. How to use this document
 
 This document is the authoritative specification for the Proof-of-Concept (POC) build. It was produced through a requirements-elicitation process where every field, algorithm rule, and boundary was explicitly confirmed by the product stakeholder - nothing here is a default or an assumption unless it is explicitly marked **[UNCONFIRMED - flagged during design, needs stakeholder sign-off]**.

@@ -8,6 +8,7 @@
 - **Authority chain:** design doc Rev 8 = *what* the system does. Architecture plan Rev 2 = *how* it's structured. This document = *order, gates, and process*. Where this document conflicts with either of the other two, they win - stop and flag it, don't silently resolve it in code.
 - **Golden rule:** a stage does not begin until the previous stage's Exit Criteria are met and green in CI on `main`. The one exception is Stage 5, which deliberately bundles three components - reasoning given inline, per the process rule that grouping is only allowed when isolated testing isn't meaningful.
 - **Traceability:** every stage cites the exact design-doc/architecture-doc section numbers it implements. If you find yourself implementing a rule that isn't traceable to one of those two documents, stop and flag it - don't invent behavior (this mirrors the design doc's own Section 0 authority rule).
+- **Open review:** `docs/implementation-readiness-review-2.md` (IRR-2) is an unresolved findings register against all three documents. Its Section 6 lists which findings gate which stage. Do not start a stage whose gating findings are still open - the point of a findings register is that the invention it prevents is exactly the invention the Traceability rule above forbids.
 
 ---
 
@@ -57,7 +58,7 @@ A stage is **DONE** only when all of the following hold:
 ### Backend (Python 3.12)
 - **Format/lint:** `ruff` (replaces black + isort + flake8), config in `pyproject.toml`, line length 130.
 - **Types:** `mypy --strict` on `app/`. `scheduling_engine/` in particular must have zero `Any` in public signatures - it's the highest-value module to keep airtight.
-- **Tests:** `pytest` + `pytest-cov`. CI enforces the coverage gates from architecture doc §8 (~90% `scheduling_engine/`, ~80% overall) - a stage doesn't pass if it drops the gate.
+- **Tests:** `pytest` + `pytest-cov`. CI enforces the coverage gates from architecture doc §8 (~90% `scheduling_engine/`, ~80% overall) - a stage doesn't pass if it drops the gate. **Not yet true:** as of Stage 0 there is no `--cov-fail-under` in `pyproject.toml` or `ci.yml`, and codecov is configured with `fail_ci_if_error: false`, so the gate is documented but unenforced. Wiring it is a Stage 1 in-scope item.
 - **Import boundaries:** `import-linter` config (`.importlinter`) as a blocking CI check, plus the redundant AST-walk pytest test - both from architecture doc §2.1, both live from Stage 0.
 - **Naming:** modules/functions/vars `snake_case`; classes `PascalCase`; constants `UPPER_SNAKE_CASE`. Pydantic domain models are named to match the design doc's interface names exactly (`TaskTemplate`, `TaskInstance`, ...) - this *is* the traceability mechanism, not just a convention. SQLAlchemy ORM classes get their own naming (decide once in Stage 2, e.g. `TaskTemplateORM`, and stay consistent - don't let it drift).
 - **Docstrings:** Google-style, mandatory on every public service-layer function. First line cites the design-doc section it implements, e.g. `"""See design doc §6.2."""` - traceability baked into the code itself, not just this plan.
@@ -67,7 +68,7 @@ A stage is **DONE** only when all of the following hold:
 - **Lint/format:** ESLint (`@typescript-eslint`, strict-ish base config) + Prettier. `tsconfig` with `strict: true`.
 - **Naming:** component files `PascalCase.tsx`; hooks `useCamelCase.ts`; utility modules `camelCase.ts`.
 - **Tests:** Vitest + React Testing Library, colocated `*.test.tsx`. Thin Playwright layer on top for real end-to-end flows against the live backend.
-- **Before writing any Stage 9 UI code:** read `/mnt/skills/public/frontend-design/SKILL.md` for design-token/styling constraints. This is a hard prerequisite for Stage 9, not optional.
+- **Before writing any Stage 9 UI code:** establish and write down the design-token/styling constraints (colour, spacing, type scale, component conventions) as a short `frontend/DESIGN.md`, and build against it. This is a hard prerequisite for Stage 9, not optional. *(Earlier revisions cited an absolute path to an external design skill file; that path does not exist in this environment, so the requirement is restated as a deliverable rather than a reference.)*
 
 ### General
 - `.env` is gitignored; `.env.example` is the source of truth for what variables exist (kept in sync per the Definition of Done).
@@ -79,8 +80,8 @@ A stage is **DONE** only when all of the following hold:
 
 | Stage | Title | Status | Branch | Notes |
 |---|---|---|---|---|
-| 0 | Bootstrap & Tooling | Not started | `stage-00-bootstrap` | |
-| 1 | Scheduling Engine | Not started | `stage-01-scheduling-engine` | |
+| 0 | Bootstrap & Tooling | **Done** (merged `28c2104`) | `stage-00-bootstrap` | Coverage gate not actually wired - see Stage 1 in-scope |
+| 1 | Scheduling Engine | **Blocked** on design-doc Rev 9 | `stage-01-scheduling-engine` | B3, B4, B8, B9, H1, M7 all decided 2026-08-06 (IRR-2 §0 decision log); unblocks when Rev 9 drafts them in |
 | 2 | Data Access Layer | Not started | `stage-02-data-layer` | |
 | 3 | Auth & Sessions | Not started | `stage-03-auth` | |
 | 4 | User Settings | Not started | `stage-04-settings` | |
@@ -148,6 +149,9 @@ A stage is **DONE** only when all of the following hold:
 - `is_deadline_elapsed(deadline, now) -> bool` - §6.7's gate only. The `missed`-transition orchestration (status change, notification) is service-layer and belongs to Stage 5 - keep this function pure and dumb on purpose.
 - `validate_feasible_duration(estimated_duration, active_hours_map) -> bool` (§6.8).
 - Every function is framework-agnostic and deterministic: no DB, no HTTP, no hidden `now()` - `now` is always a parameter.
+- **Wire the coverage gate that Stage 0 documented but didn't enforce:** `--cov-fail-under` in CI for both thresholds (~90% `scheduling_engine/`, ~80% overall). Without this, every later stage's "coverage gate met" exit criterion is unverified.
+
+**Gating findings (IRR-2), must be resolved before this stage starts:** B3 (obstacle set omits previously-placed flexible and `in_progress` instances), B4 (`active_hours_override` null semantics), B8 (`Duration` representation), B9 (slot granularity), H1 (dead topological sort), M7 (Examples A/B/C/E are not concrete fixtures).
 
 **Explicitly out of scope**
 - Anything touching `status`, `detached`, notifications, or persistence.
