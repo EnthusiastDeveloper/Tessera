@@ -303,3 +303,54 @@ def test_intra_pass_placement_becomes_an_obstacle_for_the_next_candidate() -> No
 
     assert [p.task_id for p in result.placements] == ["first"]
     assert result.unschedulable_task_ids == ("second",)
+
+
+def test_pass_two_slack_tie_break_is_dst_correct() -> None:
+    """Regression: naive datetime subtraction silently ignores DST, corrupting the slack tie-break.
+
+    2026-03-08 is the US DST spring-forward day (2:00am -> 3:00am is skipped).
+    Sunday's window (01:00-04:00) is only 120 real minutes, not the 180 a naive
+    wall-clock subtraction would report; Monday's window (01:00-03:30, no DST
+    involved) is a plain 150. With duration=100 and a too-small budget forcing
+    Pass 2 on both days, correct DST-aware slack makes Monday's true 50 minutes
+    remaining beat Sunday's true 20 - a naive computation would instead see
+    Sunday's (wrong) 80 minutes remaining and pick Sunday.
+    """
+    candidate = FlexibleTaskCandidate(id="task", deadline=ny(2026, 3, 9, 21, 0), priority=2, estimated_duration_minutes=100)
+
+    result = schedule_pending_flexible_tasks(
+        candidates=[candidate],
+        now=ny(2026, 3, 8, 0, 0),
+        active_hours={"sunday": window("01:00", "04:00"), "monday": window("01:00", "03:30")},
+        blackout_dates=[],
+        daily_time_budget_minutes={"sunday": 50, "monday": 50},
+        budget_enforcement="soft",
+        obstacles=[],
+    )
+
+    assert result.placements == (Placement("task", ny(2026, 3, 9, 1, 0), True),)
+
+
+def test_committed_minutes_are_dst_correct_across_a_spring_forward_obstacle() -> None:
+    """Regression: same DST pitfall, this time in the budget/committed-minutes accounting.
+
+    An obstacle spanning 01:00-04:00 on 2026-03-08 (the spring-forward day) is
+    only 120 real minutes, not 180. With a 130-minute budget and a 10-minute
+    task, the correct 120+10=130 fits within Pass 1 directly; a naive 180+10=190
+    would wrongly reject Pass 1 and fall through to a Pass 2 override instead -
+    same slot, wrong `budget_overridden` flag.
+    """
+    obstacles = [Obstacle(ny(2026, 3, 8, 1, 0), ny(2026, 3, 8, 4, 0))]
+    candidate = FlexibleTaskCandidate(id="task", deadline=ny(2026, 3, 8, 21, 0), priority=2, estimated_duration_minutes=10)
+
+    result = schedule_pending_flexible_tasks(
+        candidates=[candidate],
+        now=ny(2026, 3, 8, 0, 0),
+        active_hours={"sunday": window("01:00", "05:00")},
+        blackout_dates=[],
+        daily_time_budget_minutes={"sunday": 130},
+        budget_enforcement="soft",
+        obstacles=obstacles,
+    )
+
+    assert result.placements == (Placement("task", ny(2026, 3, 8, 4, 0), False),)

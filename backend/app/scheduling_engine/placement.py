@@ -17,9 +17,10 @@ touches no clock, and creates no notifications; the service layer maps
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from datetime import date, datetime, time, timedelta, tzinfo
+from datetime import date, datetime, time, timedelta, timezone, tzinfo
 
 from app.scheduling_engine.calendar_rules import day_name, day_range, is_blacked_out, merge_active_hours
+from app.scheduling_engine.fixed_conflicts import intervals_overlap
 from app.scheduling_engine.grid import DEFAULT_GRID_MINUTES, ceil_to_grid
 from app.scheduling_engine.types import (
     ActiveHoursMap,
@@ -60,16 +61,15 @@ def find_first_free_slot(
     resolves DST correctly.
     """
     duration = timedelta(minutes=duration_minutes)
+    sorted_obstacles = sorted(obstacles, key=lambda obstacle: obstacle.start)
     for day in day_range(not_before.date(), not_after.date()):
-        if is_blacked_out(day, excluded_dates):
-            continue
-        window = allowed_hours.get(day_name(day))
+        window = _eligible_window_for_day(day, allowed_hours, excluded_dates)
         if window is None:
             continue
         if daily_time_budget_minutes is not None:
             budget = daily_time_budget_minutes.get(day_name(day))
             if budget is not None:
-                committed = _committed_minutes_for_day(day, obstacles, not_before.tzinfo)
+                committed = _committed_minutes_for_day(day, sorted_obstacles, not_before.tzinfo)
                 if committed + duration_minutes > budget:
                     continue
         slot = _first_slot_in_window(
@@ -78,7 +78,7 @@ def find_first_free_slot(
             duration=duration,
             not_before=not_before,
             not_after=not_after,
-            obstacles=obstacles,
+            obstacles=sorted_obstacles,
             grid_minutes=grid_minutes,
         )
         if slot is not None:
@@ -167,14 +167,13 @@ def _pass_two(
     """
     duration = timedelta(minutes=task.estimated_duration_minutes)
     tz = earliest_start.tzinfo
+    sorted_obstacles = sorted(obstacles, key=lambda obstacle: obstacle.start)
 
     best_slot: datetime | None = None
     best_key: tuple[float, float, date] | None = None
 
     for day in day_range(earliest_start.date(), task.deadline.date()):
-        if is_blacked_out(day, blackout_dates):
-            continue
-        window = effective_hours.get(day_name(day))
+        window = _eligible_window_for_day(day, effective_hours, blackout_dates)
         if window is None:
             continue
         slot = _first_slot_in_window(
@@ -183,16 +182,16 @@ def _pass_two(
             duration=duration,
             not_before=earliest_start,
             not_after=task.deadline,
-            obstacles=obstacles,
+            obstacles=sorted_obstacles,
             grid_minutes=grid_minutes,
         )
         if slot is None:
             continue
 
         cap = daily_time_budget_minutes.get(day_name(day))
-        committed = _committed_minutes_for_day(day, obstacles, tz)
+        committed = _committed_minutes_for_day(day, sorted_obstacles, tz)
         overage = max(0.0, committed + task.estimated_duration_minutes - cap) if cap is not None else 0.0
-        remaining_after = _free_capacity_in_window(day, window, obstacles, tz) - task.estimated_duration_minutes
+        remaining_after = _free_capacity_in_window(day, window, sorted_obstacles, tz) - task.estimated_duration_minutes
         key = (overage, float(-remaining_after), day)
 
         if best_key is None or key < best_key:
@@ -200,6 +199,19 @@ def _pass_two(
             best_slot = slot
 
     return best_slot, best_slot is not None
+
+
+def _eligible_window_for_day(
+    day: date, allowed_hours: ActiveHoursMap, excluded_dates: Sequence[BlackoutDate]
+) -> ActiveHoursWindow | None:
+    """The day's active-hours window, or None if the day is ineligible - blacked out or excluded (§6.2).
+
+    Shared by `find_first_free_slot` and `_pass_two` so the two passes can't
+    silently diverge on which days are even in play.
+    """
+    if is_blacked_out(day, excluded_dates):
+        return None
+    return allowed_hours.get(day_name(day))
 
 
 def _first_slot_in_window(
@@ -217,6 +229,9 @@ def _first_slot_in_window(
     The chosen start `t` satisfies `t >= gap_start`, `t + duration <= gap_end`,
     `t + duration <= not_after` (the deadline), and `t + duration <=` the window's
     end - exactly §6.2's placement-grid rule.
+
+    `obstacles` must already be sorted by `start` - both callers sort once per
+    invocation rather than once per day, so this only ever filters.
     """
     tz = not_before.tzinfo
     window_start = datetime.combine(day, window.start, tzinfo=tz)
@@ -228,10 +243,7 @@ def _first_slot_in_window(
     if cursor + duration > limit:
         return None
 
-    relevant = sorted(
-        (obstacle for obstacle in obstacles if obstacle.end > search_from and obstacle.start < window_end),
-        key=lambda obstacle: obstacle.start,
-    )
+    relevant = [obstacle for obstacle in obstacles if intervals_overlap(search_from, window_end, obstacle.start, obstacle.end)]
     for obstacle in relevant:
         if cursor + duration <= obstacle.start:
             return cursor
@@ -251,37 +263,59 @@ def _committed_minutes_for_day(day: date, obstacles: Sequence[Obstacle], tz: tzi
     """
     day_start = datetime.combine(day, time.min, tzinfo=tz)
     day_end = day_start + timedelta(days=1)
-    clipped = [
-        (max(obstacle.start, day_start), min(obstacle.end, day_end))
-        for obstacle in obstacles
-        if obstacle.start < day_end and obstacle.end > day_start
-    ]
-    return _summed_minutes(clipped)
+    return _summed_minutes(_clip_obstacles(obstacles, day_start, day_end))
 
 
 def _free_capacity_in_window(day: date, window: ActiveHoursWindow, obstacles: Sequence[Obstacle], tz: tzinfo | None) -> int:
     """Free minutes remaining inside `day`'s active-hours window, obstacles merged (§6.2 Pass 2 slack key)."""
     window_start = datetime.combine(day, window.start, tzinfo=tz)
     window_end = datetime.combine(day, window.end, tzinfo=tz)
-    window_minutes = int((window_end - window_start).total_seconds() // 60)
-    clipped = [
-        (max(obstacle.start, window_start), min(obstacle.end, window_end))
+    window_minutes = _elapsed_minutes(window_start, window_end)
+    return max(0, window_minutes - _summed_minutes(_clip_obstacles(obstacles, window_start, window_end)))
+
+
+def _clip_obstacles(obstacles: Sequence[Obstacle], bound_start: datetime, bound_end: datetime) -> list[tuple[datetime, datetime]]:
+    """Clip each obstacle overlapping [bound_start, bound_end) to that range.
+
+    Shared by `_committed_minutes_for_day` (whole-day bound) and
+    `_free_capacity_in_window` (active-hours-window bound). `obstacles` must
+    already be sorted by `start`; clipping via `max`/`min` against a fixed bound
+    is monotonic in each obstacle's own start, so the result stays sorted too and
+    `_summed_minutes` doesn't need to re-sort.
+    """
+    return [
+        (max(obstacle.start, bound_start), min(obstacle.end, bound_end))
         for obstacle in obstacles
-        if obstacle.start < window_end and obstacle.end > window_start
+        if intervals_overlap(bound_start, bound_end, obstacle.start, obstacle.end)
     ]
-    return max(0, window_minutes - _summed_minutes(clipped))
 
 
 def _summed_minutes(intervals: list[tuple[datetime, datetime]]) -> int:
-    """Sum interval durations in minutes, merging overlaps first so double-booked obstacles aren't double-counted."""
+    """Sum interval durations in minutes, merging overlaps first so double-booked obstacles aren't double-counted.
+
+    `intervals` must already be sorted by start (guaranteed by `_clip_obstacles`).
+    """
     if not intervals:
         return 0
-    ordered = sorted(intervals, key=lambda interval: interval[0])
-    merged = [ordered[0]]
-    for start, end in ordered[1:]:
+    merged = [intervals[0]]
+    for start, end in intervals[1:]:
         last_start, last_end = merged[-1]
         if start <= last_end:
             merged[-1] = (last_start, max(last_end, end))
         else:
             merged.append((start, end))
-    return sum(int((end - start).total_seconds() // 60) for start, end in merged)
+    return sum(_elapsed_minutes(start, end) for start, end in merged)
+
+
+def _elapsed_minutes(start: datetime, end: datetime) -> int:
+    """Minutes between two aware instants, correct across DST transitions (design doc §14.1).
+
+    Plain subtraction of two aware datetimes silently takes a naive wall-clock
+    shortcut whenever they share the same tzinfo *object* - which `zoneinfo.ZoneInfo`
+    does by default (it caches one instance per IANA key), so this isn't a rare
+    case, it's the normal one. That shortcut ignores any DST transition between
+    the two instants. Converting both to a fixed offset (UTC) first sidesteps it
+    and always reflects real elapsed time, matching 14.1's "handled by the
+    library, not custom code" rule.
+    """
+    return int((end.astimezone(timezone.utc) - start.astimezone(timezone.utc)).total_seconds() // 60)
