@@ -40,6 +40,8 @@ def merge_active_hours(global_hours: ActiveHoursMap, override: ActiveHoursMap | 
     a whole-map replacement would silently wipe out every day the override didn't
     mention.
     """
+    if not override:
+        return global_hours
     merged = dict(global_hours)
-    merged.update(override or {})
+    merged.update(override)
     return merged
