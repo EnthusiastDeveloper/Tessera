@@ -45,6 +45,7 @@ backend-imports:
 
 backend-test:
 	cd backend && pytest
+	cd backend && coverage report --include="app/scheduling_engine/*" --fail-under=90
 
 frontend-lint:
 	cd frontend && npm run lint
