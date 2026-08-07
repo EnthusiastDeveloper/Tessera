@@ -1,14 +1,14 @@
 # Task Scheduling Application - Implementation Plan (POC)
-### Companion to: Design Document Rev 8, Architecture & Implementation Plan Rev 2
+### Companion to: Design Document Rev 9, Architecture & Implementation Plan Rev 3
 
 ## 0. How to use this document
 
 - **Purpose:** sequences the architecture into buildable, independently-testable stages, with hard gates between them.
 - **Audience:** human developer *and* an LLM coding agent (e.g. Claude Code) picking up a stage cold. Instructions are written to be followed literally.
-- **Authority chain:** design doc Rev 8 = *what* the system does. Architecture plan Rev 2 = *how* it's structured. This document = *order, gates, and process*. Where this document conflicts with either of the other two, they win - stop and flag it, don't silently resolve it in code.
+- **Authority chain:** design doc Rev 9 = *what* the system does. Architecture plan Rev 3 = *how* it's structured. This document = *order, gates, and process*. Where this document conflicts with either of the other two, they win - stop and flag it, don't silently resolve it in code.
 - **Golden rule:** a stage does not begin until the previous stage's Exit Criteria are met and green in CI on `main`. The one exception is Stage 5, which deliberately bundles three components - reasoning given inline, per the process rule that grouping is only allowed when isolated testing isn't meaningful.
 - **Traceability:** every stage cites the exact design-doc/architecture-doc section numbers it implements. If you find yourself implementing a rule that isn't traceable to one of those two documents, stop and flag it - don't invent behavior (this mirrors the design doc's own Section 0 authority rule).
-- **Open review:** `docs/implementation-readiness-review-2.md` (IRR-2) is an unresolved findings register against all three documents. Its Section 6 lists which findings gate which stage. Do not start a stage whose gating findings are still open - the point of a findings register is that the invention it prevents is exactly the invention the Traceability rule above forbids.
+- **Open review:** `docs/implementation-readiness-review-2.md` (IRR-2) is the findings register and decision log behind design doc Revision 9 and architecture plan Revision 3. Everything gating Stages 1, 2 and 3 is now **decided and drafted into those documents**; findings gating Stage 5 and later remain open. Its Section 6 lists which gates which stage. Do not start a stage whose gating findings are still open - the point of a findings register is that the invention it prevents is exactly the invention the Traceability rule above forbids. Note that design-doc Section 11 also reopened at Revision 9 with two `[UNCONFIRMED]` items (`dismiss` semantics, gating Stage 5; the setup token, gating Stage 3).
 
 ---
 
@@ -81,7 +81,7 @@ A stage is **DONE** only when all of the following hold:
 | Stage | Title | Status | Branch | Notes |
 |---|---|---|---|---|
 | 0 | Bootstrap & Tooling | **Done** (merged `28c2104`) | `stage-00-bootstrap` | Coverage gate not actually wired - see Stage 1 in-scope |
-| 1 | Scheduling Engine | **Blocked** on design-doc Rev 9 | `stage-01-scheduling-engine` | B3, B4, B8, B9, H1, M7 all decided 2026-08-06 (IRR-2 §0 decision log); unblocks when Rev 9 drafts them in |
+| 1 | Scheduling Engine | **Ready** | `stage-01-scheduling-engine` | All six gating findings (B3, B4, B8, B9, H1, M7) drafted into design doc Rev 9. Also in scope: wire the coverage gate (see §4) |
 | 2 | Data Access Layer | Not started | `stage-02-data-layer` | |
 | 3 | Auth & Sessions | Not started | `stage-03-auth` | |
 | 4 | User Settings | Not started | `stage-04-settings` | |
@@ -147,11 +147,11 @@ A stage is **DONE** only when all of the following hold:
 - `schedule_pending_flexible_tasks(candidates, ...)` - full §6.2: topological sort, stable sort by `(deadline ASC, priority DESC)`, Pass 2 soft-budget override with the 3-key tie-break (overage → remaining slack → earliest date).
 - `check_fixed_conflict(...)` - §6.5 pure overlap predicate.
 - `is_deadline_elapsed(deadline, now) -> bool` - §6.7's gate only. The `missed`-transition orchestration (status change, notification) is service-layer and belongs to Stage 5 - keep this function pure and dumb on purpose.
-- `validate_feasible_duration(estimated_duration, active_hours_map) -> bool` (§6.8).
+- `validate_feasible_duration(estimated_duration_minutes, effective_active_hours_map) -> bool` (§6.8) - note the map is the **merged** one (§3.2) and the window is measured from the first 15-minute grid point (§6.2/§6.8).
 - Every function is framework-agnostic and deterministic: no DB, no HTTP, no hidden `now()` - `now` is always a parameter.
 - **Wire the coverage gate that Stage 0 documented but didn't enforce:** `--cov-fail-under` in CI for both thresholds (~90% `scheduling_engine/`, ~80% overall). Without this, every later stage's "coverage gate met" exit criterion is unverified.
 
-**Gating findings (IRR-2), must be resolved before this stage starts:** B3 (obstacle set omits previously-placed flexible and `in_progress` instances), B4 (`active_hours_override` null semantics), B8 (`Duration` representation), B9 (slot granularity), H1 (dead topological sort), M7 (Examples A/B/C/E are not concrete fixtures).
+**Gating findings (IRR-2) - all resolved in design doc Revision 9, and each changes what this stage builds:** B3 (obstacle set now includes every `scheduled`/`in_progress` instance of either type, and placement is an incremental fit that never moves existing placements), B4 (`active_hours_override` merges per day; one `null` meaning), B8 (all durations are integer minutes), B9 (15-minute placement grid aligned to the hour in local wall-clock; durations unquantised), H1 (topological sort deleted - **do not build it**), M7 (Examples A–P are now concrete fixtures).
 
 **Explicitly out of scope**
 - Anything touching `status`, `detached`, notifications, or persistence.
@@ -161,7 +161,8 @@ A stage is **DONE** only when all of the following hold:
 **Key modules/files:** `app/scheduling_engine/` only.
 
 **Tests required**
-- Unit tests directly encoding Worked Examples A, B, E, G, H, I, J (table-driven where convenient).
+- Unit tests directly encoding Worked Examples B, E, G, H, I, J (table-driven where convenient). **Example A moved to the service-layer suite** in architecture plan Rev 3 - it is a creation-validation path, not a placement one.
+- Two of these carry deliberate regression weight: **B** fails if `active_hours_override` is implemented as a whole-map replacement instead of a per-day merge, and **H** fails if durations or budgets get quantised to the grid along with start times.
 - Example C: placement-only half - feed a freshly-pending task, confirm correct re-placement.
 - Example K: only `is_deadline_elapsed` returning `True` at the correct boundary.
 - Edge cases beyond the worked examples: zero-remaining budget day, `budget_enforcement=strict` (confirm Pass 2 never runs), no dependencies, `deadline == now`, exact three-way tie-break equality, empty candidate list.
@@ -185,7 +186,7 @@ A stage is **DONE** only when all of the following hold:
 **Branch:** `stage-02-data-layer`
 
 **In scope**
-- SQLAlchemy ORM models for all six §3 entities, field-for-field, including `TaskInstance.detached` (§3.3). Decide and document: priority stored as int per §3.2's numeric mapping; status/type as string enums with DB-level constraints.
+- SQLAlchemy ORM models for all **seven** §3 entities (Rev 9 added `ExternalEvent`, §3.11), field-for-field, including `TaskInstance.detached` (§3.3), the `created_at`/`updated_at`/`version` columns (§3.3), and `dependencies` as a **join table** rather than an array column (§3.3). Decide and document: priority stored as int per §3.2's numeric mapping; status/type as string enums with DB-level constraints.
 - Alembic migration(s) - reversible, `upgrade`/`downgrade` both implemented and tested.
 - Repository classes (one per aggregate): plain CRUD plus the specific lookups the service layer will need (e.g. "all pending flexible instances", "instance with dependencies loaded"). Decide once: repositories return domain-shaped data, not raw ORM objects leaking past this layer.
 - Dependency storage decision for §3.8's unlink-not-cascade semantics (join table vs. JSON column) - document the choice and why.

@@ -17,10 +17,10 @@ Tessera fits your flexible tasks into the gaps left by fixed commitments, deadli
 
 ## Documentation
 
-- **[Design Document](docs/design-doc.md)** - authoritative product specification (Revision 8, locked for POC)
-- **[Architecture Plan](docs/architecture-plan.md)** - how the system is structured and built (Revision 2)
+- **[Design Document](docs/design-doc.md)** - authoritative product specification (Revision 9)
+- **[Architecture Plan](docs/architecture-plan.md)** - how the system is structured and built (Revision 3)
 - **[Implementation Plan](docs/implementation-plan.md)** - staged build sequence with gates and tests
-- **[Implementation-Readiness Review #2](docs/implementation-readiness-review-2.md)** - open findings register against all three docs; Section 6 says which findings gate which stage
+- **[Implementation-Readiness Review #2](docs/implementation-readiness-review-2.md)** - findings register and decision log behind Revisions 9 and 3; Section 6 says which remaining findings gate which stage
 - **[CLAUDE.md](CLAUDE.md)** - guidance for Claude Code when working in this repository
 
 ## Quick Start

@@ -7,8 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Tessera** is a self-hosted task scheduling application that auto-places flexible tasks into your calendar while respecting fixed commitments, deadlines, and priorities. It's a Python FastAPI backend + React frontend, single-user, containerized.
 
 ### Key References
-- **Product specification:** `docs/design-doc.md` (Revision 8, locked for POC) - this is the authoritative source for what the system *does*
-- **Implementation plan:** `docs/architecture-plan.md` (Revision 2) - defines how it's structured and built
+- **Product specification:** `docs/design-doc.md` (Revision 9) - this is the authoritative source for what the system *does*
+- **Implementation plan:** `docs/architecture-plan.md` (Revision 3) - defines how it's structured and built
+- **Findings register / decision log:** `docs/implementation-readiness-review-2.md` (IRR-2) - why Revisions 9 and 3 say what they say, plus the findings still open (H2 onward, gating Stage 5+)
 - **Architecture enforcement:** `backend/pyproject.toml` has an `import-linter` configuration that blocks layering violations at CI
 
 ### Common Commands
@@ -55,7 +56,7 @@ Data access layer (backend/app/db/)
 - `backend/app/task_instances/` - TaskInstance CRUD + edit-scope logic (design-doc Sections 3.3, 3.10)
 - `backend/app/scheduling_engine/` - core placement algorithm (design-doc Section 6), **must be pure Python, zero FastAPI/SQLAlchemy imports**
 - `backend/app/notifications/` - notification types and state (design-doc Sections 3.4, 5)
-- `backend/app/calendar_sync/` - external calendar polling + conflict handling (design-doc Sections 3.5, 6.4, 7)
+- `backend/app/calendar_sync/` - external calendar polling + conflict handling (design-doc Sections 3.5, 3.11, 6.4, 7). Note `ExternalEvent` (3.11) is a **local cache** the scheduler reads; the engine never makes a network call
 - `backend/app/auth/` - password hashing, session management (design-doc Sections 3.6, 6)
 - `backend/app/jobs/` - APScheduler adapter for background jobs (architecture-plan Section 4)
 - `backend/app/settings/` - user settings + active-hours windows (design-doc Section 3.7)
@@ -69,7 +70,7 @@ Data access layer (backend/app/db/)
 **Read the full design-doc before implementing.** These are the non-negotiable rules:
 
 ### TaskTemplate vs. TaskInstance
-- A **TaskTemplate** defines recurrence rules and defaults (one-time, daily, weekly, etc.)
+- A **TaskTemplate** defines recurrence rules and defaults (one-time, daily, weekly, etc.), including a **`recurrence.anchor`** of `calendar` (next occurrence lands where the rule says, regardless of the predecessor) or `completion` (`completed_at` + cadence; **flexible templates only**, rejected at save on fixed ones)
 - A **TaskInstance** is the schedulable unit - generated from the template, has a deadline + scheduled_time + status
 - Editing is **two-scoped** (design-doc 3.10):
   - **"This occurrence"** → edits just the live TaskInstance, sets `detached=true` (design-doc 3.3), skips template propagation forever
@@ -80,6 +81,10 @@ This is the high-risk piece. It's a greedy two-pass algorithm:
 - **Pass 1:** respect the daily time budget cap (soft-cap setting in user preferences)
 - **Pass 2:** if Pass 1 fails and budget_enforcement is "soft", ignore the budget and find the day with least overage
 - Accounts for: active-hours windows, blackout dates, task dependencies, fixed tasks, external calendar events (filtered per design-doc Section 7), and daily budget per day-of-week
+- **Incremental fit, not a reflow:** existing placements are never moved by a later pass. Greedy corner-painting (`unschedulable` where a global rearrangement would have fitted) is accepted behaviour, not a bug
+- **Obstacles = every instance in `scheduled` or `in_progress`, both types**, plus intra-pass placements, plus filtered external events
+- **Start times land on a 15-minute grid** aligned to the hour in local wall-clock. **Durations are never quantised**
+- **No topological sort.** The `blocked` gate already guarantees every candidate's dependencies are `completed`. Do not build one
 - All dates/times computed in the user's IANA timezone, never UTC offsets (design-doc 14.1)
 
 ### Task Statuses (design-doc Section 4)
@@ -91,7 +96,7 @@ This is the high-risk piece. It's a greedy two-pass algorithm:
 
 ### Binding Design Decisions (design-doc Section 14)
 - **14.1 Timezone & DST:** All persisted timestamps in UTC; user timezone as IANA name; use timezone-aware library (Python `zoneinfo` or `pytz`). Fixed tasks re-project on timezone change unless `detached`. DST edge cases handled by the library, not custom code.
-- **14.2 Authentication:** Mandatory for all deployments (no anon mode), even LAN-local single-user. Password reset via `RESET_ADMIN_PASSWORD` env var (one-time, marked after first use so it doesn't act as a standing backdoor).
+- **14.2 Authentication:** Mandatory for all deployments (no anon mode), even LAN-local single-user. First-run account creation is a **setup wizard** (`POST /auth/setup`), not an env var. `RESET_ADMIN_PASSWORD` is **recovery only**, one-time, and its marker lives in the **database** (not a file, which a container recreate would erase). Sessions: 30-day absolute TTL, rotate on login, all revoked on password change. The auth guard is **middleware with an explicit public allowlist** - see design-doc 14.2 for the enumerated public routes.
 
 ---
 
@@ -102,7 +107,8 @@ APScheduler with persistent SQLite job store - **jobs are event-driven, not peri
 - **Overdue check:** one-off job at `scheduled_time`
 - **Deadline-elapsed (`missed` state):** one-off job at `deadline`
 - **Dependency-at-risk scan:** one-off job at `deadline - 3 days`
-- **Recurring instance generation:** event hook (fires when prior instance reaches `completed`)
+- **Recurring instance generation:** depends on the anchor. `completion` is an event hook (fires when the prior instance reaches `completed`); `calendar` is a **one-off job at the occurrence boundary**, because it must generate whether or not the predecessor was ever completed
+- **Dependency unblock:** a pure event hook, no job - when the last dependency completes, the dependent is placed in the *same* service method and transaction (design-doc 6.9)
 - **External calendar poll:** interval-based (per `refresh_interval_minutes`)
 
 **Critical:** Every mutation path that affects a task (`create`, `edit`, `reschedule`, `complete`, `delete`, `extend_deadline`) **must co-locate the DB write and job side-effect in one service method** (architecture-plan 4.1) - never in the route handler. This is what prevents orphaned or missing jobs.
@@ -127,7 +133,7 @@ APScheduler with persistent SQLite job store - **jobs are event-driven, not peri
 
 ## API Contract (architecture-plan Section 3)
 
-**REST, versioned (`/api/v1/...`), session-cookie auth (httpOnly, secure).**
+**REST, versioned (`/api/v1/...`), session-cookie auth (`HttpOnly`, `SameSite=Lax`, `Secure` derived from `APP_BASE_URL`'s scheme via `SESSION_COOKIE_SECURE=auto`).**
 
 ### Key Endpoints
 - `GET /api/v1/task-instances` - list with filtering
@@ -139,13 +145,18 @@ APScheduler with persistent SQLite job store - **jobs are event-driven, not peri
 - `PATCH /api/v1/task-templates/{id}?scope=this_and_future` - "this and future" edit (touches template + conditionally live instance)
 - `DELETE /api/v1/task-instances/{id}` - delete (dependency unlink, not cascade)
 - `POST /api/v1/auth/login`, `/logout` - session-based auth
+- `POST /api/v1/auth/setup` - first-run account creation; `410 Gone` once a user exists
+- `DELETE /api/v1/task-instances/{id}?scope=this_occurrence|this_and_future` - deletion scope mirrors edit scope (design-doc 3.8); required for recurring templates
+- `GET /api/v1/task-instances?view=backlog` - the Backlog view is a filter, not its own resource
 
 ### Error Envelope
 Consistent across all endpoints: HTTP status + machine-readable code + human message. Distinct error codes:
 - `cycle_detected` - dependency creates a cycle
 - `creation_conflict` - fixed task collides with existing event
 - `infeasible_duration` - flexible task can't fit any single day's active-hours window (design-doc 6.8)
-- `409 Conflict` - optimistic lock collision; see architecture-plan 5.1 (auto-retry on non-overlapping fields, real conflict UI on overlap)
+- `invalid_recurrence_anchor` - `anchor: "completion"` on a fixed template
+- `session_expired` - distinct from a generic 401 so the client redirects to login
+- `409 Conflict` - optimistic lock collision; see architecture-plan 5.1. The client sends an `expected` map of the values it read for the fields it is changing; the server compares only those and merges onto the current row. **PATCH must be genuinely partial** - sending the whole object defeats the mechanism
 
 ---
 
@@ -154,25 +165,26 @@ Consistent across all endpoints: HTTP status + machine-readable code + human mes
 **TaskTemplate** (design-doc 3.2):
 - `name`, `description`, `location` (informational)
 - `type`: "fixed" | "flexible"
-- `recurrence`: pattern + interval (one_time, daily, weekly, monthly, custom)
+- `recurrence`: pattern + interval (one_time, daily, weekly, monthly, custom) + **`anchor`** (`calendar` | `completion`)
 - `fixed_time_of_day`: wall-clock local time (e.g. "18:00"), **re-projected per timezone change** unless instance is `detached`
-- `deadline_offset`: Duration (e.g. "3 days") for flexible tasks
+- `deadline_offset_minutes`: integer minutes (e.g. 4320 = 3 days) for flexible tasks
 - `priority`: low | medium | high | critical (numeric internally: 1-4)
-- `estimated_duration`: Duration, validated at save against active-hours window (design-doc 6.8)
-- `reminder_offsets`: Duration[] (e.g. ["1h", "15m", "0m"])
-- `active_hours_override`: optional per-day-of-week window, overrides user settings
+- `estimated_duration_minutes`: integer minutes, validated at save against the **merged** active-hours window, measured from the first grid point (design-doc 6.8)
+- `reminder_offsets_minutes`: integer minutes before `scheduled_time` (e.g. [60, 15, 0])
+- `active_hours_override`: optional per-day-of-week window that **merges** over user settings per day; per-day `null` always means "day excluded" (never "unrestricted" - use an explicit `00:00`-`23:59` window for that)
 - `archived`: boolean (soft-delete; templates with history are archived, not hard-deleted)
 
 **TaskInstance** (design-doc 3.3):
 - `template_id`: always set (even for one-time tasks)
 - `name`, `description`, `location`, `type`, `priority` (copied from template at generation)
-- `estimated_duration`: Duration
+- `estimated_duration_minutes`: integer minutes
 - `detached`: boolean (true = this instance no longer receives template propagation)
 - `scheduled_time`: DateTime (set once placed on timeline)
 - `deadline`: DateTime (set at generation for flexible tasks)
 - `status`: pending | scheduled | in_progress | completed | blocked | missed
 - `status_history`: [{status, at}] - immutable trail
-- `dependencies`: TaskInstance id[] (can't start until all are completed)
+- `dependencies`: TaskInstance id[] (can't start until all are completed) - **persisted as a join table**, not an array column, because the Backlog view navigates it in both directions
+- `created_at`, `updated_at`, `version` - `version` is the optimistic-locking token, incremented at the ORM layer; `updated_at` is display/audit only
 - `completed_at`: DateTime (set when transitioned to completed, from any status)
 - `generated_at`: DateTime
 
@@ -180,7 +192,7 @@ Consistent across all endpoints: HTTP status + machine-readable code + human mes
 - `timezone`: IANA name (e.g. "America/New_York")
 - `active_hours`: {day_name: {start, end} | null} - per-day-of-week global window
 - `blackout_dates`: [{start, end, label?}] - full-day exclusions
-- `daily_time_budget`: {day_name: Duration | null} - max flexible work per day, soft cap by default
+- `daily_time_budget_minutes`: {day_name: number | null} - max flexible work per day in minutes, soft cap by default
 - `budget_enforcement`: "soft" | "strict" - whether to allow budget override as last resort
 - `first_day_of_week`: day name (display-only, doesn't affect algorithm)
 
@@ -238,7 +250,8 @@ Consistent across all endpoints: HTTP status + machine-readable code + human mes
 - `DATABASE_PATH` - path to SQLite file, should point into a mounted volume (default: `./data/tessera.db`)
 - `APP_BASE_URL` - base URL for OAuth redirect construction (required if using calendar sync)
 - `TZ` - default timezone, overridable in Settings (optional, sensible default)
-- `RESET_ADMIN_PASSWORD` - one-time password reset (optional, requires container restart)
+- `RESET_ADMIN_PASSWORD` - one-time password recovery (optional, requires container restart)
+- `SESSION_COOKIE_SECURE` - `auto` (default) | `true` | `false`; `auto` derives the cookie's `Secure` flag from `APP_BASE_URL`. Never hardcode it to `true` - it silently breaks login on plain-HTTP LAN, which is a supported deployment
 - Calendar provider credentials if using sync (`GOOGLE_CLIENT_ID`, etc.)
 
 **Data persistence:** SQLite file must live on a mounted Docker volume, never in the container's writable layer. Otherwise all tasks, history, and credentials evaporate on container recreate.
@@ -265,7 +278,7 @@ Consistent across all endpoints: HTTP status + machine-readable code + human mes
 4. **API returned `409 Conflict` unexpectedly?**
    - Check architecture-plan Section 5.1: background jobs and template propagation write to `TaskInstance` too
    - The app tries to auto-retry if the fields don't overlap; real overlap shows a conflict UI in the frontend
-   - If the `updated_at` check is too strict, the fix is in the diff-based retry logic (5.1), not in bypassing the check
+   - The mechanism is an expected-values PATCH (architecture-plan 5.1), not a server-side diff. If it fires too eagerly, the usual cause is the frontend sending a whole object instead of only dirty fields - fix that, don't bypass the check
 
 5. **External calendar events aren't blocking placement?**
    - Check design-doc Section 7 (event filtering): transparent/"Free" events and all-day events are excluded from the obstacle set by default (display-only)
@@ -292,6 +305,8 @@ React + Vite, same-origin served from the FastAPI app (no CORS). Key features:
 - Timeline view uses FullCalendar or equivalent, overlaying scheduled instances + external busy-blocks + blackout dates + virtual recurring projections (design-doc 9.2)
 - Task creation/edit form prompts for edit scope ("this occurrence" vs. "this and future") for recurring tasks (design-doc 3.10, 8.1)
 - Notifications panel with auto-resolved state display (design-doc 3.9)
+- Backlog view: `blocked` / `unschedulable` / `missed` instances, with bidirectional dependency navigation (design-doc 8.1)
+- Duration inputs are value-plus-unit controls with human-readable display - the user never types or reads a raw minute count (design-doc 8.1a)
 - Settings screen: timezone, active-hours per day-of-week, blackout dates, daily budget, budget enforcement toggle, first-day-of-week display preference (design-doc 8.1, 3.7)
 
 The frontend hasn't been built yet (skeleton only at this point), so detailed patterns TBD.
