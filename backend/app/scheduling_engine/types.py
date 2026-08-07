@@ -9,7 +9,7 @@ calling into the engine, and for translating results back. See architecture-plan
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date, datetime, time
 from typing import Literal
 
@@ -81,7 +81,7 @@ class FlexibleTaskCandidate:
     priority: int
     estimated_duration_minutes: int
     active_hours_override: ActiveHoursMap | None = None
-    dependency_completed_at: Sequence[datetime] = field(default_factory=tuple)
+    dependency_completed_at: Sequence[datetime] = ()
 
 
 @dataclass(frozen=True)
