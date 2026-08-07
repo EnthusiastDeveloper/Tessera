@@ -144,7 +144,7 @@ A stage is **DONE** only when all of the following hold:
 - Plain-Python (dataclass/Pydantic-without-ORM) input shapes for everything the engine needs - instance-like records, template config, settings-like config. These are engine-local input types the engine defines for itself; it must not import Stage 2's persisted domain models.
 - `cycle_check(edges) -> bool` (§6.1).
 - `find_first_free_slot(...)` - §6.2 Pass 1: `allowed_hours`, `excluded_dates`, `daily_time_budget`, `obstacles`.
-- `schedule_pending_flexible_tasks(candidates, ...)` - full §6.2: topological sort, stable sort by `(deadline ASC, priority DESC)`, Pass 2 soft-budget override with the 3-key tie-break (overage → remaining slack → earliest date).
+- `schedule_pending_flexible_tasks(candidates, ...)` - full §6.2: stable sort by `(deadline ASC, priority DESC)` (no topological sort - see H1 below), Pass 2 soft-budget override with the 3-key tie-break (overage → remaining slack → earliest date).
 - `check_fixed_conflict(...)` - §6.5 pure overlap predicate.
 - `is_deadline_elapsed(deadline, now) -> bool` - §6.7's gate only. The `missed`-transition orchestration (status change, notification) is service-layer and belongs to Stage 5 - keep this function pure and dumb on purpose.
 - `validate_feasible_duration(estimated_duration_minutes, effective_active_hours_map) -> bool` (§6.8) - note the map is the **merged** one (§3.2) and the window is measured from the first 15-minute grid point (§6.2/§6.8).
