@@ -1,6 +1,7 @@
 """Unit tests for app.scheduling_engine.feasibility.validate_feasible_duration. See design doc §6.8."""
 
 from app.scheduling_engine.feasibility import validate_feasible_duration
+from app.scheduling_engine.types import DAY_NAMES
 from tests.fixtures.scheduling import every_day, window
 
 
@@ -35,7 +36,7 @@ def test_one_minute_over_boundary_is_infeasible() -> None:
 
 
 def test_no_non_null_day_at_all_is_infeasible() -> None:
-    effective = dict.fromkeys(["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"], None)
+    effective = dict.fromkeys(DAY_NAMES, None)
     assert validate_feasible_duration(10, effective) is False
 
 
