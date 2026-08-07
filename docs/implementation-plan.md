@@ -81,7 +81,7 @@ A stage is **DONE** only when all of the following hold:
 | Stage | Title | Status | Branch | Notes |
 |---|---|---|---|---|
 | 0 | Bootstrap & Tooling | **Done** (merged `28c2104`) | `stage-00-bootstrap` | Coverage gate not actually wired - see Stage 1 in-scope |
-| 1 | Scheduling Engine | **Ready** | `stage-01-scheduling-engine` | All six gating findings (B3, B4, B8, B9, H1, M7) drafted into design doc Rev 9. Also in scope: wire the coverage gate (see §4) |
+| 1 | Scheduling Engine | **Implementation complete, awaiting PR/merge** | `stage-01-scheduling-engine` | All six gating findings (B3, B4, B8, B9, H1, M7) resolved per design doc Rev 9. Coverage gate wired (90% engine / 80% overall, both enforced in CI + `make backend-test`). 83 tests green: Worked Examples B, C (placement half), E, G, H, I (+ grid variant), J, K, N (step-2) plus edge cases; `scheduling_engine/` at 100% branch coverage |
 | 2 | Data Access Layer | Not started | `stage-02-data-layer` | |
 | 3 | Auth & Sessions | Not started | `stage-03-auth` | |
 | 4 | User Settings | Not started | `stage-04-settings` | |
@@ -171,10 +171,10 @@ A stage is **DONE** only when all of the following hold:
 - Coverage ≥ 90% on `app/scheduling_engine/` (CI-enforced).
 
 **Exit criteria**
-- [ ] All tests above green.
-- [ ] Coverage gate met.
-- [ ] `mypy --strict` clean, zero `Any` in public signatures.
-- [ ] Zero `fastapi`/`sqlalchemy` imports anywhere under `scheduling_engine/`.
+- [x] All tests above green.
+- [x] Coverage gate met.
+- [x] `mypy --strict` clean, zero `Any` in public signatures.
+- [x] Zero `fastapi`/`sqlalchemy` imports anywhere under `scheduling_engine/`.
 
 ---
 
