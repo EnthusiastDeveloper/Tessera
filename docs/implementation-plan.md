@@ -81,7 +81,7 @@ A stage is **DONE** only when all of the following hold:
 | Stage | Title | Status | Branch | Notes |
 |---|---|---|---|---|
 | 0 | Bootstrap & Tooling | **Done** (merged `28c2104`) | `stage-00-bootstrap` | Coverage gate not actually wired - see Stage 1 in-scope |
-| 1 | Scheduling Engine | **Ready** | `stage-01-scheduling-engine` | All six gating findings (B3, B4, B8, B9, H1, M7) drafted into design doc Rev 9. Also in scope: wire the coverage gate (see §4) |
+| 1 | Scheduling Engine | **Implementation complete, awaiting PR/merge** | `stage-01-scheduling-engine` | All six gating findings (B3, B4, B8, B9, H1, M7) resolved per design doc Rev 9. Coverage gate wired (90% engine / 80% overall, both enforced in CI + `make backend-test`). 83 tests green: Worked Examples B, C (placement half), E, G, H, I (+ grid variant), J, K, N (step-2) plus edge cases; `scheduling_engine/` at 100% branch coverage |
 | 2 | Data Access Layer | Not started | `stage-02-data-layer` | |
 | 3 | Auth & Sessions | Not started | `stage-03-auth` | |
 | 4 | User Settings | Not started | `stage-04-settings` | |
@@ -144,7 +144,7 @@ A stage is **DONE** only when all of the following hold:
 - Plain-Python (dataclass/Pydantic-without-ORM) input shapes for everything the engine needs - instance-like records, template config, settings-like config. These are engine-local input types the engine defines for itself; it must not import Stage 2's persisted domain models.
 - `cycle_check(edges) -> bool` (§6.1).
 - `find_first_free_slot(...)` - §6.2 Pass 1: `allowed_hours`, `excluded_dates`, `daily_time_budget`, `obstacles`.
-- `schedule_pending_flexible_tasks(candidates, ...)` - full §6.2: topological sort, stable sort by `(deadline ASC, priority DESC)`, Pass 2 soft-budget override with the 3-key tie-break (overage → remaining slack → earliest date).
+- `schedule_pending_flexible_tasks(candidates, ...)` - full §6.2: stable sort by `(deadline ASC, priority DESC)` (no topological sort - see H1 below), Pass 2 soft-budget override with the 3-key tie-break (overage → remaining slack → earliest date).
 - `check_fixed_conflict(...)` - §6.5 pure overlap predicate.
 - `is_deadline_elapsed(deadline, now) -> bool` - §6.7's gate only. The `missed`-transition orchestration (status change, notification) is service-layer and belongs to Stage 5 - keep this function pure and dumb on purpose.
 - `validate_feasible_duration(estimated_duration_minutes, effective_active_hours_map) -> bool` (§6.8) - note the map is the **merged** one (§3.2) and the window is measured from the first 15-minute grid point (§6.2/§6.8).
@@ -171,10 +171,10 @@ A stage is **DONE** only when all of the following hold:
 - Coverage ≥ 90% on `app/scheduling_engine/` (CI-enforced).
 
 **Exit criteria**
-- [ ] All tests above green.
-- [ ] Coverage gate met.
-- [ ] `mypy --strict` clean, zero `Any` in public signatures.
-- [ ] Zero `fastapi`/`sqlalchemy` imports anywhere under `scheduling_engine/`.
+- [x] All tests above green.
+- [x] Coverage gate met.
+- [x] `mypy --strict` clean, zero `Any` in public signatures.
+- [x] Zero `fastapi`/`sqlalchemy` imports anywhere under `scheduling_engine/`.
 
 ---
 
