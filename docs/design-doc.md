@@ -13,69 +13,46 @@ Rules for whoever (human or LLM) implements against this doc:
 - Section 13 (Non-Goals) lists things that were considered and explicitly rejected for POC. Treat these the same as backlog items: known, deliberate, deferred.
 - Section 14 (Design Decisions Log) contains binding architectural rules that don't map to a single feature but must be followed throughout implementation (e.g. timezone handling). Treat these as cross-cutting constraints, not optional style notes.
 
-**Revision 2 changelog:** added user authentication (in scope for POC), scheduling-window constraints (global + per-task override), blackout dates, revised deletion semantics (dependency unlink instead of cascade, template archival instead of hard delete), overdue-task handling, notification self-resolution, and a binding timezone/DST rule. Holiday-calendar automation evaluated and moved to backlog with open questions recorded.
+### Revision history
 
-**Revision 3 changelog:** added a per-day-of-week **daily time budget** for flexible-task auto-placement, so the scheduling algorithm stops packing a day back-to-back once its configured capacity is used - measured as total scheduled duration (not task count), to avoid conflating a 5-minute chore with a 2-hour one. The budget is **soft**: it yields as a last resort when respecting it would otherwise cause a task to miss its deadline, and a new `budget_exceeded` notification surfaces whenever that happens.
+Full diffs are in git; IRR-2 (`docs/implementation-readiness-review-2.md`) holds the reasoning trail for Revisions 6 and 9, both of which came out of implementation-readiness reviews.
 
-**Revision 4 changelog:** made the soft-budget behavior itself configurable (`budget_enforcement: strict | soft` in Settings - `strict` disables the last-resort override entirely), and fixed a gap in the last-resort search: rather than accepting the first physically-free day it finds, it now compares every eligible day and picks the one with the smallest resulting overage.
+| Rev | What changed |
+|---|---|
+| 2 | User authentication; active-hours windows (global + per-task override); blackout dates; deletion semantics (dependency unlink, template archival); overdue handling; notification self-resolution; the binding timezone/DST rule (14.1). Holiday calendars moved to backlog |
+| 3 | Per-day-of-week **daily time budget**, measured as total duration rather than task count, soft by default with a `budget_exceeded` notification |
+| 4 | `budget_enforcement: strict \| soft`; Pass 2 picks the least-overage day rather than the first free one |
+| 5 | `first_day_of_week` display preference (no algorithm effect) |
+| 6 | Resolved a batch of edge cases from the first readiness review: `completed_at` in the earliest-start calculation, `completed` reachable from any non-terminal status, feasibility validation (6.8), the Pass 2 slack tie-break, virtual Timeline projections (9.2), external-event filtering (Section 7), wall-clock `fixed_time_of_day` (14.1), and the `missed` state (6.7) |
+| 7 | **Reversed Revision 6's refusal of instance-level overrides.** Added 3.10 (Edit Scope & Propagation) and the `detached` flag, modelled on Google Calendar's edit-scope prompt. Also formalised fixed-task "reschedule" as a "this occurrence" edit |
+| 8 | Closed the last five `[UNCONFIRMED]` items, all confirmed as specified. Markup only, no behaviour change |
+| 9 | Resolved sixteen findings from the second readiness review (IRR-2) - see below |
 
-**Revision 5 changelog:** added a `first_day_of_week` display preference. Display-only - the scheduling algorithm is unaffected, since active-hours/budget/blackout constraints are already keyed by day name, not by position in the week.
+**Revision 9 changelog.** Sixteen IRR-2 findings, following stakeholder decisions taken 2026-08-05 to 2026-08-07. Revision 8's "locked" status meant "no unilateral edits"; it did not mean "verified correct". IRR-2 records what each finding was and why it mattered; this lists only what the specification now says.
 
-**Revision 6 changelog:** resolved a batch of edge cases surfaced during an implementation-readiness review (source list retained alongside this doc). Specifically:
-- Fixed a null-reference bug in the dependency earliest-start calculation - it now keys off `dep.completed_at` instead of `dep.scheduled_time` (6.2).
-- Clarified that an instance may be marked `completed` directly from `pending`/`blocked`/`scheduled`, not only from `in_progress` (3.3, Section 4).
-- Confirmed (and documented why) dependency eviction does **not** need to cascade to downstream tasks (3.3, 6.2).
-- Added creation-time feasibility validation for flexible tasks whose duration cannot fit any single day's active-hours window (new 6.8). Recorded task-splitting as a new backlog item (12.20) instead of building it now.
-- Added a physical-buffer secondary tie-break to the Pass 2 budget-override day selection (6.2).
-- Added computed, non-persisted "virtual" instance projection for Timeline display of recurring templates, without changing the real one-instance-at-a-time generation rule (new 9.2).
-- Added external-event transparency/all-day filtering rules for calendar sync (Section 7).
-- Clarified `fixed_time_of_day` as wall-clock local time (re-projected on timezone change), not a frozen UTC instant, and documented DST-transition handling (14.1).
-- Added a new `missed` state for flexible tasks whose deadline elapses before they're ever scheduled or completed, replacing an infinite unschedulable-retry loop (Section 4, new 6.7).
-- Added `14.2` (Authentication is mandatory) to resolve a dangling cross-reference from 8.1 present in earlier revisions.
-- **Explicitly declined to resolve** one item - instance-level field overrides - because it contradicts the deliberate 3.1 decision. See Section 11, item 7 (reversed - see Revision 7 changelog below).
+*Recurrence (B1, B2):*
+- `recurrence.anchor` - `calendar` (the next occurrence lands where the rule says, regardless of the predecessor) or `completion` (`completed_at` + cadence). `completion` is valid on **flexible templates only** (3.2, 9.1).
+- Calendar-anchored templates generate on the occurrence boundary regardless of the predecessor's state, allowing more than one live instance. Completion-anchored templates **stall when incomplete, and that is intended** for upkeep work, not a dead-end (9.1).
+- Deletion prompts for scope, mirroring 3.10's edit prompt (3.8). Projection is anchor-aware (9.2).
 
-Several Revision 6 changes were marked **[UNCONFIRMED]** and collected in Section 11, per this document's own convention. Items 6 and 7 were resolved in Revision 7; **items 1–5 are resolved in Revision 8 below. As of Revision 8, Section 11 has no remaining open items - this document is fully locked for POC implementation.**
+*Scheduling algorithm (B3, B4, B8, B9, H1):*
+- Obstacle set is every instance in `scheduled` or `in_progress`, both types, plus intra-pass placements and filtered external events. Placement is an **incremental fit** - existing placements are never moved by a later pass (6.2).
+- `active_hours_override` **merges** per day over the global map; per-day `null` always means "day excluded" (3.2, 3.7, 6.2, 6.8).
+- All durations are **integer minutes**, with the unit in the field name (3.2, 3.3, 3.7, 14.1).
+- Computed start times land on a **15-minute grid** aligned to the hour in local wall-clock. **Durations are not quantised** (6.2, 6.8).
+- **The topological sort is deleted** - it was unreachable under the `blocked` gate. A **Backlog view** (8.1) makes blocked work visible instead (6.1, 6.9).
 
-**Revision 7 changelog:** resolved Section 11 items 6 and 7 following stakeholder input.
-- **Item 6 (the `missed` state) is CONFIRMED as specified in Revision 6.** No behavior change; the `[UNCONFIRMED]` markers in Section 4 and 6.7 are removed.
-- **Item 7 (instance-level overrides) is RESOLVED, reversing the Revision 6 decision.** The stakeholder's reference point was Google Calendar's edit-scope prompt ("this event" vs. "this and following events"), adapted to this app's one-instance-at-a-time generation model (9.1), which collapses the usual three-way GCal choice to two. New **Section 3.10 (Edit Scope & Propagation)** is now the binding rule; `TaskInstance` gains a `detached` flag (3.3). Resolving this also closed two things that were previously informal or broken:
-  - The dangling **"(3.6)"** citations in Revision 6's 3.1, 8.1, and Section 11 item 7 - which pointed to "edit-propagation rules" that were never actually written under that section number (3.6 is, and remains, the `User` schema) - now correctly point to 3.10.
-  - The previously-unstated semantics of the fixed-task **"reschedule"** action (6.6, 8.1) are now formally defined as a "this occurrence" edit (3.10) of `scheduled_time`, not a template edit.
-- Added Worked Examples L and M (Section 10) covering both edit-scope paths.
-- Added a recurring-task-edit-scope row to the POC/Backlog scope table (Section 2).
+*Data model (B5, B6, B7):*
+- `created_at`, `updated_at` and a monotonic **`version`** on `TaskInstance`; `version` on `TaskTemplate`. `version` is the optimistic-locking token (3.2, 3.3).
+- `dependencies` is persisted as a **join table** (3.3). New **`ExternalEvent`** entity (3.11) and **3.12 Data retention** - the event cache ages out, `TaskInstance` rows never do.
 
-**Revision 8 changelog:** closed the remaining five `[UNCONFIRMED]` items in Section 11. All five are **confirmed as originally specified - no behavior, schema, or algorithm changes**, so this revision is purely markup: removing `[UNCONFIRMED]` tags at 6.2, 6.8, Section 7, 9.2, and 14.1, and updating Section 11's status. One addition: Item 5's rejected alternative (a fixed-UTC-instant option for `fixed_time_of_day`) is recorded as new **Backlog 12.21**, so the idea isn't lost even though it wasn't built.
+*Authentication (B10, B11, B12, M9, M10):*
+- **First-run setup wizard** (3.6, 8.1); session lifetime, rotation and revocation; the auth guard's public-route list enumerated (14.2). Cookie `Secure` is derived from the deployment scheme rather than hardcoded, so plain-HTTP LAN is a supported deployment - architecture-plan Revision 3 has the mechanism.
 
-**Revision 9 changelog:** resolves the twelve BLOCKER findings and four others from the second implementation-readiness review (IRR-2), following stakeholder decisions taken 2026-08-05 through 2026-08-07. Revision 8's "locked" status meant "no unilateral edits"; it did not mean "verified correct", and IRR-2 found several load-bearing rules that were internally contradictory, undefined, or unimplementable. Grouped by area:
+*Worked examples (M7):*
+- All examples are now concrete given/expected fixtures; G–K re-derived against the decisions above. New N, O and P cover the dependency chain and both recurrence anchors.
 
-*Recurrence (IRR-2 B1, B2):*
-- `recurrence` gains an **`anchor`** field - `calendar` (rigid: the next occurrence lands where the rule says, regardless of the predecessor) or `completion` (`completed_at` + cadence, for upkeep tasks like "replace the filter monthly"). `completion` is valid on **flexible templates only** and rejected at save on fixed ones (3.2, 9.1).
-- Generation no longer dead-ends. Calendar-anchored templates generate on the occurrence boundary regardless of the predecessor's state, allowing more than one live instance; completion-anchored templates stall when incomplete, which is the intended behaviour for upkeep work (9.1).
-- Deletion of a recurring instance now **prompts for scope**, mirroring 3.10's edit prompt: `this_occurrence` (series continues) or `this_and_future` (template archived) - 3.8.
-- 9.2's Timeline projection is anchor-aware.
-
-*Scheduling algorithm (IRR-2 B3, B4, B8, B9, H1):*
-- **Obstacle set corrected.** It omitted flexible instances placed in earlier passes, which would have double-booked essentially every real placement, and omitted `in_progress` instances entirely. Placement is now specified as an **incremental fit**: existing placements are never moved by a later pass (6.2).
-- **`active_hours_override` null semantics fixed.** Revision 8 gave one field three contradictory meanings. Per-day `null` now always means "day excluded", an absent override inherits the global map, and a partial override **merges** per day rather than replacing the whole map (3.2, 3.7, 6.2, 6.8).
-- **`Duration` is defined.** It was used in five fields and specified nowhere. All durations are now **integer minutes**, with the unit in the field name (3.2, 3.3, 3.7, 14.1).
-- **Placement grid defined.** "First free slot" had no time quantum, so no worked example was reproducible. Computed start times now land on a **15-minute grid aligned to the hour** in local wall-clock time; durations are not quantised (6.2, 6.8).
-- **The topological sort is deleted.** It was provably unreachable under the `blocked` gate. Dependency ordering is enforced by that gate alone, and a new **Backlog view** (8.1) makes blocked work visible instead of hiding it until its prerequisites finish (6.1, 6.2, 8.1).
-
-*Data model and persistence (IRR-2 B5, B6, B7):*
-- `TaskInstance` gains `created_at`, `updated_at` and a monotonic **`version`**; `TaskTemplate` gains `version`. Optimistic locking was specified on a field that did not exist (3.2, 3.3).
-- `dependencies` becomes a **join table** rather than an id array, so the Backlog's bidirectional navigation is a lookup rather than a scan (3.3).
-- New **`ExternalEvent`** entity (3.11). Three separate rules assumed external events were persisted while the entity list defined six entities, none of them an event.
-- New **3.12 Data retention**: the event cache ages out; `TaskInstance` rows never do.
-
-*Authentication (IRR-2 B10, B11, B12, M9, M10):*
-- **First-run setup wizard** (3.6, 8.1). There was previously no way to create the first user at all, on a spec that mandates authentication.
-- Session lifetime, rotation and revocation defined; the auth guard's public-route list enumerated (3.6, 14.2).
-- Cookie `Secure` is derived from the deployment scheme rather than hardcoded, so plain-HTTP LAN - the primary target - is a supported deployment rather than a broken one. Details in architecture-plan Revision 3 (14.2).
-
-*Worked examples (IRR-2 M7):*
-- Examples A, B, C and E were qualitative prose and could not be transcribed into tests without inventing fixture data. All examples are now concrete given/expected fixtures, and every expected value in G–K has been re-derived against the decisions above. New Examples N, O and P cover the dependency chain, completion-anchored recurrence, and calendar-anchored generation with a stale predecessor.
-
-*Reopened:* **Section 11 has two open items again** (the `dismiss` action's relationship to scoped deletion, and whether the first-run setup token ships in the POC). This document is therefore **not** fully locked at Revision 9.
+*Reopened:* **Section 11 has two open items again** (8 and 9). This document is **not** fully locked at Revision 9.
 
 ---
 
@@ -195,9 +172,9 @@ Notes:
 - `active_hours_override` exists for two conceptually different reasons that share one mechanism: (a) the user's personal flexibility about a specific chore ("filters can wait till late"), or (b) a genuine external constraint (a business's real opening hours). POC ships the mechanism; a proper business-hours registry with task tagging is Backlog item - see scope table.
 - **(Added Revision 6)** `estimated_duration_minutes` is checked at save time against every day-of-week's applicable active-hours window (override if set, else global) - see 6.8. A duration that cannot physically fit any single day is rejected at creation, not silently left to fail scheduling forever.
 - **(Added Revision 7)** A template edit only reaches a currently-live `TaskInstance` if that instance is not `detached` (3.3, 3.10). A `detached` instance keeps its own values until it completes; the template's new values apply starting with the *next* generated instance (9.1) regardless.
-- **(Added Revision 9) `recurrence.anchor` is a type constraint, not a preference.** `anchor: "completion"` requires `type: "flexible"`, and a save that violates this is **rejected** with an `invalid_recurrence_anchor` validation error. The reason is structural rather than stylistic: completion-anchoring only means anything if the resulting occurrence can be *pushed* within a window, and that window is `deadline_offset_minutes` - a field flexible instances have and fixed instances do not (3.3 sets `deadline` for flexible tasks only; a fixed instance carries `scheduled_time` and has nothing to slide against). A fixed task must happen at its defined date and time, so there is nothing for a completion date to re-anchor. A recurring commitment that genuinely should shift with completion - "service the car six months after the last service" - is modelled as a flexible template whose `deadline_offset_minutes` expresses how far it may slip.
-- **(Added Revision 9) All durations are integer minutes.** `Duration` was used in this schema and three others and was never defined anywhere; `"3 days"`, `"1h"`, `"15m"` and `"e.g. minutes"` all appeared as examples of it. Minutes are the storage and wire format **only** - the UI must never ask the user to compute them, and must never display a raw minute count. See 8.1 for the required input control and 14.1 for the elapsed-versus-calendar consequence.
-- **(Added Revision 9) `active_hours_override` merges, and its `null` matches 3.7's.** Revision 8 annotated this field's `null` as "no restriction" while 3.7 annotated the identically-shaped `active_hours` `null` as "day fully excluded", and 6.2 treated an outer `null` as "fall back to global" - three readings of one field. One rule now: **per-day `null` always excludes that day**, an **absent** override inherits the global map entirely, and a **partial** override applies per day rather than replacing the map. Note that the API contract must therefore distinguish an absent key from a present-but-`null` key: `{"monday": null}` excludes Monday, `{}` inherits it.
+- **`recurrence.anchor` is a type constraint, not a preference.** `anchor: "completion"` requires `type: "flexible"`, and a save that violates this is **rejected** with an `invalid_recurrence_anchor` validation error. The reason is structural rather than stylistic: completion-anchoring only means anything if the resulting occurrence can be *pushed* within a window, and that window is `deadline_offset_minutes` - a field flexible instances have and fixed instances do not (3.3 sets `deadline` for flexible tasks only; a fixed instance carries `scheduled_time` and has nothing to slide against). A fixed task must happen at its defined date and time, so there is nothing for a completion date to re-anchor. A recurring commitment that genuinely should shift with completion - "service the car six months after the last service" - is modelled as a flexible template whose `deadline_offset_minutes` expresses how far it may slip.
+- **All durations are integer minutes.** Minutes are the storage and wire format **only** - the UI must never ask the user to compute them, and must never display a raw minute count. See 8.1a for the required input control and 14.1 for the elapsed-versus-calendar consequence.
+- **`active_hours_override` merges, and its `null` matches 3.7's.** One rule, no exceptions: **per-day `null` always excludes that day**, an **absent** override inherits the global map entirely, and a **partial** override applies per day rather than replacing the map. The API contract must therefore distinguish an absent key from a present-but-`null` key: `{"monday": null}` excludes Monday, `{}` inherits it.
 
 ### 3.3 `TaskInstance`
 
@@ -258,9 +235,9 @@ Notes:
 - **(Added Revision 6)** An instance may be marked `completed` directly from `pending`, `blocked`, or `scheduled` - not only from `in_progress` - covering the "I already did this, don't bother scheduling/tracking it further" case. `completed_at` is always set on this transition regardless of whether `scheduled_time` was ever populated. `in_progress` remains an optional intermediate step, never mandatory.
 - **(Added Revision 6)** Because a candidate only becomes eligible for scheduling (`pending`, unblocked from `blocked`) once **all** its dependencies have reached `completed` (never merely `scheduled`), a dependency's `completed_at` is always populated by the time it's read in 6.2's earliest-start calculation. This also means: if an upstream dependency is later evicted back to `pending` by an external-sync collision (6.4) or an overdue revert (6.6), that eviction has **no cascading effect** on any downstream instance that already unblocked - unblocking was gated on the upstream's (terminal, immutable) completion, not on it remaining scheduled. There is nothing to cascade.
 - **(Added Revision 7)** `detached` is independent of `status` - a `pending`, `blocked`, or `scheduled` instance can be `detached`; the flag only concerns whether the instance's fields still track its template. See 3.10 for the full edit-scope and propagation rule, and for which fields it applies to (notably: not `type`, not `dependencies`, not `status`).
-- **(Added Revision 9) `dependencies` is persisted as a join table** - `task_instance_dependencies(dependent_id, dependency_id)` - rather than as an id array on the row. The array form makes the reverse question ("what is waiting on *this* task?") a full scan, and the Backlog view (8.1) asks it constantly, in both directions. The array shown above is the API representation, not the storage shape.
-- **(Added Revision 9) `version` is the concurrency token, `updated_at` is not.** Revision 8's architecture plan specified optimistic locking on `updated_at`, a field this schema did not have. A timestamp is also the wrong token: SQLite's timestamp resolution makes two writes inside one clock tick indistinguishable, and the collision this mechanism exists to catch - a background job writing while the user edits - is precisely the sub-millisecond case. `version` must be incremented at the ORM layer rather than by individual service methods, because a single write path that forgets to bump it defeats the mechanism silently and with no error to observe.
-- **(Added Revision 9) `TaskInstance` rows are never purged.** See 3.12.
+- **`dependencies` is persisted as a join table** - `task_instance_dependencies(dependent_id, dependency_id)` - rather than as an id array on the row. The array form makes the reverse question ("what is waiting on *this* task?") a full scan, and the Backlog view (8.1) asks it constantly, in both directions. The array shown above is the API representation, not the storage shape.
+- **`version` is the concurrency token; `updated_at` must never be used for locking.** A timestamp is the wrong token here: SQLite's resolution makes two writes inside one clock tick indistinguishable, and the collision this mechanism exists to catch - a background job writing while the user edits - is precisely the sub-millisecond case. `version` must be incremented at the ORM layer rather than by individual service methods, because a single write path that forgets to bump it defeats the mechanism silently and with no error to observe.
+- **`TaskInstance` rows are never purged.** See 3.12.
 
 ### 3.4 `Notification`
 
@@ -316,7 +293,7 @@ interface User {
 }
 ```
 
-**First-run account creation (added Revision 9).** Revision 8 made authentication mandatory (14.2) and defined a password *reset* path, but no account *creation* path - so a fresh deployment had zero users, no way to make one, and no usable app. Resolved as a **first-run setup wizard**:
+**First-run account creation.** Authentication is mandatory (14.2), so a deployment needs a way to obtain its first account. That is a **first-run setup wizard**:
 
 - While **zero `User` rows exist**, the app serves a one-time setup screen (8.1) and exposes `POST /api/v1/auth/setup`. Once an account exists, that endpoint is permanently `410 Gone` - not merely unauthorised.
 - **Every other route refuses to serve while unconfigured** and directs to setup. An app serving task data before an account exists would be an unauthenticated app, which 14.2 forbids.
@@ -326,13 +303,13 @@ interface User {
 
 A **setup token** guarding this flow is recorded as Section 11 item 8 - see there for the claim-window risk it addresses.
 
-**Password reset (confirmed mechanism).** Revision 9 note: with the setup wizard above, this mechanism is now purely a **recovery** path and is never used to create the initial account.
+**Password reset (confirmed mechanism).** With the setup wizard above, this is purely a **recovery** path and is never used to create the initial account.
 
 On container startup, if a `RESET_ADMIN_PASSWORD` env var (or mounted secret file) is present and non-empty, the app resets the admin password to that value **once**. On successful reset, the app writes a marker (a hash of the value it just consumed) so that if the same env var is still present on the next restart, the app does **not** reset again - it logs a warning instead. This prevents the env var from acting as a standing backdoor if the operator forgets to remove it from their compose file after use. A changed value is treated as a new reset request and is honored.
 
-**(Added Revision 9)** The marker is stored **as a row in the database**, not as a file. Revision 8 said only "a local marker", and a marker written to the container's writable layer is erased on every container recreate - at which point the env var becomes exactly the standing backdoor this mechanism exists to prevent. The database lives on the mounted volume and cannot desynchronise from the account it protects.
+The marker is stored **as a row in the database**, not as a file. A marker written to the container's writable layer is erased on every container recreate, at which point the env var becomes exactly the standing backdoor this mechanism exists to prevent. The database lives on the mounted volume and cannot desynchronise from the account it protects.
 
-**Session policy (added Revision 9).** None of this was specified, and an implementer who writes no expiry code gets sessions that never expire:
+**Session policy.** An implementer who writes no expiry code gets sessions that never expire, so each of these is stated explicitly:
 - **Absolute TTL of 30 days** from issue. No idle timeout: idle expiry alone is weaker against a live attacker, who refreshes the session simply by using it, and a sliding window would mean a database write on every request.
 - **Rotation on login** - a fresh session id is issued on each successful login, never reused. Standard session-fixation defence.
 - **Every session for the user is revoked on any password change or reset.** This is not optional: `RESET_ADMIN_PASSWORD` exists so an operator can lock somebody out, and it fails at that if existing sessions survive it.
@@ -371,7 +348,7 @@ interface UserSettings {
 
 `first_day_of_week` affects **display only** - it controls the Timeline view's calendar layout (8.1) and the row order of the day-of-week settings below (`active_hours`, `daily_time_budget_minutes`, `blackout_dates`). It has no effect on scheduling algorithm behavior: those fields are already keyed by day name rather than position-in-week, so the algorithm doesn't have a concept of "week" to reorder in the first place.
 
-**(Added Revision 9)** A per-day `null` in `active_hours` means **that day is fully excluded**, and the same rule applies to `TaskTemplate.active_hours_override` (3.2) - one shape, one meaning. A template override **merges** over this map per day: days the override names use the override's value, days it does not name inherit the value here. To allow a task at any hour on a given day, give that day an explicit `00:00`–`23:59` window; there is no `null` that means "unrestricted".
+A per-day `null` in `active_hours` means **that day is fully excluded**, and the same rule applies to `TaskTemplate.active_hours_override` (3.2) - one shape, one meaning. A template override **merges** over this map per day: days the override names use the override's value, days it does not name inherit the value here. To allow a task at any hour on a given day, give that day an explicit `00:00`–`23:59` window; there is no `null` that means "unrestricted".
 
 `active_hours` (and any `TaskTemplate.active_hours_override`), `blackout_dates`, and `daily_time_budget_minutes` constrain **flexible-task auto-placement only** (6.2). Fixed tasks are user-chosen times and are never constrained by this window - the window governs what the algorithm may choose, not what the user is allowed to set manually. Note the distinction between "constrains" and "counts toward capacity" for `daily_time_budget_minutes` specifically: fixed tasks and external calendar events are never *blocked* by the budget, but their duration *does* count against a day's budget when the algorithm decides whether there's still room for more flexible tasks that day (see 6.2) - otherwise a day already packed with fixed commitments would still get flexible chores piled on top of it, which defeats the purpose of the setting. Unlike the effective active-hours window and `blackout_dates`, which are hard constraints the algorithm never crosses, `daily_time_budget_minutes` is a constraint whose strictness is itself configurable via `budget_enforcement` - see 6.2 for exactly when and how it's allowed to yield.
 
@@ -380,7 +357,7 @@ interface UserSettings {
 - **Deleting a `TaskInstance` that other instances depend on:** the dependency link is simply removed from the dependent instance(s)' `dependencies` array. The dependent instance(s) are otherwise untouched. If this removal leaves a `blocked` instance with zero remaining dependencies, it transitions to `pending` per the normal state machine (Section 4) and becomes eligible for the next scheduling pass. **No cascading delete.**
 - **Deleting a `TaskTemplate` with incomplete instances:** the UI must show a confirmation dialog explaining the implications (which incomplete instances exist and what happens to them) before proceeding. On confirmation, the template is **archived**, not hard-deleted (`archived = true`) - this keeps `template_id` references on historical/completed instances valid rather than dangling, and preserves history availability.
 
-**Deletion scope for recurring tasks (added Revision 9).** Revision 8 defined what happens to a deleted instance's *dependents* but never what happens to its *template* - so deleting the live instance of a recurring task silently ended the series, with no notification and no error. Deletion now **prompts for scope**, mirroring 3.10's edit-scope prompt rather than inventing a second mental model:
+**Deletion scope for recurring tasks.** Deleting an instance must say what happens to its *series*, not only to its dependents. Deletion **prompts for scope**, mirroring 3.10's edit-scope prompt rather than inventing a second mental model:
 
 | Scope | Effect |
 |---|---|
@@ -418,11 +395,11 @@ There is deliberately no third "all occurrences, including past" scope: "past" m
 
 **UI implication (see also 8.1).** The task edit form must prompt for scope ("this occurrence" vs. "this and future") whenever the task being edited is (a) recurring and (b) not a one-time (`recurrence: one_time`) template - a one-time task has no "future occurrences" to distinguish, so no prompt is needed; the edit simply applies to that instance and template alike, as in Revision 6. The task detail view should visibly indicate when an instance is `detached`, so the user understands why it didn't pick up a later template-wide edit.
 
-**(Added Revision 9)** Deletion uses the same two-way scope prompt - see 3.8.
+Deletion uses the same two-way scope prompt - see 3.8.
 
 ### 3.11 `ExternalEvent` (added Revision 9)
 
-Revision 8 defined six entities and none of them was an event, while three separate rules assumed external calendar events were persisted locally: 6.4 diffs each poll "against previously known set", 6.2 needs external busy-blocks as obstacles on every scheduling pass, and 3.9 auto-resolves a `sync_conflict` when "the external event was later removed" - none of which is computable without a prior set.
+External calendar events are persisted locally. Three separate rules require it: 6.4 diffs each poll against the previously known set, 6.2 needs external busy-blocks as obstacles on every scheduling pass, and 3.9 auto-resolves a `sync_conflict` when the external event is later removed - none of which is computable without a prior set.
 
 ```typescript
 interface ExternalEvent {
@@ -446,7 +423,7 @@ interface ExternalEvent {
 - **`(connection_id, provider_event_id)` is unique.** This is what makes 6.4's diff a plain upsert rather than bespoke matching logic.
 - Filtering per Section 7 happens when the obstacle set is assembled, not at fetch time - a transparent or all-day event is still stored and still displayed, it simply does not obstruct.
 
-### 3.12 Data retention (added Revision 9)
+### 3.12 Data retention
 
 The distinction is what owns the data.
 
@@ -503,7 +480,7 @@ Rules:
 - **(Added Revision 6)** `completed` is reachable directly from `pending`, `blocked`, or `scheduled` - not only via `in_progress` - see 3.3.
 - **(Added Revision 6)** `missed` is reachable from `pending` or `blocked` (flexible instances only) when the deadline elapses before the instance is scheduled or completed. See 6.7 for the full trigger logic and resolution paths. **[CONFIRMED - Revision 7, Section 11 item 6 - no change from the Revision 6 design.]**
 - **(Added Revision 7)** `detached` (3.3/3.10) is orthogonal to `status` - it does not add, remove, or gate any transition in this diagram. An instance can be `detached` in any non-terminal status.
-- **(Added Revision 9)** Revision 9 adds **no new states and no new transitions.** The `blocked` gate is unchanged, and `blocked` remains mutually exclusive with having a `scheduled_time`. What changed is only *when* the `blocked` → `pending` transition fires its placement: 6.9 now places the unblocked instance in the same transaction as the completion that unblocked it, rather than leaving it for a later sweep.
+- **(Added Revision 9)** `blocked` is mutually exclusive with having a `scheduled_time`. The `blocked` → `pending` transition fires its placement **in the same transaction as the completion that unblocked it** (6.9), not on a later sweep.
 - **(Added Revision 9)** `blocked`, `missed`, and `pending`-with-an-active-`unschedulable`-notification are the three states surfaced in the Backlog view (8.1). That view is a query over this same state machine, not a parallel one - no instance is moved, copied, or given a different status by appearing in it.
 
 ---
@@ -531,14 +508,14 @@ All types support auto-resolution per 3.9, **except `budget_exceeded`**: it reco
 
 - Dependencies form a directed graph over `TaskInstance` ids.
 - Cycle check runs at **save time** - a task cannot be saved with a dependency list that would create a direct or indirect cycle. Reject with a validation error (`cycle_detected`).
-- **(Revised Revision 9) Dependency ordering is enforced by the `blocked` status gate, not by sorting within a pass.** Revision 8 called for a topological sort of the candidate set before each pass. That sort was provably unable to change any outcome: Section 4 makes an instance with any incomplete dependency `blocked`, and only `pending` instances are candidates, so no candidate can ever depend on another candidate - every dependency of every candidate is already `completed`. The sort is **deleted**, along with any test purporting to exercise it. Runtime cycle detection inside the scheduling engine is likewise unnecessary; the save-time check above is the only one.
-- **(Added Revision 9)** The consequence of the `blocked` gate is that dependents are invisible on the Timeline until their prerequisites finish. That is addressed by making them visible in the **Backlog view** (8.1) rather than by relaxing the gate - see 6.9 for what happens when a dependency completes. Placing dependents against a prerequisite's merely *scheduled* time was considered and deferred (Backlog 12.22): it would require a dependency-invalidation cascade, which contradicts 6.2's rule that existing placements never move.
+- **(Revised Revision 9) Dependency ordering is enforced by the `blocked` status gate, not by sorting within a pass. Do not build a topological sort.** One would be unreachable: Section 4 makes an instance with any incomplete dependency `blocked`, and only `pending` instances are candidates, so no candidate can ever depend on another candidate - every dependency of every candidate is already `completed`. Runtime cycle detection inside the scheduling engine is likewise unnecessary; the save-time check above is the only one.
+- **(Added Revision 9)** The gate's consequence is that dependents are invisible on the Timeline until their prerequisites finish. That is addressed by making them visible in the **Backlog view** (8.1) rather than by relaxing the gate - see 6.9 for what happens when a dependency completes. Placing dependents against a prerequisite's merely *scheduled* time was considered and deferred (Backlog 12.22): it would require a dependency-invalidation cascade, which contradicts 6.2's rule that existing placements never move.
 
 ### 6.2 Core placement algorithm
 
 Runs whenever: a new flexible instance enters `pending`, an external sync or overdue event invalidates a scheduled flexible instance (returns it to `pending`), a dependency completes/is removed and unblocks a downstream instance (6.9), or **(added Revision 7)** a non-`detached` flexible instance's `estimated_duration_minutes`/`deadline` changes via a "this and future" template propagation (3.10) in a way that invalidates its current placement.
 
-**Placement is an incremental fit, not a reflow (added Revision 9).** A pass places only the new or changed candidate into the gaps left by everything already committed. **Existing placements are never moved by a later pass.** Adding a task never silently reshuffles the tasks already on your timeline - see the notes below for the consequence this has, which is deliberate and accepted.
+**Placement is an incremental fit, not a reflow (added Revision 9).** A pass places only the new or changed candidate into the gaps left by everything already committed. **Existing placements are never moved by a later pass**, so adding a task never silently reshuffles what is already on the timeline. The notes below record the consequence, which is deliberate and accepted.
 
 ```
 function schedule_pending_flexible_tasks():
@@ -562,9 +539,8 @@ function schedule_pending_flexible_tasks():
         # complete directly from "pending" without ever being scheduled - 3.3).
 
         # (Rev 9) Active hours resolve PER DAY, merging the template's override over
-        # the global map. Revision 8 selected whole objects here, which is wrong under
-        # the merge semantics fixed in 3.2/3.7: a template overriding one evening would
-        # have lost its active hours on every other day.
+        # the global map (3.2/3.7). NOT a whole-object selection: a template overriding
+        # one evening must keep its active hours on every other day.
         function effective_hours(day):
             if task.template.active_hours_override is not None
                and day in task.template.active_hours_override:
@@ -581,12 +557,10 @@ function schedule_pending_flexible_tasks():
             daily_time_budget = user_settings.daily_time_budget_minutes,  # per-day cap, see 3.7
             grid_minutes = 15,                      # (Rev 9) see "Placement grid" below
 
-            # (Rev 9) Obstacle set corrected. Revision 8 listed only flexible instances
-            # placed "in this pass", which - since scheduling is event-driven and almost
-            # every pass holds exactly one candidate - meant essentially every placement
-            # ignored every previously-placed flexible task and stacked on top of it.
-            # `in_progress` was omitted too, so a task the user was actively doing could
-            # be scheduled over.
+            # (Rev 9) Includes instances placed in ANY prior pass, not just this one -
+            # scheduling is event-driven and almost every pass holds exactly one
+            # candidate, so a this-pass-only set would double-book nearly everything.
+            # `in_progress` counts too: a task the user is actively doing is an obstacle.
             obstacles = all TaskInstances with status in ("scheduled", "in_progress")
                           # both types: fixed AND flexible, from any prior pass
                       + all flexible TaskInstances placed earlier in THIS pass
@@ -633,7 +607,7 @@ function schedule_pending_flexible_tasks():
 
 #### Placement grid (added Revision 9)
 
-"First free slot" is not a well-defined function without a time quantum, and Revision 8 never gave one - a 30-minute task in a gap from 18:07 to 19:00 could equally start at 18:07, 18:15 or 18:30, so no worked example was reproducible and no acceptance test could be written from one.
+"First free slot" is not well-defined without a time quantum: a 30-minute task in a gap from 18:07 to 19:00 could equally start at 18:07, 18:15 or 18:30. Without a stated grid no worked example is reproducible and no acceptance test can be written from one.
 
 - **Computed start times land on a 15-minute grid aligned to the hour** - `:00`, `:15`, `:30`, `:45`.
 - **The grid is aligned in the user's local wall-clock time, not UTC.** Aligning in UTC would produce `:15`-offset slots for anyone in a half-hour or quarter-hour offset zone (`Asia/Kolkata` at +05:30, `Asia/Kathmandu` at +05:45). This is a concrete instance of 14.1's binding rule.
@@ -658,7 +632,7 @@ Notes:
 
 - Periodic check. For any non-completed instance with ≥1 incomplete dependency, if `deadline - now() <= 3 days` (flat POC threshold), create a `dependency_at_risk` Notification.
 - Deduplicated - fires once per (instance, threshold-crossing) event, not every scan.
-- **(Added Revision 9) The risk assessment uses a speculative placement pass.** Because dependents are never placed until their prerequisites complete (6.1), chain-completion risk cannot be read off the timeline - there is nothing on it to read. The check therefore runs the 6.2 placement logic **hypothetically over the whole chain, persisting nothing**, and compares the chain's projected end against the deadline. This is possible precisely because the scheduling engine is pure and side-effect-free; it must not write `scheduled_time`, must not create obstacles, and must not emit any notification other than `dependency_at_risk` itself.
+- **(Added Revision 9) The risk assessment uses a speculative placement pass.** Because dependents are never placed until their prerequisites complete (6.1), chain-completion risk cannot be read off the timeline - there is nothing on it to read. The check runs 6.2's placement logic **hypothetically over the whole chain, persisting nothing**, and compares the projected end against the deadline. This is possible precisely because the scheduling engine is pure and side-effect-free: it must not write `scheduled_time`, must not create obstacles, and must not emit any notification other than `dependency_at_risk` itself.
 
 ### 6.4 External calendar sync - collision handling
 
@@ -710,9 +684,9 @@ Without this gate, a flexible task overdue past its own deadline would hand `fin
 Before a flexible `TaskTemplate` (and its initial instance) is saved, validate that `estimated_duration_minutes` fits within **at least one** day's **effective** active-hours window - i.e.:
 
 ```
-# (Rev 9) Evaluated against the MERGED map, not the override alone. Under 3.2's merge
-# semantics a partial override leaves the unnamed days governed by the global map, and
-# checking the override in isolation would reject feasible tasks.
+# (Rev 9) Evaluated against the MERGED map (3.2), not the override alone - a partial
+# override leaves unnamed days governed by the global map, and checking the override
+# in isolation would reject feasible tasks.
 effective = { day: effective_hours(day) for every day-of-week }   # see 6.2
 
 # (Rev 9) Measured from the first GRID point at or after the window start, not from the
@@ -811,9 +785,7 @@ All durations are stored and transmitted as integer minutes (3.2). **That is a s
 
 Instances are generated **one at a time**, never as a pre-generated rolling window (Backlog 12.13 if that proves insufficient). This rule is about **real, persisted** `TaskInstance` generation only. See 9.2 for how the Timeline nonetheless shows upcoming recurring commitments without changing it.
 
-**(Rewritten Revision 9.)** Revision 8 generated the next instance *only* when the current one reached `completed`, which dead-ended on every other path: a `missed` flexible instance, a fixed instance whose time passed un-ticked, a deleted instance, or one blocked on a dependency that never completed all left the template unable to ever generate again. The failure was silent - no notification, no error, the recurring task simply stopped existing. A user who forgot to tick off one Monday stand-up would lose every future Monday stand-up.
-
-Generation now depends on the template's `recurrence.anchor` (3.2), and the two modes fail differently **on purpose**:
+**(Rewritten Revision 9.)** Generation depends on the template's `recurrence.anchor` (3.2), and the two modes fail differently **on purpose**. Generation must never be gated solely on a `completed` transition: a `missed` instance, a fixed instance whose time passed un-ticked, a deleted instance, or one blocked on a dependency that never completed would each leave the template unable to generate again, silently and with no error - a user who forgot to tick off one Monday stand-up would lose every future Monday stand-up.
 
 #### `anchor: "calendar"` - rigid commitments
 
@@ -844,7 +816,7 @@ Under 9.1's one-instance-at-a-time rule, the Timeline would otherwise show nothi
 - Carry no `id`, participate in no dependency graph, trigger no notification.
 - Are excluded entirely from the scheduling algorithm (6.2) and from `daily_time_budget_minutes` accounting - only real, persisted instances affect scheduling and budget math.
 
-**Projection basis, per anchor (added Revision 9).** Revision 8 said the projection runs "forward from the most recently generated/completed real instance", which is ambiguous in exactly the way 9.1 was, and a projection that disagrees with the real generator makes the Timeline actively lie to the user:
+**Projection basis, per anchor (added Revision 9).** The projection must agree with 9.1's real generator, or the Timeline actively lies to the user:
 
 - **`anchor: "calendar"`** - project the recurrence rule forward from the last nominal occurrence date. Straightforward, and it agrees with 9.1 by construction because both read the same rule.
 - **`anchor: "completion"`** - future dates genuinely depend on a completion that has not happened yet, so the projection **assumes on-time completion**: project from the live instance's nominal date plus cadence. **If the live instance is already past its nominal date**, project from `today + cadence` instead, so ghost occurrences do not pile up in the past and imply a backlog that does not exist.
@@ -859,7 +831,7 @@ Real instance generation itself remains exactly as specified in 9.1. This sectio
 
 ## 10. Worked Examples
 
-**(Rewritten in Revision 9.)** Revision 8's Examples A, B, C and E were qualitative prose - "finds the first free 30-minute slot" - with no settings, no obstacle list and no expected timestamps, so they could not be transcribed into acceptance tests without inventing fixture data, which Section 0 forbids. All examples below are now concrete given/expected fixtures, and every expected value in G through K has been **re-derived** against Revision 9's decisions - most visibly the 15-minute placement grid, which moves several previously-stated start times.
+**(Rewritten in Revision 9.)** Every example below is a concrete given/expected fixture, transcribable into an acceptance test without inventing data - which Section 0 forbids.
 
 All examples use timezone `America/New_York` and the 15-minute grid (6.2). Times are local. Each example states its own settings; there is no shared baseline.
 
@@ -885,7 +857,7 @@ All examples use timezone `America/New_York` and the 15-minute grid (6.2). Times
 
 **Expected:** `scheduled_time` = **Tue 2026-03-03 21:45**.
 
-Reasoning, and what each part of the fixture is testing: Monday's effective window is 18:00–21:00 (inherited from the global map, since the override names only Tuesday) and is fully occupied. Tuesday's effective window is 18:00–**22:30** from the override. The first free moment is 21:37, which is not a grid point; the first grid point at or after it is **21:45**, and `21:45 + 30min = 22:15 ≤ 22:30`, so it fits. Had the override been treated as a whole-map *replacement* rather than a merge, Monday would have had no window at all - the merge semantics are load-bearing here, not incidental.
+Reasoning, and what the fixture is testing: Monday's effective window is 18:00–21:00 (inherited from the global map, since the override names only Tuesday) and is fully occupied. Tuesday's effective window is 18:00–**22:30** from the override. The first free moment is 21:37, which is not a grid point; the first grid point at or after it is **21:45**, and `21:45 + 30min = 22:15 ≤ 22:30`, so it fits. **This example fails if the override is implemented as a whole-map replacement instead of a per-day merge** - Monday would then have no window at all.
 
 **Example C - Sync evicts a scheduled flexible task (6.4).**
 
@@ -968,8 +940,6 @@ Candidate: a `flexible` task, `estimated_duration_minutes: 60`, placed via Pass 
 
 **Expected:** **Wednesday**. Both days tie on the first key at exactly 60 minutes of overage, so the second key decides: prefer the day left with more slack for whatever else might need to land there, rather than defaulting to Tuesday purely because it comes first chronologically.
 
-*(Revision 9 wording fix: Revision 8 described Wednesday as "budget effectively exceeded already, committed 1h". With a 60-minute budget and 60 minutes committed, Wednesday was exactly **at** budget, not over it. The arithmetic that followed was right; the description was not.)*
-
 **Example K - Deadline elapses before the task is ever scheduled (6.7).**
 
 | Given | |
@@ -1024,23 +994,19 @@ Had `anchor` been `"calendar"`, N+1 would instead have landed on **Wed 2026-04-0
 
 **Expected:** the 6.6 overdue check fires an `overdue` Notification for the 2026-03-02 instance, which - being `fixed` - keeps its `scheduled` status. When the next occurrence boundary arrives on **Mon 2026-03-09**, that instance is generated **anyway**, and both are live simultaneously. The user clears the stale one with `DELETE ?scope=this_occurrence` (3.8), which removes that instance only and leaves the series running.
 
-Under Revision 8 this template would have generated nothing ever again, silently, because generation was gated on a `completed` transition that never came.
+This is the case that makes 9.1's occurrence-boundary rule necessary: gating generation on a `completed` transition that never comes would silently end the series.
 
 ---
 
 ## 11. Open Questions Requiring Stakeholder Sign-off
 
-**Status as of Revision 9: two open items (8 and 9 below). This document is NOT fully locked.** Items 1–7 remain resolved as recorded. Revision 6 surfaced seven items during an implementation-readiness review; Revision 7 resolved items 6 and 7 (one of which - item 7 - reversed a Revision 6 decision, see 3.10); Revision 8 resolved items 1–5, all confirmed exactly as originally specified. Revision 9 resolved a further sixteen findings from a second review (IRR-2) and, per this document's own convention, records the two it could not close as new `[UNCONFIRMED]` items rather than deciding them unilaterally.
+**Status as of Revision 9: two open items (8 and 9 below). This document is NOT fully locked.**
 
-Separately, IRR-2 findings gating Stage 5 and later are **open against this revision** but are not listed here, because they are review findings awaiting a decision rather than decisions awaiting confirmation. See IRR-2 Section 6.
+Items 1–7 were raised by the first readiness review and resolved in Revisions 7 and 8; their outcomes are stated in the body of this document rather than restated here, and the full text is in git history. One is worth naming, because it was a **reversal** and a future reader is otherwise liable to reinstate the original position:
 
-1. ~~**(6.8) Flexible-task feasibility hard-block at creation.**~~ **RESOLVED - Revision 8: CONFIRMED, hard-block as specified.** No softer save-with-warning; no pull-forward of Backlog 12.20.
-2. ~~**(6.2, Pass 2) Physical-buffer secondary tie-break.**~~ **RESOLVED - Revision 8: CONFIRMED as specified.** Three-key tie-break (overage, then slack, then earliest date) stands.
-3. ~~**(9.2) Virtual/ghost recurring-instance projection for Timeline display.**~~ **RESOLVED - Revision 8: CONFIRMED.** Display-only, non-persisted, 30-day horizon - hardcoded constant for POC, not a `UserSettings` field.
-4. ~~**(Section 7) All-day / transparent external-event handling.**~~ **RESOLVED - Revision 8: CONFIRMED.** Display-only for POC; per-event holiday-style semantics stays deferred to Backlog 12.15, unchanged.
-5. ~~**(14.1) Wall-clock vs. fixed-UTC-instant semantics for `fixed_time_of_day`.**~~ **RESOLVED - Revision 8: CONFIRMED, wall-clock only.** A fixed-UTC-instant option was considered and deliberately not built for POC - recorded as new Backlog 12.21 rather than lost.
-6. ~~**(Section 4, new 6.7) New `missed` state for flexible tasks whose deadline elapses unmet.**~~ **RESOLVED - Revision 7: CONFIRMED as specified.** No change to the Revision 6 design; the `[UNCONFIRMED]` markers in Section 4 and 6.7 are removed.
-7. ~~**Instance-level field overrides - raised, but NOT adopted.**~~ **RESOLVED - Revision 7: option (b), reversed.** Per stakeholder direction, modeled on Google Calendar's edit-scope prompt and adapted to this app's one-instance-at-a-time model (which collapses GCal's three scopes to two - see 3.10 for why). `TaskInstance` gains a `detached` flag (3.3); the full edit-scope and propagation rules are in new **Section 3.10**. The original scenario (a "Pay Utility Bills" task needing a one-off 45-minute call) is now Worked Examples L and M (Section 10). This also retroactively fixes the "(3.6)" citations in the original text of this item and in 3.1/8.1 - they pointed to edit-propagation content that was never actually written under Section 3.6 (which is, and remains, the `User` schema).
+- **Item 7, instance-level field overrides.** Revision 6 declined these as contradicting 3.1's "everything is a template" simplicity decision. Revision 7 **reversed that**, on stakeholder direction, modelled on Google Calendar's edit-scope prompt and adapted to this app's one-instance-at-a-time model (which collapses GCal's three scopes to two). Section 3.10 is the binding rule and `TaskInstance` carries a `detached` flag; Worked Examples L and M cover both paths. Revision 9 extended the same two-way scope to deletion (3.8).
+
+Revision 9 resolved sixteen findings from a second review (IRR-2) and, per this document's own convention, records below the two it would not decide unilaterally. Separately, IRR-2 findings gating Stage 5 and later are **open against this revision** but are not listed here, because they are review findings awaiting a decision rather than decisions awaiting confirmation. See IRR-2 Section 6.
 
 8. **[UNCONFIRMED - added Revision 9, needs stakeholder sign-off] Does a separate `dismiss` action exist, distinct from `DELETE ?scope=this_occurrence`?**
    Calendar-anchored templates can now leave a stale predecessor live alongside its successor (9.1), and the user needs a way to clear it. Revision 9 specifies that this is `DELETE ?scope=this_occurrence` (3.8) - one action, no new status. The alternative is a first-class **`dismiss`** that is *non-destructive*: it would need its own terminal value in `TaskInstance.status` (3.3) and its own node in Section 4's state machine, and it would preserve the row so that "I skipped this one" stays visible in history, rather than erasing the evidence that the occurrence ever existed.
@@ -1122,11 +1088,11 @@ This is **not** a feature ticket, it's a constraint on how the entire codebase h
 
 **DST edge cases:** a wall-clock time that falls in a spring-forward gap (doesn't exist that day) is shifted forward to the next valid instant; a wall-clock time that falls in a fall-back ambiguity (occurs twice) resolves to the first occurrence - this is standard behavior of a timezone-aware library applied per the binding rule above, not custom logic to write.
 
-**Durations are elapsed time, not calendar time (added Revision 9).** All duration fields are integer minutes (3.2), and `deadline_offset_minutes = 4320` means 4320 minutes of elapsed time, not "three calendar days at the same wall-clock hour". Across a DST boundary the resulting deadline therefore lands an hour off the original wall-clock time. **This is an accepted simplification, not a bug** - it is recorded here so it is not later filed as one. It costs an hour on a personal deadline twice a year, and it keeps the scheduling engine free of any timezone dependency for duration arithmetic, which is what lets 6.2 stay pure integer comparison.
+**Durations are elapsed time, not calendar time (added Revision 9).** All duration fields are integer minutes (3.2), and `deadline_offset_minutes = 4320` means 4320 minutes of elapsed time, not "three calendar days at the same wall-clock hour". Across a DST boundary the resulting deadline therefore lands an hour off the original wall-clock time. **This is an accepted simplification, not a bug** - recorded here so it is not later filed as one. It costs an hour on a personal deadline twice a year, and it keeps the scheduling engine free of any timezone dependency for duration arithmetic, which is what lets 6.2 stay pure integer comparison.
 
 Recurrence **cadence** is unaffected and remains calendar-correct: 3.2 expresses it as `pattern` + `interval`, so "monthly" is calendar-month arithmetic performed in the user's timezone (9.1), never a minute count.
 
-**Grid alignment is a local-time operation (added Revision 9).** 6.2's 15-minute placement grid aligns to the hour in the user's local wall-clock, never in UTC. Aligning in UTC would produce `:15`-offset slots for anyone in a half-hour or quarter-hour offset zone (`Asia/Kolkata` at +05:30, `Asia/Kathmandu` at +05:45) - a concrete instance of the general rule above.
+**Grid alignment is a local-time operation (added Revision 9).** 6.2's 15-minute placement grid aligns to the hour in the user's local wall-clock, never in UTC. Aligning in UTC produces `:15`-offset slots for anyone in a half-hour or quarter-hour offset zone (`Asia/Kolkata` at +05:30, `Asia/Kathmandu` at +05:45) - a concrete instance of the general rule above.
 
 **[CONFIRMED - Revision 8, Section 11 item 5. Wall-clock is the only `fixed_time_of_day` semantics for POC.** A genuinely fixed-UTC-instant option (e.g. for a global webinar) was considered and deliberately not built - it's additive to this rule, not a replacement of it, so it can be layered on later as a per-template flag without touching the wall-clock default path. Recorded as new **Backlog 12.21** rather than built now, consistent with this document's "no premature abstraction" stance elsewhere.]**
 
@@ -1134,7 +1100,7 @@ Recurrence **cadence** is unaffected and remains calendar-correct: 3.2 expresses
 
 Per stakeholder confirmation (see 3.6, 9): every deployment of the POC requires password-based login; there is no anonymous/no-auth mode, even for a fully LAN-local single-user deployment. Recorded here, rather than only in Section 9, because it's a cross-cutting constraint on every screen and endpoint (a session/auth guard must wrap the entire app), not a feature confined to one section.
 
-**The guard's public routes, enumerated (added Revision 9).** "Wraps the entire app" cannot be literally true - some routes must serve before a session exists - and Revision 8 never listed the exceptions. An unlisted carve-out is how auth bypasses happen: not through a deliberate hole, but through a route somebody adds later without considering which side of the boundary it belongs on.
+**The guard's public routes, enumerated (added Revision 9).** "Wraps the entire app" cannot be literally true, since some routes must serve before a session exists. The exceptions are listed exhaustively below, because an unlisted carve-out is how auth bypasses happen: not through a deliberate hole, but through a route somebody adds later without considering which side of the boundary it belongs on.
 
 **Public:**
 

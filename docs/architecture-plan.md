@@ -11,37 +11,26 @@ This document defines **how it gets built** - stack, layering, API shape, job ex
 
 Whoever (human or LLM) implements against this repo should treat the design doc as the source of truth for behavior, and this document as the source of truth for structure and process.
 
-### 0.1 Revision 1 changes
+### 0.1 Revision history
 
-Two implementation-level gaps were surfaced during an implementation-readiness review of the design doc (companion edge-case list) and were addressed:
-- **Section 5** - a policy for how the frontend handles `409 Conflict` responses caused by the *background scheduler* writing to a row the user is concurrently editing, rather than surfacing a raw conflict error for what is, in a single-user app, never actually a two-human conflict.
-- **Section 4.2** - a startup job-reconciliation scan, guarding against the APScheduler job store and the SQLite `TaskInstance` table drifting out of sync after a crash or partial batch failure.
+| Rev | What changed |
+|---|---|
+| 1 | Section 5 - a policy for `409 Conflict` responses caused by the background scheduler writing to a row the user is concurrently editing. Section 4.2 - a startup job-reconciliation scan, guarding against the job store and the `TaskInstance` table drifting apart after a crash |
+| 2 | Sync with design doc Revision 7 (Section 3.10, Edit Scope & Propagation), which reversed the "edit always targets the template" assumption several decisions here were built on. Section 3 gained the edit-scope API shape; Section 4/4.1 split instance edits from template edits as job-rewiring triggers; **Section 5.1 was substantively rewritten**; Section 8 gained edit-scope/detach coverage |
+| 3 | Sync with design doc Revision 9 - see below |
 
-Both were implementation/process decisions (per Section 0's own framing, lower-stakes and more freely revisable than the design doc), so neither was marked `[UNCONFIRMED]` in the design-doc sense - but the 409-handling policy was flagged for a quick sign-off since it changed previously-stated behavior in Section 5.
+### 0.2 Revision 3 changes - sync with Design Doc Revision 9
 
-### 0.2 Revision 2 changes - sync with Design Doc Revision 7
+Design doc Revision 9 resolved sixteen findings from a second implementation-readiness review (IRR-2). Most are product-level and land there; eight had architectural consequences, and **two invalidated mechanisms this document specified**:
 
-The design doc's Revision 7 added Section 3.10 (Edit Scope & Propagation), reversing the "edit always targets the template" assumption several parts of this document were built on. This revision updates every place that assumption leaked into an architectural decision:
-- **Section 3** - Resource shape now specifies how edit-scope is submitted over the API.
-- **Section 4 / 4.1** - the job-wiring mutation list now distinguishes a "this occurrence" instance edit from a "this and future" template edit, and adds the latter's conditional-propagation case as its own job-rewiring trigger.
-- **Section 5.1 - substantively rewritten, not just re-cited.** The field-partition this section's 409-handling logic depends on was built on the now-superseded claim that instance-level user edits were narrow. They're not, as of design doc 3.10. This also surfaces a new question: template-propagation writes are a third writer to `TaskInstance`, not just "user" and "scheduler" - flagged below for sign-off, same as the original 5.1 change was.
-- **Section 8** - testing strategy now covers edit-scope/detach logic explicitly, and the Worked-Examples reference is corrected to A–M.
-- **Section 7.2** - same Worked-Examples correction.
-
-### 0.3 Revision 3 changes - sync with Design Doc Revision 9
-
-Design doc Revision 9 resolved sixteen findings from a second implementation-readiness review (IRR-2). Most are product-level and land there, but eight had architectural consequences, and two of those invalidated mechanisms this document specified:
-
-- **Section 5 - the concurrency token changes.** Optimistic locking was specified on `TaskInstance.updated_at`, a field the design doc's schema did not have. Design doc 3.3 now adds `created_at`, `updated_at` **and a monotonic `version`**, and `version` - not the timestamp - is the token. A timestamp cannot distinguish two writes inside one clock tick, which is precisely the background-job-versus-user-edit case Section 5.1 exists for.
-- **Section 5.1 - substantively rewritten for the second time, because the Revision 2 mechanism was not implementable.** It asked the service layer to diff "which fields changed between the `updated_at` the client last read and the current row". The server has no such snapshot; a version token records *that* a row changed, never *what* changed. Replaced with an **expected-values PATCH**, which moves the comparison to the client's side of the contract and delivers the same intent with no history storage. See 5.1 for the full contract and the four requirements it places on the frontend.
-- **Section 3** - `DELETE` gains a `scope` parameter mirroring the edit-scope contract (design doc 3.8); new setup and backlog endpoints; new error codes; the expected-values PATCH body.
-- **Section 4** - a new job type for `calendar`-anchored recurrence generation, and two new event hooks. The Revision 2 "recurring-instance generation fires off a `completed` transition" row was only ever true for what is now the `completion` anchor.
-- **Section 4.1 / 4.2** - the mutation list and the reconciliation pass both extend to cover the new job type and the new deletion scopes.
-- **Section 6** - session lifetime, rotation and revocation; the cookie's `Secure` flag becomes deployment-derived rather than hardcoded; the auth guard's public-route allowlist; OAuth `state`; framework-generated API docs disabled in production.
-- **Section 7.1** - new `SESSION_COOKIE_SECURE` variable; `RESET_ADMIN_PASSWORD`'s "Optional" label is now correct, because first-run account creation moved to a setup wizard.
-- **Section 8** - the worked-example suite split is re-derived for Examples A–P, and the note that A/B/C/E were not yet usable as fixtures is removed, since Revision 9 rewrote them.
-
-**Why the `Secure` cookie change matters more than it looks.** Revisions 1 and 2 specified a `secure` session cookie against a deployment target the design doc describes as LAN-local. Browsers refuse to store a `Secure` cookie set over plain `http://` from anything other than `localhost`, so on the primary target - the operator opening `http://192.168.1.x:8000` from a phone - login returned `200`, the browser silently discarded the cookie, and the next request `401`ed. No error, no log line, an infinite login loop, and it would have passed every test run on a developer's `localhost`. See Section 6.
+- **Section 5 - the concurrency token is now `version`, not `updated_at`.** The old token was a field the design doc's schema did not contain, and a timestamp cannot distinguish two writes inside one clock tick - precisely the background-job-versus-user-edit case 5.1 exists for.
+- **Section 5.1 - rewritten a second time, because the Revision 2 mechanism was not implementable.** It asked the service layer to diff against a snapshot of the row as the client last read it; the server keeps no such snapshot, and a version token records *that* a row changed, never *what* changed. Replaced with an **expected-values PATCH**, which moves the comparison to the client's side of the contract and delivers the same intent with no history storage. See 5.1 for the contract and the four requirements it places on the frontend.
+- **Section 3** - `DELETE` gains a `scope` parameter mirroring edit scope (design doc 3.8); new setup and backlog endpoints; new error codes.
+- **Section 4** - a new one-off job for `calendar`-anchored recurrence generation, plus two event hooks. Revision 2's single "generation fires off a `completed` transition" row was only ever true for what is now the `completion` anchor.
+- **Section 4.1 / 4.2** - the mutation list and the reconciliation pass extend to cover the new job type, the new deletion scopes, and **missed events** (occurrence boundaries that elapsed while the process was down).
+- **Section 6** - session lifetime, rotation and revocation; the cookie's `Secure` flag becomes deployment-derived; the auth guard's public-route allowlist; mandatory OAuth `state`; framework-generated API docs disabled in production.
+- **Section 7.1** - `SESSION_COOKIE_SECURE`; `RESET_ADMIN_PASSWORD`'s "Optional" label is now accurate, since first-run account creation moved to a setup wizard.
+- **Section 8** - worked-example suite split re-derived for Examples A–P; five new required test categories.
 
 ---
 
@@ -210,19 +199,20 @@ This is a single pass at boot, low cost, and directly closes the failure mode ab
 - **Optimistic locking** via a monotonic integer **`version`** column (design doc 3.2/3.3): every conditional update carries `WHERE id = ? AND version = ?`, and a zero-row result is the `409 Conflict` signal rather than a silent overwrite of a concurrent change. This is the mechanism for the scenario the design doc doesn't otherwise address - e.g. a background job and a live user edit touching the same `TaskInstance` at once.
 - Chosen over locking (blocking access) because operations should hold shared resources as briefly as possible; optimistic checks let concurrent reads proceed freely and only reject the losing write.
 
-**(Revised Rev 3) The token is `version`, not `updated_at`.** Revisions 1 and 2 specified locking on `updated_at`, which the design doc's `TaskInstance` schema did not actually contain - the whole of this section rested on a field that did not exist. Design doc Revision 9 adds `created_at`, `updated_at` and `version`, and makes `version` the token for a second reason beyond availability: SQLite's timestamp resolution cannot distinguish two writes inside one clock tick, and the background-job-plus-user-edit race that 5.1 exists to handle is precisely that sub-millisecond case. `updated_at` remains, for display and auditing, and must not be used for locking.
+**(Revised Rev 3) The token is `version`, not `updated_at`.** A timestamp is the wrong token here: SQLite's resolution cannot distinguish two writes inside one clock tick, and the background-job-plus-user-edit race 5.1 exists to handle is precisely that sub-millisecond case. `updated_at` remains, for display and auditing, and **must not be used for locking**.
 
 **Binding on the implementation:** `version` is incremented at the **ORM layer** - SQLAlchemy's `version_id_col` or an equivalent mapper-level hook - never by individual service methods. A single write path that forgets to bump it defeats the mechanism entirely, silently, and with no error to observe. That includes writes made by background jobs and by template propagation, which are the writers most likely to be added later by someone who has not read this section.
 
-### 5.1 Background-vs-user write conflicts (added Rev 1; substantively revised Rev 2)
+### 5.1 Background-vs-user write conflicts
 
-**The original gap:** the POC is single-user, so most optimistic-lock conflicts on a `TaskInstance` are a collision between the user's own live edit and a *background job* (scheduling pass, sync, overdue/deadline-elapsed scan) - not a second human. A blanket `409` on every such collision means routine background recomputation (which can touch many rows in one pass - see design doc Example G/H-style scenarios) can bounce the user's unrelated edit (e.g. changing a title) just because the row's version moved underneath them.
+**The gap:** the POC is single-user, so most optimistic-lock conflicts on a `TaskInstance` are a collision between the user's own live edit and a *background job* (scheduling pass, sync, overdue/deadline-elapsed scan) - not a second human. A blanket `409` on every such collision means routine background recomputation (which can touch many rows in one pass - see design doc Example G/H-style scenarios) can bounce the user's unrelated edit (e.g. changing a title) just because the row's version moved underneath them.
 
-**(Rev 2) Why the original fix no longer works as written:** the Rev 1 fix partitioned `TaskInstance` into a fixed "user-owned" field list (name, description, priority, dependencies) and a fixed "scheduler-owned" list (`scheduled_time`, `status`), on the premise - accurate at the time - that instance-level user edits were narrow. Design doc 3.10 broke that premise: `name`, `description`, `estimated_duration_minutes`, `priority`, `deadline`, and `scheduled_time` can now *all* be written directly by the user via a "this occurrence" edit. The same fields can *also* be written by template propagation (3.10) when a "this and future" edit lands on a non-`detached` instance. A fixed two-bucket list can no longer classify every field correctly, because several fields now sit in both buckets depending on which write path touched them.
+**Two approaches that do not work, recorded so they are not re-proposed:**
 
-**(Rev 3) Why the Revision 2 fix could not be built either.** It asked the service layer to diff "which fields actually changed between the `updated_at` the client last read and the current row". That comparison has no data to run against. A version token - timestamp or integer - records *that* a row changed, never *what* changed, and the server keeps no snapshot of how the row looked when the client read it. Implementing it as written would have required row history, which nothing in this plan provides. Revision 2 also placed the auto-retry ("re-fetch, reapply, resubmit") in the service layer while describing client behaviour, so nobody owned it.
+- **A fixed field partition** - "user-owned" (name, description, priority, dependencies) versus "scheduler-owned" (`scheduled_time`, `status`). Design doc 3.10 makes this unclassifiable: `name`, `description`, `estimated_duration_minutes`, `priority`, `deadline` and `scheduled_time` can *all* be written by the user via a "this occurrence" edit, **and** by template propagation when a "this and future" edit lands on a non-`detached` instance. Several fields sit in both buckets depending on which path touched them.
+- **A server-side diff** - "compare the row now against the row as the client last read it". The server keeps no such snapshot. A version token records *that* a row changed, never *what* changed, so this needs row history, which nothing in this plan provides. Any future proposal along these lines has the same problem.
 
-**The corrected fix (Rev 3): expected-values PATCH.** Move the comparison to the client's side of the contract. The browser already knows what it read, so it says so. For each field it is changing, it sends the value it originally read:
+**The mechanism: expected-values PATCH.** Move the comparison to the client's side of the contract. The browser already knows what it read, so it says so. For each field it is changing, it sends the value it originally read:
 
 ```
 PATCH /api/v1/task-instances/42
@@ -246,7 +236,7 @@ Fields nobody is writing are preserved, so a concurrent job's `status` change su
 3. **Structured fields need a defined comparison.** Compare `dependencies` and `reminder_offsets_minutes` as **sets**, so a reordering is not reported as a false conflict; deep-compare `active_hours_override`.
 4. **Field-level agreement is not semantic agreement.** A job writing `status: missed` and a user writing `scheduled_time` touch disjoint fields and can still produce an invalid combination. Ordinary service-layer validation runs *after* the merge and rejects those on business rules. The field check is a concurrency control, not a correctness guarantee, and must not be read as one.
 
-**Sign-off status:** the underlying intent - do not interrupt the user when the concurrent write did not touch what they are editing - is unchanged since Revision 1. Revision 3 changes only the mechanism, from an uncomputable server-side diff to a client-supplied expectation. The `expected` field is additive, so if this turns out to be more machinery than the POC needs, it degrades to a plain version check without an API break.
+**Sign-off status:** the intent - do not interrupt the user when the concurrent write did not touch what they are editing - has been stable since Revision 1; only the mechanism has changed. The `expected` field is additive, so if this proves to be more machinery than the POC needs, it degrades to a plain version check without an API break.
 
 ---
 
@@ -273,7 +263,7 @@ Set-Cookie: tessera_session=<id>; HttpOnly; SameSite=Lax; Path=/[; Secure]
 
 **`HttpOnly` and `SameSite=Lax` are set unconditionally.** Both function correctly over plain HTTP and cost nothing.
 
-**`Secure` is derived, never hardcoded.** Revisions 1 and 2 specified it unconditionally, against a deployment target the design doc describes as LAN-local. Browsers treat `localhost`, `127.0.0.1` and `[::1]` as potentially trustworthy and permit `Secure` cookies there over HTTP; a private IP such as `192.168.1.50` or an `.local` name is **not** trustworthy, so the cookie is silently discarded. The resulting failure is the worst kind: login returns `200`, the server logs a success, the SPA navigates to the dashboard, its first API call `401`s, and the user loops back to the login screen with nothing in any log - and it passes every test run on a developer's `localhost`.
+**`Secure` is derived, never hardcoded.** Setting it unconditionally breaks the LAN-local deployment the design doc names as primary. Browsers treat `localhost`, `127.0.0.1` and `[::1]` as potentially trustworthy and permit `Secure` cookies there over HTTP; a private IP such as `192.168.1.50` or an `.local` name is **not** trustworthy, so the cookie is silently discarded. The resulting failure is the worst kind: login returns `200`, the server logs a success, the SPA navigates to the dashboard, its first API call `401`s, and the user loops back to the login screen with nothing in any log - and it passes every test run on a developer's `localhost`.
 
 - **`SESSION_COOKIE_SECURE`**, values `auto` | `true` | `false`, default **`auto`**.
 - `auto` reads the scheme of `APP_BASE_URL`: `https://` resolves to `Secure`, `http://` does not.
