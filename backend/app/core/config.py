@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     app_base_url: str | None = None  # required only if SESSION_COOKIE_SECURE=auto, or calendar sync (Stage 7)
     reset_admin_password: str | None = None  # one-time recovery trigger, design doc §3.6
 
+    # --- Settings (Stage 4) ---
+    tz: str | None = None  # default timezone for the first-run UserSettings row, design doc §14.1
+
     def resolve_session_cookie_secure(self) -> bool:
         """Whether the session cookie should carry `Secure`. See architecture-plan §6.1.
 
