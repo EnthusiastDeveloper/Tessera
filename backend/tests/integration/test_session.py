@@ -14,16 +14,20 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.db.session import get_db, get_session_factory, sqlite_url
+from app.db.session import get_db, get_engine, get_jobs_engine, get_session_factory, sqlite_url
 
 
 @pytest.fixture(autouse=True)
 def _fresh_lru_caches() -> Iterator[None]:
-    """`get_settings`/`get_session_factory` are process-wide caches - reset around each test."""
+    """`get_settings`/`get_engine`/`get_jobs_engine`/`get_session_factory` are process-wide caches - reset around each test."""
     get_settings.cache_clear()
+    get_engine.cache_clear()
+    get_jobs_engine.cache_clear()
     get_session_factory.cache_clear()
     yield
     get_settings.cache_clear()
+    get_engine.cache_clear()
+    get_jobs_engine.cache_clear()
     get_session_factory.cache_clear()
 
 

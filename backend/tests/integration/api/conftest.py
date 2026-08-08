@@ -15,7 +15,8 @@ from fastapi.testclient import TestClient
 from app.auth.throttle import login_throttle
 from app.core.config import get_settings
 from app.db.base import Base
-from app.db.session import build_engine, get_session_factory, sqlite_url
+from app.db.session import build_engine, get_engine, get_jobs_engine, get_session_factory, sqlite_url
+from app.jobs.interface import NoOpJobScheduler, set_job_scheduler
 from app.main import app
 
 
@@ -27,6 +28,8 @@ def app_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Test
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "tessera.db"))
     monkeypatch.setenv("SECRET_KEY", "test-secret-key-not-for-production-use")
     get_settings.cache_clear()
+    get_engine.cache_clear()
+    get_jobs_engine.cache_clear()
     get_session_factory.cache_clear()
     login_throttle.clear_all()  # module-global state; nothing else resets it between tests
 
@@ -37,5 +40,13 @@ def app_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Test
     with TestClient(app) as client:
         yield client
 
+    set_job_scheduler(NoOpJobScheduler())  # undo the lifespan's real-adapter install for the next test
+    # Dispose before dropping the lru_cache reference - clearing the cache alone leaves
+    # the pooled connections open until GC gets to them, which is what actually produces
+    # the "unclosed database" ResourceWarning, not a real leak in the app itself.
+    get_engine().dispose()
+    get_jobs_engine().dispose()
     get_settings.cache_clear()
+    get_engine.cache_clear()
+    get_jobs_engine.cache_clear()
     get_session_factory.cache_clear()

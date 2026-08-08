@@ -15,7 +15,7 @@ from app.auth.setup_token import setup_token_store
 from app.auth.throttle import MAX_ATTEMPTS, login_throttle
 from app.core.config import get_settings
 from app.db.base import Base
-from app.db.session import build_engine, get_session_factory, sqlite_url
+from app.db.session import build_engine, get_engine, get_jobs_engine, get_session_factory, sqlite_url
 from app.main import app
 
 VALID_PASSWORD = "correcthorsebatterystaple"
@@ -31,6 +31,8 @@ def _booted_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, **extra_env:
     for key, value in extra_env.items():
         monkeypatch.setenv(key, value)
     get_settings.cache_clear()
+    get_engine.cache_clear()
+    get_jobs_engine.cache_clear()
     get_session_factory.cache_clear()
     login_throttle.clear_all()
 
@@ -40,7 +42,11 @@ def _booted_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, **extra_env:
 
     with TestClient(app) as client:
         yield client
+    get_engine().dispose()
+    get_jobs_engine().dispose()
     get_settings.cache_clear()
+    get_engine.cache_clear()
+    get_jobs_engine.cache_clear()
     get_session_factory.cache_clear()
 
 

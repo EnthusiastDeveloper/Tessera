@@ -144,7 +144,7 @@ class TestArchiveTemplate:
         result = create_template(db_session, jobs, _flexible_draft())
         db_session.commit()
 
-        archived = archive_template(db_session, result.template.id)
+        archived = archive_template(db_session, jobs, result.template.id)
         db_session.commit()
 
         assert archived.template.archived is True
