@@ -31,7 +31,14 @@ class NotificationORM(Base):
         ),
         nullable=False,
     )
-    related_instance_id: Mapped[str] = mapped_column(String, ForeignKey("task_instances.id"), nullable=False)
+    # CASCADE, not "unlink" (contrast task_instance_dependencies, §3.8's deliberate
+    # unlink-not-cascade for dependency edges): a Notification has no meaning once its
+    # instance is gone, unlike a dependency link, which the design doc explicitly wants
+    # preserved-as-removed rather than blocking the delete. Without this, deleting any
+    # instance with an unresolved notification (overdue, unschedulable, ...) hard-fails
+    # with a bare FK error - found via Stage 6's real job scheduler actually firing one
+    # mid-test, not by inspection.
+    related_instance_id: Mapped[str] = mapped_column(String, ForeignKey("task_instances.id", ondelete="CASCADE"), nullable=False)
     message: Mapped[str] = mapped_column(String, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utcnow)
