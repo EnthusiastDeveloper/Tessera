@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterator
+from contextlib import contextmanager
 from functools import lru_cache
 from typing import Any
 
@@ -58,10 +59,26 @@ def get_session_factory() -> sessionmaker[Session]:
     return sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
 
-def get_db() -> Iterator[Session]:
-    """FastAPI dependency: yield a request-scoped session, always closed afterward."""
+@contextmanager
+def session_scope() -> Iterator[Session]:
+    """A session that commits on clean exit, rolls back on exception, and always closes.
+
+    The one place this transaction-boundary logic lives - the FastAPI `get_db`
+    dependency below and one-off work outside a request (e.g. main.py's startup lifespan)
+    both go through this rather than each reimplementing commit/rollback/close.
+    """
     session = get_session_factory()()
     try:
         yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
     finally:
         session.close()
+
+
+def get_db() -> Iterator[Session]:
+    """FastAPI dependency: a request-scoped session with `session_scope()`'s semantics."""
+    with session_scope() as session:
+        yield session
