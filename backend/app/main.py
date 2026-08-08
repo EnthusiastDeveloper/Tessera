@@ -10,11 +10,13 @@ from fastapi import FastAPI
 from app.api.errors import register_error_handlers
 from app.api.middleware import AuthGuardMiddleware
 from app.api.v1.routes.auth import router as auth_router
+from app.api.v1.routes.settings import router as settings_router
 from app.auth.service import apply_reset_admin_password_if_needed
 from app.auth.setup_token import setup_token_store
 from app.core.config import get_settings
 from app.db.repositories import UserRepository
 from app.db.session import session_scope
+from app.settings.service import default_timezone_from_env, get_or_create_default
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +42,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             token = setup_token_store.issue()
             logger.warning("No account exists yet. Setup token (use it at POST /api/v1/auth/setup): %s", token)
 
+        default_timezone = default_timezone_from_env(settings.tz)
+        if settings.tz and default_timezone == "UTC" and settings.tz != "UTC":
+            logger.warning("TZ=%s is not a valid IANA timezone name - falling back to UTC.", settings.tz)
+        get_or_create_default(db, default_timezone=default_timezone)
+
     yield
     logger.info("Tessera shutting down")
 
@@ -57,6 +64,7 @@ app = FastAPI(
 register_error_handlers(app)
 app.add_middleware(AuthGuardMiddleware)
 app.include_router(auth_router)
+app.include_router(settings_router)
 
 
 @app.get("/health", tags=["health"])
