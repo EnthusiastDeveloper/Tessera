@@ -14,6 +14,7 @@ class RecordingJobScheduler(JobScheduler):
         self.scheduled: list[tuple[str, datetime]] = []
         self.cancelled: list[str] = []
         self.cancelled_instances: list[str] = []
+        self.intervals: list[tuple[str, int]] = []
 
     def schedule_at(self, *, job_key: str, run_at: datetime) -> None:
         self.scheduled.append((job_key, run_at))
@@ -23,6 +24,9 @@ class RecordingJobScheduler(JobScheduler):
 
     def cancel_all_for_instance(self, *, instance_id: str) -> None:
         self.cancelled_instances.append(instance_id)
+
+    def schedule_interval(self, *, job_key: str, minutes: int) -> None:
+        self.intervals.append((job_key, minutes))
 
     def scheduled_keys(self) -> set[str]:
         return {key for key, _ in self.scheduled}
