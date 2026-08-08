@@ -32,8 +32,15 @@ from app.db.schemas import (
     TaskTemplate,
     UserSettings,
 )
-from app.jobs.interface import JobScheduler, deadline_elapsed_job_key, overdue_job_key, reminder_job_key
-from app.scheduling.adapter import attempt_placement
+from app.jobs.interface import (
+    JobScheduler,
+    deadline_elapsed_job_key,
+    occurrence_boundary_job_key,
+    overdue_job_key,
+    reminder_job_key,
+)
+from app.scheduling.adapter import attempt_placement, has_fixed_conflict
+from app.scheduling.generation import generate_next_instance
 from app.scheduling_engine.deadlines import is_deadline_elapsed
 
 #: Notification types Stage 5 creates at the trigger points it owns (design doc §5) -
@@ -42,6 +49,9 @@ from app.scheduling_engine.deadlines import is_deadline_elapsed
 UNSCHEDULABLE = "unschedulable"
 BUDGET_EXCEEDED = "budget_exceeded"
 DEADLINE_MISSED = "deadline_missed"
+#: Stage 6 addition - see generate_and_place_next_instance's docstring for why an
+#: auto-generated fixed instance gets a Notification instead of a synchronous rejection.
+CREATION_CONFLICT = "creation_conflict"
 
 
 def place_or_defer(
@@ -96,6 +106,94 @@ def place_or_defer(
     if instance.deadline is not None:
         jobs.schedule_at(job_key=deadline_elapsed_job_key(instance.id), run_at=instance.deadline)
     return instance
+
+
+def generate_and_place_next_instance(
+    db: Session,
+    jobs: JobScheduler,
+    *,
+    template: TaskTemplate,
+    predecessor: TaskInstance | None,
+    settings: UserSettings,
+    now: datetime,
+) -> TaskInstance:
+    """§9.1 - generates the next occurrence from `template` (never from a possibly-detached
+    predecessor's overridden fields, see `app.scheduling.generation`'s module docstring),
+    persists it with no dependencies (§3.2's `TaskTemplate` carries no `dependencies` field
+    for generation to copy - a template has no standing memory of what its instances
+    depended on), and places it immediately if flexible.
+
+    Shared by both anchor mechanisms' triggers - the completion-anchor event hook
+    (`app.task_instances.service.complete`/`dismiss`) and the calendar-anchor
+    occurrence-boundary job (`app.jobs.handlers.run_occurrence_boundary`) - which are
+    independent siblings under the layering contract and both need this identical
+    sequence, hence its home here rather than in either one.
+
+    A newly generated **fixed** instance is never rejected on conflict the way a
+    user-initiated create is (Example A) - there is no request to reject, and silently
+    skipping the occurrence would break the series exactly as design doc §9.1 warns
+    against for a missed generation call. Instead it is persisted and flagged with a
+    `creation_conflict` Notification so the user notices and reschedules it manually.
+    """
+    generated = generate_next_instance(template, predecessor=predecessor, now=now, timezone=settings.timezone)
+    status: TaskInstanceStatus = "scheduled" if template.type == "fixed" else "pending"
+    instance = TaskInstanceRepository(db).create(
+        TaskInstance(
+            id=generate_id(),
+            template_id=template.id,
+            name=generated.name,
+            description=generated.description,
+            location=generated.location,
+            type=generated.type,
+            priority=generated.priority,
+            estimated_duration_minutes=generated.estimated_duration_minutes,
+            detached=False,
+            scheduled_time=generated.scheduled_time,
+            deadline=generated.deadline,
+            status=status,
+            status_history=(StatusHistoryEntry(status=status, at=now),),
+            dependencies=(),
+            generated_at=now,
+            created_at=now,
+            updated_at=now,
+            version=1,
+        )
+    )
+
+    if template.type == "fixed":
+        assert instance.scheduled_time is not None
+        end = instance.scheduled_time + timedelta(minutes=instance.estimated_duration_minutes)
+        if has_fixed_conflict(db, start=instance.scheduled_time, end=end, exclude_instance_id=instance.id):
+            _create_notification(
+                db,
+                type_=CREATION_CONFLICT,
+                instance_id=instance.id,
+                message=f'"{instance.name}" was generated at a time that collides with an existing fixed task or external event.',
+                now=now,
+            )
+        _schedule_reminder_and_overdue_jobs(jobs, instance, template)
+        return instance
+
+    return place_or_defer(db, jobs, instance=instance, template=template, settings=settings, now=now)
+
+
+def schedule_next_occurrence_boundary(
+    db: Session,
+    jobs: JobScheduler,
+    *,
+    template: TaskTemplate,
+    latest_instance: TaskInstance,
+    settings: UserSettings,
+    now: datetime,
+) -> None:
+    """Schedules the one-off job that will generate the occurrence *after* `latest_instance`
+    (architecture-plan §4's job breakdown: "calendar anchor - a one-off job at the next
+    occurrence's nominal time ... on firing it generates the instance and schedules the
+    next boundary job"). Only meaningful for a non-`one_time`, `calendar`-anchored
+    template - callers are expected to have already checked that.
+    """
+    upcoming = generate_next_instance(template, predecessor=latest_instance, now=now, timezone=settings.timezone)
+    jobs.schedule_at(job_key=occurrence_boundary_job_key(template.id), run_at=upcoming.nominal_date)
 
 
 def _transition_to_missed(db: Session, jobs: JobScheduler, *, instance: TaskInstance, now: datetime) -> TaskInstance:
@@ -166,4 +264,12 @@ def _status_entry(status: str, at: datetime) -> StatusHistoryEntry:
     return StatusHistoryEntry(status=_status(status), at=at)
 
 
-__all__ = ["BUDGET_EXCEEDED", "DEADLINE_MISSED", "UNSCHEDULABLE", "place_or_defer"]
+__all__ = [
+    "BUDGET_EXCEEDED",
+    "CREATION_CONFLICT",
+    "DEADLINE_MISSED",
+    "UNSCHEDULABLE",
+    "generate_and_place_next_instance",
+    "place_or_defer",
+    "schedule_next_occurrence_boundary",
+]
