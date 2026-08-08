@@ -82,8 +82,8 @@ A stage is **DONE** only when all of the following hold:
 |---|---|---|---|---|
 | 0 | Bootstrap & Tooling | **Done** (merged `28c2104`) | `stage-00-bootstrap` | Coverage gate not actually wired - see Stage 1 in-scope |
 | 1 | Scheduling Engine | **Done** (merged `61a1454`) | `stage-01-scheduling-engine` | All six gating findings (B3, B4, B8, B9, H1, M7) resolved per design doc Rev 9. Coverage gate wired (90% engine / 80% overall, both enforced in CI + `make backend-test`). Worked Examples B, C (placement half), E, G, H, I (+ grid variant), J, K, N (step-2) plus edge cases; `scheduling_engine/` at 100% branch coverage |
-| 2 | Data Access Layer | **Implementation complete, awaiting PR/merge** | `stage-02-data-layer` | ORM models + repositories for all seven §3 entities plus the `task_instance_dependencies` join table. `UTCDateTime` column type added to fix a real SQLite+SQLAlchemy gap (tzinfo silently dropped on read - not in either source doc, a Stage 2 implementation-level fix). `Enum` columns use `create_constraint=True` for real DB-level CHECK constraints (SQLAlchemy 2.0 defaults this off). Alembic wired end-to-end (`alembic.ini`, `env.py` incl. a `render_item` hook for the custom type, initial migration) - upgrade/downgrade/round-trip verified. 42 new tests (migrations, per-entity repository CRUD, DB-level constraint rejection, dependency unlink-not-cascade) |
-| 3 | Auth & Sessions | Not started | `stage-03-auth` | |
+| 2 | Data Access Layer | **Done** (merged `c2cb2c0`) | `stage-02-data-layer` | ORM models + repositories for all seven §3 entities plus the `task_instance_dependencies` join table. `UTCDateTime` column type added to fix a real SQLite+SQLAlchemy gap (tzinfo silently dropped on read - not in either source doc, a Stage 2 implementation-level fix). `Enum` columns use `create_constraint=True` for real DB-level CHECK constraints (SQLAlchemy 2.0 defaults this off). Alembic wired end-to-end (`alembic.ini`, `env.py` incl. a `render_item` hook for the custom type, initial migration) - upgrade/downgrade/round-trip verified. 42 new tests (migrations, per-entity repository CRUD, DB-level constraint rejection, dependency unlink-not-cascade) |
+| 3 | Auth & Sessions | **Implementation complete, awaiting PR/merge** | `stage-03-auth` | Built to design doc Rev 9 §3.6 + architecture-plan Rev 3 §6 (first-run setup wizard + setup token, IRR-2 B10/B10-token) - see the corrected "In scope" bullet below; the original placeholder-account recommendation this section carried was superseded before this stage started. `sessions` and `admin_password_reset_marker` tables added (new migration). Default-deny auth guard middleware, signed session cookie, argon2id, login throttle (N=5/15min, documented in `app/auth/throttle.py`). 63 new tests |
 | 4 | User Settings | Not started | `stage-04-settings` | |
 | 5 | Task Domain (Templates/Instances/Notifications) | Not started | `stage-05-task-domain` | Multi-component stage - see rationale in Stage 5 |
 | 6 | Jobs & Reconciliation | Not started | `stage-06-jobs` | |
@@ -211,30 +211,34 @@ A stage is **DONE** only when all of the following hold:
 ### Stage 3 - Auth & Session Management
 
 **Depends on:** Stage 2
-**Design doc refs:** §3.6 (User schema, password reset mechanism), §14.2 (auth mandatory, wraps entire app)
-**Architecture doc refs:** §6 (argon2id, session cookie, throttling, `RESET_ADMIN_PASSWORD`)
+**Design doc refs:** §3.6 (User schema, first-run setup wizard, password reset mechanism), §14.2 (auth mandatory, wraps entire app, public-route allowlist)
+**Architecture doc refs:** §6 (argon2id, session cookie, setup token, throttling, `RESET_ADMIN_PASSWORD`), §6.1-§6.3 (cookie attributes, session lifetime, auth guard)
 **Branch:** `stage-03-auth`
 
 **In scope**
-- `POST /api/v1/auth/login`, `POST /api/v1/auth/logout`; session-cookie issuance (`httpOnly`, `secure`), server-side session table.
+
+**Correction (superseding this section's original text):** this bullet list originally described a "single-user bootstrap" as a new decision this plan would have to invent, recommending a locked placeholder admin account unlockable via `RESET_ADMIN_PASSWORD`. That was written before IRR-2 finding B10/B10-token was decided and drafted into design doc §3.6 and architecture-plan §6 (Revision 9/Rev 3) - both source documents now specify a concrete mechanism (first-run setup wizard + setup token) that supersedes the placeholder-account idea entirely. Per this document's own authority rule (§0), the source docs win; built to that spec, not the stale recommendation below.
+
+- `POST /api/v1/auth/setup` (§3.6, added Rev 9) - public only while zero `User` rows exist, `410 Gone` afterwards. Requires a setup token (`secrets.token_urlsafe(32)`, generated at startup while unconfigured, logged at `WARNING`, constant-time compared, held in memory only, invalidated on success). Username fixed as `admin`, 12-character minimum password.
+- `POST /api/v1/auth/login`, `POST /api/v1/auth/logout`, `GET /api/v1/auth/me`; session-cookie issuance (`HttpOnly`, `SameSite=Lax`, `Secure` derived from `APP_BASE_URL` via `SESSION_COOKIE_SECURE=auto|true|false`), signed with `SECRET_KEY` (HMAC-SHA256, stdlib `hmac` - no new dependency), server-side session table (new `sessions` table, not one of design doc §3's seven entities).
 - `argon2id` hashing/verification via `argon2-cffi`.
-- Login rate limiting/throttling.
-- `RESET_ADMIN_PASSWORD` mechanism exactly per §3.6: one-time consumption, local marker written, warning logged (not re-applied) if the same value persists across restarts; a changed value is honored as a new reset.
-- Auth guard/dependency, applied to every route from here on (even though most routes don't exist yet).
-- Single-user bootstrap: **new decision this plan makes, not in either source doc - flagged as such.** Recommendation: on first run with no `User` row, create a locked placeholder admin account, unlockable only via `RESET_ADMIN_PASSWORD`. Confirm this doesn't conflict with §3.6's intent before building it; if in doubt, raise it as a real open question rather than assuming.
+- Login rate limiting/throttling - **documented choice:** 5 failed attempts within 15 minutes locks out further attempts from that `client_ip:username` key; a success resets it immediately (`app/auth/throttle.py`).
+- `RESET_ADMIN_PASSWORD` mechanism exactly per §3.6: one-time consumption via a DB marker row (new `admin_password_reset_marker` table, not a file), warning logged (not re-applied) if the same value persists across restarts; a changed value is honored as a new reset; all sessions for the user revoked on any reset.
+- Auth guard: default-deny middleware with an explicit public allowlist (`/health`, `POST /auth/setup`, `POST /auth/login`) per architecture-plan §6.3 - not per-endpoint dependencies.
 
-**Out of scope:** 2FA, SSO, multi-user (Backlog 12.17); OAuth calendar auth (different credential type, Stage 7).
+**Out of scope:** 2FA, SSO, multi-user (Backlog 12.17); OAuth calendar auth (different credential type, Stage 7); disabling `/docs`/`/redoc`/`/openapi.json` by environment (architecture-plan §6 lists this, but implementation-plan never scheduled it for this stage - deferred to Stage 11. The auth guard already blocks unauthenticated access to them in every environment, which is the harm the environment toggle exists to prevent; the toggle itself is defense-in-depth on top of that).
 
-**Key modules/files:** `app/auth/`.
+**Key modules/files:** `app/auth/` (passwords, setup token, throttle, cookie signing, service orchestration - framework-agnostic, imports no FastAPI), `app/api/middleware.py` (guard), `app/api/errors.py` (error envelope), `app/api/v1/routes/auth.py`, `app/db/models/session.py` + `admin_password_reset_marker.py`.
 
 **Tests required**
-- Integration: correct cookie flags on success; wrong password rejected; throttling triggers after N attempts (define and document N) and resets appropriately; logout invalidates the session.
+- Integration: correct cookie flags on success; wrong password rejected; throttling triggers after N attempts and resets appropriately; logout invalidates the session.
 - `RESET_ADMIN_PASSWORD`: two consecutive simulated "restarts" with the same value - second must NOT reset, must warn-log; a changed value on a third restart DOES reset.
-- Auth guard: unauthenticated request to a protected placeholder route → 401; authenticated → passes.
+- Auth guard: unauthenticated request to a protected route → 401; authenticated → passes. Enumerates every registered route (including ones added via `include_router`, which a naive `app.routes` walk silently misses on this FastAPI version - see the comment on `_iter_api_routes` in `test_auth_routes.py`) and asserts each is allowlisted or guarded.
+- Setup-token tests: missing/wrong/already-consumed token all rejected; token absent from the success response body; a restart issues a different token.
 
 **Exit criteria**
-- [ ] All tests green.
-- [ ] Cookie attributes manually confirmed once in real browser dev tools (automated later via Playwright, Stage 9).
+- [x] All tests green.
+- [ ] Cookie attributes manually confirmed once in real browser dev tools (automated later via Playwright, Stage 9) - **not done by this stage's implementation; needs a human with a browser**, tracked here rather than silently skipped.
 
 ---
 

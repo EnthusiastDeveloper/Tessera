@@ -10,4 +10,4 @@ def test_health_check() -> None:
     client = TestClient(app)
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "healthy"}
+    assert response.json() == {"status": "ok"}  # design doc §14.2: minimal, unfingerprintable payload

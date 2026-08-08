@@ -7,13 +7,39 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.api.errors import register_error_handlers
+from app.api.middleware import AuthGuardMiddleware
+from app.api.v1.routes.auth import router as auth_router
+from app.auth.service import apply_reset_admin_password_if_needed
+from app.auth.setup_token import setup_token_store
+from app.core.config import get_settings
+from app.db.repositories import UserRepository
+from app.db.session import session_scope
+
 logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Manage application lifespan."""
+    """Manage application lifespan - see design doc §3.6 (setup token), §6.1 (cookie Secure logging)."""
     logger.info("Tessera starting up")
+
+    settings = get_settings()
+    secure = settings.resolve_session_cookie_secure()
+    logger.info("Session cookie Secure=%s (SESSION_COOKIE_SECURE=%s)", secure, settings.session_cookie_secure)
+    if not secure:
+        logger.warning(
+            "Session cookie is NOT marked Secure - the session cookie and login password "
+            "cross the network in cleartext. Put a TLS-terminating reverse proxy (or "
+            "WireGuard/Tailscale) in front of Tessera if it's reachable beyond localhost."
+        )
+
+    with session_scope() as db:
+        apply_reset_admin_password_if_needed(db, reset_value=settings.reset_admin_password)
+        if UserRepository(db).count() == 0:
+            token = setup_token_store.issue()
+            logger.warning("No account exists yet. Setup token (use it at POST /api/v1/auth/setup): %s", token)
+
     yield
     logger.info("Tessera shutting down")
 
@@ -28,11 +54,17 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+register_error_handlers(app)
+app.add_middleware(AuthGuardMiddleware)
+app.include_router(auth_router)
+
 
 @app.get("/health", tags=["health"])
 async def health_check() -> dict[str, str]:
-    """Health check endpoint for container orchestration."""
-    return {"status": "healthy"}
+    """Health check endpoint for container orchestration. Public (§14.2) - minimal payload
+    only, nothing an unauthenticated caller can fingerprint.
+    """
+    return {"status": "ok"}
 
 
 # Placeholder: in Stage 9, serve the frontend build here

@@ -38,6 +38,8 @@ COPY --from=backend-builder /usr/local/bin /usr/local/bin
 COPY backend/app ./app
 COPY backend/alembic ./alembic
 COPY backend/alembic.ini ./
+COPY docker/entrypoint.sh ./entrypoint.sh
+RUN chmod +x ./entrypoint.sh
 
 # Copy frontend build
 COPY --from=frontend-builder /build/dist ./static
@@ -51,5 +53,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 
 USER nobody
 
-# Run the application
-CMD ["python", "-m", "app.main"]
+# Apply migrations, then run the application - see entrypoint.sh
+ENTRYPOINT ["./entrypoint.sh"]
