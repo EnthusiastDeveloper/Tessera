@@ -57,6 +57,7 @@ type = "layers"
 layers = [
     "app.api",
     "app.task_templates | app.task_instances | app.notifications | app.calendar_sync | app.auth | app.settings",
+    "app.scheduling",
     "app.db",
 ]
 
@@ -74,6 +75,7 @@ forbidden_modules = [
     "app.db",
     "app.jobs",
     "app.notifications",
+    "app.scheduling",
     "app.settings",
     "app.task_instances",
     "app.task_templates",

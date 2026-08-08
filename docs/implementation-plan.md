@@ -84,8 +84,8 @@ A stage is **DONE** only when all of the following hold:
 | 1 | Scheduling Engine | **Done** (merged `61a1454`) | `stage-01-scheduling-engine` | All six gating findings (B3, B4, B8, B9, H1, M7) resolved per design doc Rev 9. Coverage gate wired (90% engine / 80% overall, both enforced in CI + `make backend-test`). Worked Examples B, C (placement half), E, G, H, I (+ grid variant), J, K, N (step-2) plus edge cases; `scheduling_engine/` at 100% branch coverage |
 | 2 | Data Access Layer | **Done** (merged `c2cb2c0`) | `stage-02-data-layer` | ORM models + repositories for all seven §3 entities plus the `task_instance_dependencies` join table. `UTCDateTime` column type added to fix a real SQLite+SQLAlchemy gap (tzinfo silently dropped on read - not in either source doc, a Stage 2 implementation-level fix). `Enum` columns use `create_constraint=True` for real DB-level CHECK constraints (SQLAlchemy 2.0 defaults this off). Alembic wired end-to-end (`alembic.ini`, `env.py` incl. a `render_item` hook for the custom type, initial migration) - upgrade/downgrade/round-trip verified. 42 new tests (migrations, per-entity repository CRUD, DB-level constraint rejection, dependency unlink-not-cascade) |
 | 3 | Auth & Sessions | **Done** (merged `26bd55a`) | `stage-03-auth` | Built to design doc Rev 9 §3.6 + architecture-plan Rev 3 §6 (first-run setup wizard + setup token, IRR-2 B10/B10-token) - see the corrected "In scope" bullet below; the original placeholder-account recommendation this section carried was superseded before this stage started. `sessions` and `admin_password_reset_marker` tables added (new migration). Default-deny auth guard middleware, signed session cookie, argon2id, login throttle (N=5/15min, documented in `app/auth/throttle.py`). 63 new tests. Also fixed the container image: nothing ran migrations before app startup once the lifespan started querying the DB - added `docker/entrypoint.sh` |
-| 4 | User Settings | **Implementation complete, awaiting PR/merge** | `stage-04-settings` | `GET`/`PATCH /api/v1/settings`, singleton row auto-created at startup (timezone from `TZ`, falling back to UTC if unset/invalid). `active_hours`'s first-run default (09:00-17:00 every day) is confirmed with the user, not sourced from either doc - see the note below. Validation: real IANA timezone (`zoneinfo`), exact 7-day-key shape on `active_hours`/`daily_time_budget_minutes`, enums via Pydantic `Literal`. Regression guard test proves `first_day_of_week` has zero effect on `find_first_free_slot`'s output, per §3.7. 25 new tests |
-| 5 | Task Domain (Templates/Instances/Notifications) | Not started | `stage-05-task-domain` | Multi-component stage - see rationale in Stage 5 |
+| 4 | User Settings | **Done** (merged `33766ad`) | `stage-04-settings` | `GET`/`PATCH /api/v1/settings`, singleton row auto-created at startup (timezone from `TZ`, falling back to UTC if unset/invalid). `active_hours`'s first-run default (09:00-17:00 every day) is confirmed with the user, not sourced from either doc - see the note below. Validation: real IANA timezone (`zoneinfo`), exact 7-day-key shape on `active_hours`/`daily_time_budget_minutes`, enums via Pydantic `Literal`. Regression guard test proves `first_day_of_week` has zero effect on `find_first_free_slot`'s output, per §3.7. 25 new tests |
+| 5 | Task Domain (Templates/Instances/Notifications) | **Implementation complete, awaiting PR/merge** | `stage-05-task-domain` | `TaskTemplate`/`TaskInstance`/`Notification` service layers + routes, §3.10 edit-scope/detach, §6.7 inline missed-gate, §9.1 recurring generation, job-wiring stubs. New shared `app.scheduling` layering tier (import-linter) so the two independent sibling services can share DB-aware placement logic without importing each other. **Deferred, documented, not silently missing:** the `dismiss` ("skip this occurrence") endpoint, `DELETE ...?scope=` (only unscoped delete exists), and this-and-future propagation of `fixed_time_of_day`/`deadline_offset_minutes` (needs real conflict/re-placement handling) - all pushed to Stage 6/8, see the Stage 5 section below. 65 new tests |
 | 6 | Jobs & Reconciliation | Not started | `stage-06-jobs` | |
 | 7 | Calendar Sync | Not started | `stage-07-calendar-sync` | |
 | 8 | API Hardening & Backend E2E | Not started | `stage-08-api-hardening` | |
@@ -290,9 +290,17 @@ A stage is **DONE** only when all of the following hold:
 - Recurring-generation function (§9.1) - pure-ish function producing the next instance's fields from the template, including §14.1 wall-clock re-projection. The completion-triggered *call* to it is Stage 6.
 - Job side-effect calls as **no-op stubs** behind the `schedule_at()`/`cancel()` interface - correct call sites now, Stage 6 swaps the stub for the real adapter without touching these sites. This directly targets architecture doc §4.1's warning that this wiring is "the one path most likely to be half-implemented by accident."
 
+**Architecture decision made during this stage:** `task_templates`/`task_instances` are independent siblings by import-linter's layering contract and must not import each other, but both need identical DB-aware placement/generation logic (`app.scheduling.adapter`, `app.scheduling.orchestration`). Rather than duplicate it or weaken the contract, added a new shared tier - `app.scheduling` - between the sibling group and `app.db`, mirroring `app.db`'s existing role as a shared foundation. Also added to the "Scheduling engine stays pure" contract's forbidden-imports list, since it is DB-aware and must never be importable from `scheduling_engine/`.
+
+**Explicitly deferred to a later stage (not silently missing):**
+- `POST /task-instances/{id}/dismiss` ("skip this occurrence", §3.8) - not built this stage. A completion-anchored template's dismiss-must-generate-successor rule (§3.9) depends on the completion-triggered generation call, which architecture doc §9.1 assigns to Stage 6.
+- `DELETE /task-instances/{id}?scope=this_occurrence|this_and_future` - only unscoped delete exists (§3.8's simple case). The `this_and_future` deletion scope needs template-level state Stage 5 doesn't otherwise touch; revisit alongside Stage 6's generation wiring.
+- This-and-future propagation (`edit_template_this_and_future`) updates the live instance's `name`/`description`/`location`/`priority`/`estimated_duration_minutes` only. `fixed_time_of_day` re-projection and `deadline_offset_minutes` deadline recomputation are **not** propagated - neither is exercised by a Stage 5 required test, and both need real conflict/re-placement handling to do properly rather than half-implement silently.
+- `creation_conflict` is a synchronous rejection at creation/reschedule time only (Example A) - it is never persisted as a `Notification` row, matching the design doc's "no TaskTemplate and no TaskInstance are created" outcome.
+
 **Out of scope:** anything touching real APScheduler, any periodic/background trigger, calendar sync.
 
-**Key modules/files:** `app/task_templates/`, `app/task_instances/`, `app/notifications/`.
+**Key modules/files:** `app/task_templates/`, `app/task_instances/`, `app/notifications/`, `app/scheduling/` (new shared tier, see architecture decision above).
 
 **Tests required**
 - Unit: edit-scope/detach resolution encoding **Worked Examples L and M** exactly.
@@ -304,9 +312,9 @@ A stage is **DONE** only when all of the following hold:
 - Job-wiring **stub** tests: correct stub calls for every mutation path (create/this-occurrence-edit/reschedule/delete/complete/extend-deadline/this-and-future-propagation).
 
 **Exit criteria**
-- [ ] All tests green, including Examples D, F(partial), K, L, M.
-- [ ] Every §5 notification type has a passing *creation*-trigger test; deferred resolution triggers explicitly listed, not silently missing.
-- [ ] Coverage ≥ 80%.
+- [x] All tests green, including Examples D, F(partial), K, L, M.
+- [x] Every §5 notification type has a passing *creation*-trigger test; deferred resolution triggers explicitly listed, not silently missing (see `tests/integration/notifications/test_service.py`'s ownership table).
+- [x] Coverage ≥ 80% (95.54% overall this stage; `mypy app`, `ruff`, both import-linter contracts, all clean).
 
 ---
 

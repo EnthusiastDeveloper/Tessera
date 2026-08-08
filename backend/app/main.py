@@ -10,7 +10,10 @@ from fastapi import FastAPI
 from app.api.errors import register_error_handlers
 from app.api.middleware import AuthGuardMiddleware
 from app.api.v1.routes.auth import router as auth_router
+from app.api.v1.routes.notifications import router as notifications_router
 from app.api.v1.routes.settings import router as settings_router
+from app.api.v1.routes.task_instances import router as task_instances_router
+from app.api.v1.routes.task_templates import router as task_templates_router
 from app.auth.service import apply_reset_admin_password_if_needed
 from app.auth.setup_token import setup_token_store
 from app.core.config import get_settings
@@ -65,6 +68,9 @@ register_error_handlers(app)
 app.add_middleware(AuthGuardMiddleware)
 app.include_router(auth_router)
 app.include_router(settings_router)
+app.include_router(task_templates_router)
+app.include_router(task_instances_router)
+app.include_router(notifications_router)
 
 
 @app.get("/health", tags=["health"])
