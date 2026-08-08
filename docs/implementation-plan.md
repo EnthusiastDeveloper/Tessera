@@ -81,8 +81,8 @@ A stage is **DONE** only when all of the following hold:
 | Stage | Title | Status | Branch | Notes |
 |---|---|---|---|---|
 | 0 | Bootstrap & Tooling | **Done** (merged `28c2104`) | `stage-00-bootstrap` | Coverage gate not actually wired - see Stage 1 in-scope |
-| 1 | Scheduling Engine | **Implementation complete, awaiting PR/merge** | `stage-01-scheduling-engine` | All six gating findings (B3, B4, B8, B9, H1, M7) resolved per design doc Rev 9. Coverage gate wired (90% engine / 80% overall, both enforced in CI + `make backend-test`). 83 tests green: Worked Examples B, C (placement half), E, G, H, I (+ grid variant), J, K, N (step-2) plus edge cases; `scheduling_engine/` at 100% branch coverage |
-| 2 | Data Access Layer | Not started | `stage-02-data-layer` | |
+| 1 | Scheduling Engine | **Done** (merged `61a1454`) | `stage-01-scheduling-engine` | All six gating findings (B3, B4, B8, B9, H1, M7) resolved per design doc Rev 9. Coverage gate wired (90% engine / 80% overall, both enforced in CI + `make backend-test`). Worked Examples B, C (placement half), E, G, H, I (+ grid variant), J, K, N (step-2) plus edge cases; `scheduling_engine/` at 100% branch coverage |
+| 2 | Data Access Layer | **Implementation complete, awaiting PR/merge** | `stage-02-data-layer` | ORM models + repositories for all seven §3 entities plus the `task_instance_dependencies` join table. `UTCDateTime` column type added to fix a real SQLite+SQLAlchemy gap (tzinfo silently dropped on read - not in either source doc, a Stage 2 implementation-level fix). `Enum` columns use `create_constraint=True` for real DB-level CHECK constraints (SQLAlchemy 2.0 defaults this off). Alembic wired end-to-end (`alembic.ini`, `env.py` incl. a `render_item` hook for the custom type, initial migration) - upgrade/downgrade/round-trip verified. 42 new tests (migrations, per-entity repository CRUD, DB-level constraint rejection, dependency unlink-not-cascade) |
 | 3 | Auth & Sessions | Not started | `stage-03-auth` | |
 | 4 | User Settings | Not started | `stage-04-settings` | |
 | 5 | Task Domain (Templates/Instances/Notifications) | Not started | `stage-05-task-domain` | Multi-component stage - see rationale in Stage 5 |
@@ -193,7 +193,7 @@ A stage is **DONE** only when all of the following hold:
 
 **Out of scope:** business-rule enforcement beyond what the schema itself expresses (cycle detection is Stage 1 + Stage 5's wiring, not a DB constraint).
 
-**Key modules/files:** `models.py`/`repository.py` inside each feature module (per Stage 0's layering decision); `alembic/versions/`.
+**Key modules/files:** `app/db/models/` (ORM), `app/db/schemas.py` (Pydantic domain objects - what repositories actually return/accept), `app/db/repositories/`, `app/db/base.py`/`session.py`, `alembic/versions/`. **Resolves Stage 0's "decide and document now, once" note**: Stage 0's own prose described `models.py`/`repository.py` living inside each feature module, but the `.importlinter` config it actually shipped with (`pyproject.toml`) already encodes a three-layer contract with `app.db` as its own bottom layer, separate from `app.task_templates`/`app.task_instances`/etc. The binding CI contract wins per this document's own authority rule (§0) - data access is consolidated under `app.db`, not scattered per feature module.
 
 **Tests required**
 - Migration test: fresh DB → `upgrade head` succeeds; `downgrade base` succeeds; round-trip.
@@ -202,9 +202,9 @@ A stage is **DONE** only when all of the following hold:
 - import-linter `layers` contract extended and passing now that data layer has real code.
 
 **Exit criteria**
-- [ ] Every entity migratable and round-trippable.
-- [ ] Repository suite green.
-- [ ] Layers contract passes.
+- [x] Every entity migratable and round-trippable.
+- [x] Repository suite green.
+- [x] Layers contract passes.
 
 ---
 
