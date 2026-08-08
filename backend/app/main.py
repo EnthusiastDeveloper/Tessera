@@ -18,7 +18,10 @@ from app.auth.service import apply_reset_admin_password_if_needed
 from app.auth.setup_token import setup_token_store
 from app.core.config import get_settings
 from app.db.repositories import UserRepository
-from app.db.session import session_scope
+from app.db.session import get_jobs_engine, session_scope
+from app.jobs.interface import DEADLINE_ELAPSED_SWEEP_INTERVAL_MINUTES, DEADLINE_ELAPSED_SWEEP_JOB_KEY, set_job_scheduler
+from app.jobs.reconciliation import reconcile_on_startup
+from app.jobs.scheduler import APSchedulerJobScheduler
 from app.settings.service import default_timezone_from_env, get_or_create_default
 
 logger = logging.getLogger(__name__)
@@ -50,8 +53,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.warning("TZ=%s is not a valid IANA timezone name - falling back to UTC.", settings.tz)
         get_or_create_default(db, default_timezone=default_timezone)
 
+    # Stage 6: the real job scheduler, persisted in its own SQLite file - deliberately not
+    # the app's own (architecture-plan §4's persistence requirement; see
+    # app.db.session.jobs_database_path for why a shared file doesn't work here). Installed
+    # as the process-wide singleton before reconciliation runs and before the app starts
+    # serving traffic, so no mutation can race ahead of it.
+    job_scheduler = APSchedulerJobScheduler(get_jobs_engine())
+    set_job_scheduler(job_scheduler)
+    job_scheduler.start()
+
+    with session_scope() as db:
+        reconcile_on_startup(db, job_scheduler)
+    job_scheduler.schedule_interval(job_key=DEADLINE_ELAPSED_SWEEP_JOB_KEY, minutes=DEADLINE_ELAPSED_SWEEP_INTERVAL_MINUTES)
+
     yield
     logger.info("Tessera shutting down")
+    job_scheduler.shutdown(wait=False)
 
 
 app = FastAPI(
