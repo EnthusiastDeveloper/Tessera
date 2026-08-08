@@ -123,13 +123,15 @@ def patch_template_endpoint(
 
 
 @router.delete("/{template_id}")
-def archive_template_endpoint(template_id: str, db: Session = Depends(get_db)) -> ArchiveResponse:
+def archive_template_endpoint(
+    template_id: str, db: Session = Depends(get_db), jobs: JobScheduler = Depends(get_job_scheduler)
+) -> ArchiveResponse:
     """§3.8: soft-delete. Returns the incomplete instances left behind so the frontend's
     confirmation dialog (§3.8's "must show a confirmation dialog explaining the
     implications") can list them.
     """
     try:
-        result = service.archive_template(db, template_id)
+        result = service.archive_template(db, jobs, template_id)
     except service.TemplateValidationError as exc:
         raise AppError(_VALIDATION_ERROR_STATUS[exc.code], exc.code, str(exc)) from exc
     return ArchiveResponse(template=result.template, incomplete_instance_ids=result.incomplete_instance_ids)

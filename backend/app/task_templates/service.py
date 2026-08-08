@@ -25,12 +25,24 @@ from app.db.schemas import (
     TaskType,
     UserSettings,
 )
-from app.jobs.interface import JobScheduler, overdue_job_key, reminder_job_key
+from app.jobs.interface import (
+    JobScheduler,
+    dependency_at_risk_job_key,
+    occurrence_boundary_job_key,
+    overdue_job_key,
+    reminder_job_key,
+)
 from app.scheduling.adapter import build_active_hours_map, has_fixed_conflict
 from app.scheduling.generation import GeneratedInstanceFields, generate_next_instance
-from app.scheduling.orchestration import place_or_defer
+from app.scheduling.orchestration import place_or_defer, schedule_next_occurrence_boundary
 from app.scheduling_engine.dependencies import cycle_check
 from app.scheduling_engine.feasibility import validate_feasible_duration
+
+#: §6.3's flat POC threshold. Duplicated from `app.jobs.handlers`' identical constant
+#: rather than imported - a trivial 1-line constant, same "small duplication across
+#: layers beats improper coupling" precedent as the priority-mapping constant in
+#: `app.db.repositories.task_template_repository` and `app.scheduling.generation`.
+_DEPENDENCY_AT_RISK_THRESHOLD = timedelta(days=3)
 
 
 class TemplateValidationError(Exception):
@@ -116,18 +128,26 @@ def create_template(db: Session, jobs: JobScheduler, draft: TaskTemplateDraft) -
         instance = _create_fixed_instance(
             db, jobs, template=template, generated=generated, blocked=blocked, dependencies=draft.dependencies, now=now
         )
-        return CreatedTemplate(template=template, instance=instance)
+    else:
+        instance = _create_flexible_instance(
+            db,
+            jobs,
+            template=template,
+            generated=generated,
+            blocked=blocked,
+            dependencies=draft.dependencies,
+            settings=settings,
+            now=now,
+        )
 
-    instance = _create_flexible_instance(
-        db,
-        jobs,
-        template=template,
-        generated=generated,
-        blocked=blocked,
-        dependencies=draft.dependencies,
-        settings=settings,
-        now=now,
-    )
+    if blocked and instance.deadline is not None:
+        jobs.schedule_at(
+            job_key=dependency_at_risk_job_key(instance.id), run_at=instance.deadline - _DEPENDENCY_AT_RISK_THRESHOLD
+        )
+
+    if template.recurrence.pattern != "one_time" and template.recurrence.anchor == "calendar":
+        schedule_next_occurrence_boundary(db, jobs, template=template, latest_instance=instance, settings=settings, now=now)
+
     return CreatedTemplate(template=template, instance=instance)
 
 
@@ -241,10 +261,16 @@ class ArchiveResult:
     incomplete_instance_ids: tuple[str, ...]
 
 
-def archive_template(db: Session, template_id: str) -> ArchiveResult:
+def archive_template(db: Session, jobs: JobScheduler, template_id: str) -> ArchiveResult:
     """§3.8: soft-delete - `archived=true`, keeping the row so historical instances'
     `template_id` references stay valid. Returns the ids of any non-terminal instances
     left behind, for the frontend's confirmation dialog to list.
+
+    Cancels the calendar-anchor occurrence-boundary job if one exists (architecture-plan
+    §4.1 Rev 3: forgetting that cancellation "leaves a job that will resurrect a series
+    the user just ended"). `app.jobs.handlers.run_occurrence_boundary` also no-ops
+    defensively on an archived template - this is the direct cancellation, that is the
+    fallback for the gap before the next startup reconciliation pass (§4.2 item 3).
     """
     repo = TaskTemplateRepository(db)
     template = repo.get(template_id)
@@ -257,6 +283,8 @@ def archive_template(db: Session, template_id: str) -> ArchiveResult:
         if instance.status not in _TERMINAL_STATUSES
     )
     archived = repo.archive(template_id)
+    if template.recurrence.pattern != "one_time" and template.recurrence.anchor == "calendar":
+        jobs.cancel(job_key=occurrence_boundary_job_key(template_id))
     return ArchiveResult(template=archived, incomplete_instance_ids=incomplete)
 
 
