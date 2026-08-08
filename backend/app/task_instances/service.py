@@ -22,7 +22,7 @@ from app.db.repositories import (
 from app.db.schemas import StatusHistoryEntry, TaskInstance, TaskTemplate, UserSettings
 from app.jobs.interface import JobScheduler, overdue_job_key, reminder_job_key
 from app.scheduling.adapter import build_active_hours_map, has_fixed_conflict
-from app.scheduling.orchestration import DEADLINE_MISSED, place_or_defer
+from app.scheduling.orchestration import DEADLINE_MISSED, generate_and_place_next_instance, place_or_defer
 from app.scheduling_engine.feasibility import validate_feasible_duration
 
 _TERMINAL_STATUSES = frozenset({"completed", "dismissed"})
@@ -105,11 +105,10 @@ def reschedule(db: Session, jobs: JobScheduler, instance_id: str, *, new_schedul
 
 def complete(db: Session, jobs: JobScheduler, instance_id: str) -> TaskInstance:
     """§3.3/§4: reachable directly from `pending`, `blocked`, or `scheduled` - not only
-    via `in_progress`. Unblocks dependents in the same transaction (§6.9).
-
-    Deliberately does not call the recurring-generation function even for a
-    completion-anchored template - "the completion-triggered call to it is Stage 6"
-    (implementation-plan Stage 5 "Out of scope").
+    via `in_progress`. Unblocks dependents (§6.9) and, for a `completion`-anchored
+    template, generates the successor - both in the same transaction as the completion
+    that triggered them (architecture-plan §4.1 Rev 3: "Completion is now two side
+    effects, not one").
     """
     instance = _require_instance(db, instance_id)
     if instance.status in _TERMINAL_STATUSES:
@@ -128,6 +127,12 @@ def complete(db: Session, jobs: JobScheduler, instance_id: str) -> TaskInstance:
     jobs.cancel_all_for_instance(instance_id=instance.id)
     _resolve_notifications(db, instance_id=instance.id, types=(DEADLINE_MISSED,), now=now)
     _unblock_dependents(db, jobs, completed_instance_id=instance.id, now=now)
+
+    template = _require_template(db, instance.template_id)
+    if template.recurrence.anchor == "completion" and not template.archived:
+        settings = _require_settings(db)
+        generate_and_place_next_instance(db, jobs, template=template, predecessor=updated, settings=settings, now=now)
+
     return updated
 
 
@@ -176,21 +181,11 @@ def delete_instance(db: Session, jobs: JobScheduler, instance_id: str) -> Delete
     now = utcnow()
     for dependent in dependents:
         refreshed = repo.get(dependent.id)
-        if refreshed is None or refreshed.status != "blocked" or refreshed.dependencies:
+        if refreshed is None:
             continue
-        template = _require_template(db, refreshed.template_id)
-        settings = _require_settings(db)
-        promoted = repo.update(
-            refreshed.model_copy(
-                update={
-                    "status": "pending",
-                    "status_history": (*refreshed.status_history, StatusHistoryEntry(status="pending", at=now)),
-                }
-            )
-        )
-        if promoted.type == "flexible":
-            place_or_defer(db, jobs, instance=promoted, template=template, settings=settings, now=now)
-        unblocked.append(promoted.id)
+        promoted = promote_if_unblocked(db, jobs, refreshed, now=now)
+        if promoted is not None:
+            unblocked.append(promoted.id)
 
     return DeleteResult(deleted_instance_id=instance_id, unblocked_instance_ids=tuple(unblocked))
 
@@ -199,22 +194,37 @@ def _unblock_dependents(db: Session, jobs: JobScheduler, *, completed_instance_i
     repo = TaskInstanceRepository(db)
     for dependent in repo.list_dependents(completed_instance_id):
         refreshed = repo.get(dependent.id)
-        if refreshed is None or refreshed.status != "blocked":
+        if refreshed is None:
             continue
-        if not _all_dependencies_completed(db, refreshed):
-            continue
-        template = _require_template(db, refreshed.template_id)
-        settings = _require_settings(db)
-        promoted = repo.update(
-            refreshed.model_copy(
-                update={
-                    "status": "pending",
-                    "status_history": (*refreshed.status_history, StatusHistoryEntry(status="pending", at=now)),
-                }
-            )
+        promote_if_unblocked(db, jobs, refreshed, now=now)
+
+
+def promote_if_unblocked(db: Session, jobs: JobScheduler, instance: TaskInstance, *, now: datetime) -> TaskInstance | None:
+    """If `instance` is `blocked` and every dependency has since reached `completed`,
+    promote it to `pending` and place it immediately if flexible (§6.9). Returns the
+    updated instance, or `None` if it wasn't eligible.
+
+    Public - besides the two direct triggers above (completion, deletion), Stage 6's
+    startup reconciliation (architecture-plan §4.2 item 4) needs this exact check outside
+    either normal trigger path, to catch a dependency that completed while the process
+    that should have unblocked its dependent was down.
+    """
+    if instance.status != "blocked" or not _all_dependencies_completed(db, instance):
+        return None
+    repo = TaskInstanceRepository(db)
+    template = _require_template(db, instance.template_id)
+    settings = _require_settings(db)
+    promoted = repo.update(
+        instance.model_copy(
+            update={
+                "status": "pending",
+                "status_history": (*instance.status_history, StatusHistoryEntry(status="pending", at=now)),
+            }
         )
-        if promoted.type == "flexible":
-            place_or_defer(db, jobs, instance=promoted, template=template, settings=settings, now=now)
+    )
+    if promoted.type == "flexible":
+        return place_or_defer(db, jobs, instance=promoted, template=template, settings=settings, now=now)
+    return promoted
 
 
 def _all_dependencies_completed(db: Session, instance: TaskInstance) -> bool:
@@ -257,5 +267,6 @@ __all__ = [
     "delete_instance",
     "edit_this_occurrence",
     "extend_deadline",
+    "promote_if_unblocked",
     "reschedule",
 ]
