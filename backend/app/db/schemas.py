@@ -178,8 +178,30 @@ class ExternalEvent(_Frozen):
     deleted_at: datetime | None = None
 
 
+class UserSession(_Frozen):
+    """A logged-in session row. See architecture-plan §6 ("Session storage").
+
+    Named `UserSession`, not `Session`, to avoid colliding with the ubiquitous
+    `sqlalchemy.orm.Session` import used throughout this layer.
+    """
+
+    id: str
+    user_id: str
+    created_at: datetime
+    expires_at: datetime
+
+
+class AdminPasswordResetMarker(_Frozen):
+    """The `RESET_ADMIN_PASSWORD` one-time-consumption marker. See design doc §3.6."""
+
+    id: str
+    consumed_value_hash: str
+    consumed_at: datetime
+
+
 __all__ = [
     "ActiveHoursWindow",
+    "AdminPasswordResetMarker",
     "BlackoutDate",
     "BudgetEnforcement",
     "CalendarProvider",
@@ -198,5 +220,6 @@ __all__ = [
     "TaskTemplate",
     "TaskType",
     "User",
+    "UserSession",
     "UserSettings",
 ]
