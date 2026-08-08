@@ -32,6 +32,11 @@ class NotificationRepository:
         stmt = select(NotificationORM).where(NotificationORM.related_instance_id == instance_id)
         return tuple(_to_domain(orm) for orm in self._session.scalars(stmt))
 
+    def list_active(self) -> tuple[Notification, ...]:
+        """System-wide, undismissed and unresolved - the Notifications panel (§8.1 item 5)."""
+        stmt = select(NotificationORM).where(NotificationORM.dismissed_at.is_(None), NotificationORM.resolved_at.is_(None))
+        return tuple(_to_domain(orm) for orm in self._session.scalars(stmt))
+
     def update(self, notification: Notification) -> Notification:
         orm = self._session.get(NotificationORM, notification.id)
         if orm is None:
