@@ -108,6 +108,13 @@ warn_no_return = true
 warn_unreachable = true
 strict_equality = true
 
+# APScheduler ships no type stubs / py.typed marker (architecture-plan §4's chosen job
+# library). Confined to app.jobs.scheduler, the one module that imports it directly -
+# everywhere else in the app talks to it only through the JobScheduler interface.
+[[tool.mypy.overrides]]
+module = "apscheduler.*"
+ignore_missing_imports = true
+
 [tool.coverage.run]
 branch = true
 source = ["app"]
