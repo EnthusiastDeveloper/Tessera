@@ -1,0 +1,161 @@
+"""DB-aware scheduling orchestration: translates domain objects into `scheduling_engine`'s
+plain input types, calls the pure engine, and hands back its raw result. This is the
+settings-to-scheduling wiring Stage 4 explicitly deferred ("Out of scope: anything reading
+these settings for actual scheduling - that wiring is Stage 5").
+
+Deliberately mechanical - no notification creation, no status transitions, no job
+scheduling. Those are business decisions the caller (`app.task_instances`/`app.task_templates`)
+makes from this module's results; this module only ever answers "where would the engine
+place this" or "does this fixed time conflict with anything".
+
+**A new tier in the import-linter "Layering" contract**, sitting below the
+`app.task_templates | app.task_instances | ...` sibling group and above `app.db`. Siblings
+in that group are independent by contract - `app.task_templates` may not import
+`app.task_instances` or vice versa - but both need this exact DB-aware placement logic (a
+template's freshly-spawned instance needs placing; an unblocked instance needs
+re-placing). This mirrors `app.db`'s existing role as a shared foundation the sibling
+service modules all depend on, rather than either sibling owning it on the other's behalf.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from datetime import datetime, time, timedelta, tzinfo
+from typing import cast
+from zoneinfo import ZoneInfo
+
+from sqlalchemy.orm import Session
+
+from app.db.repositories import TaskInstanceRepository
+from app.db.schemas import ActiveHoursWindow as DomainActiveHoursWindow
+from app.db.schemas import DayName, TaskInstance, TaskTemplate, UserSettings
+from app.scheduling_engine.calendar_rules import merge_active_hours
+from app.scheduling_engine.fixed_conflicts import check_fixed_conflict as engine_check_fixed_conflict
+from app.scheduling_engine.placement import schedule_pending_flexible_tasks
+from app.scheduling_engine.types import ActiveHoursMap, FlexibleTaskCandidate, Obstacle, SchedulingResult
+from app.scheduling_engine.types import ActiveHoursWindow as EngineActiveHoursWindow
+from app.scheduling_engine.types import BlackoutDate as EngineBlackoutDate
+
+OBSTACLE_STATUSES = ("scheduled", "in_progress")
+
+
+def _parse_hhmm(value: str) -> time:
+    hour, minute = value.split(":")
+    return time(int(hour), int(minute))
+
+
+def to_engine_active_hours(
+    mapping: dict[DayName, DomainActiveHoursWindow | None] | None,
+) -> ActiveHoursMap | None:
+    """ "HH:MM"-string windows (design doc §3.2/§3.7's wire shape) -> the engine's `time`-based type."""
+    if mapping is None:
+        return None
+    return {
+        day: (EngineActiveHoursWindow(start=_parse_hhmm(w.start), end=_parse_hhmm(w.end)) if w else None)
+        for day, w in mapping.items()
+    }
+
+
+def build_active_hours_map(
+    settings: UserSettings, override: dict[DayName, DomainActiveHoursWindow | None] | None
+) -> ActiveHoursMap:
+    """The effective per-day window: `override` merged over the global settings map (§3.2, §6.2)."""
+    global_map = to_engine_active_hours(settings.active_hours)
+    assert global_map is not None  # UserSettings.active_hours is never itself optional
+    return merge_active_hours(global_map, to_engine_active_hours(override))
+
+
+def build_blackout_dates(settings: UserSettings) -> tuple[EngineBlackoutDate, ...]:
+    return tuple(EngineBlackoutDate(start=b.start, end=b.end, label=b.label) for b in settings.blackout_dates)
+
+
+def gather_obstacles(db: Session, *, exclude_instance_id: str | None = None) -> tuple[Obstacle, ...]:
+    """Every `scheduled`/`in_progress` instance, both types, as opaque busy blocks (§6.2's obstacle set).
+
+    External-calendar obstacles are Stage 7's concern (calendar sync is explicitly out of
+    scope for Stage 5) and are not gathered here.
+    """
+    repo = TaskInstanceRepository(db)
+    obstacles: list[Obstacle] = []
+    for instance in repo.list_by_statuses(OBSTACLE_STATUSES):
+        if instance.id == exclude_instance_id or instance.scheduled_time is None:
+            continue
+        end = instance.scheduled_time + timedelta(minutes=instance.estimated_duration_minutes)
+        obstacles.append(Obstacle(start=instance.scheduled_time, end=end))
+    return tuple(obstacles)
+
+
+def build_candidate(db: Session, instance: TaskInstance, template: TaskTemplate, *, tz: tzinfo) -> FlexibleTaskCandidate:
+    """Precondition: `instance` is `flexible` with a set `deadline` - true of every real
+    placement candidate (§3.3); fixed instances never reach this function.
+
+    `tz` converts the persisted-UTC deadline/dependency-completion instants to the user's
+    local wall-clock - see `attempt_placement`'s docstring for why that conversion has to
+    happen before anything reaches the engine, not after.
+    """
+    if instance.deadline is None:
+        raise ValueError(f"TaskInstance {instance.id} has no deadline - only flexible instances can be placed")
+
+    repo = TaskInstanceRepository(db)
+    dependency_completed_at: list[datetime] = []
+    for dependency_id in instance.dependencies:
+        dependency = repo.get(dependency_id)
+        if dependency is not None and dependency.completed_at is not None:
+            dependency_completed_at.append(dependency.completed_at.astimezone(tz))
+
+    return FlexibleTaskCandidate(
+        id=instance.id,
+        deadline=instance.deadline.astimezone(tz),
+        priority=instance.priority,
+        estimated_duration_minutes=instance.estimated_duration_minutes,
+        active_hours_override=to_engine_active_hours(template.active_hours_override),
+        dependency_completed_at=tuple(dependency_completed_at),
+    )
+
+
+def attempt_placement(
+    db: Session, *, instance: TaskInstance, template: TaskTemplate, settings: UserSettings, now: datetime
+) -> SchedulingResult:
+    """Run §6.2 for a single candidate. Reused for every trigger point that places or
+    re-places exactly one instance (creation, dependency unblock, this-and-future
+    propagation, extend-deadline) - `schedule_pending_flexible_tasks` degrades cleanly to
+    a one-element candidate list, so there is no separate "single" algorithm to maintain.
+
+    `now` must be timezone-aware (matches every other datetime in this codebase, e.g.
+    `app.db.base.utcnow()`) but need not already be in the user's timezone - it, the
+    candidate's deadline/dependency-completion instants, and every obstacle are all
+    converted to `settings.timezone` here before reaching the engine. Design doc §14.1/
+    §6.2: grid alignment and active-hours windows are wall-clock operations, and handing
+    the engine a UTC instant instead would silently misapply both.
+    """
+    tz = ZoneInfo(settings.timezone)
+    local_obstacles = tuple(
+        Obstacle(start=obstacle.start.astimezone(tz), end=obstacle.end.astimezone(tz))
+        for obstacle in gather_obstacles(db, exclude_instance_id=instance.id)
+    )
+    return schedule_pending_flexible_tasks(
+        [build_candidate(db, instance, template, tz=tz)],
+        now=now.astimezone(tz),
+        active_hours=build_active_hours_map(settings, template.active_hours_override),
+        blackout_dates=build_blackout_dates(settings),
+        daily_time_budget_minutes=cast("Mapping[str, int | None]", settings.daily_time_budget_minutes),
+        budget_enforcement=settings.budget_enforcement,
+        obstacles=local_obstacles,
+    )
+
+
+def has_fixed_conflict(db: Session, *, start: datetime, end: datetime, exclude_instance_id: str | None = None) -> bool:
+    """§6.5: hard-block predicate for creating/retiming a `fixed` instance."""
+    return engine_check_fixed_conflict(start, end, gather_obstacles(db, exclude_instance_id=exclude_instance_id))
+
+
+__all__ = [
+    "OBSTACLE_STATUSES",
+    "attempt_placement",
+    "build_active_hours_map",
+    "build_blackout_dates",
+    "build_candidate",
+    "gather_obstacles",
+    "has_fixed_conflict",
+    "to_engine_active_hours",
+]
