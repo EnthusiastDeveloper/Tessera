@@ -83,8 +83,8 @@ A stage is **DONE** only when all of the following hold:
 | 0 | Bootstrap & Tooling | **Done** (merged `28c2104`) | `stage-00-bootstrap` | Coverage gate not actually wired - see Stage 1 in-scope |
 | 1 | Scheduling Engine | **Done** (merged `61a1454`) | `stage-01-scheduling-engine` | All six gating findings (B3, B4, B8, B9, H1, M7) resolved per design doc Rev 9. Coverage gate wired (90% engine / 80% overall, both enforced in CI + `make backend-test`). Worked Examples B, C (placement half), E, G, H, I (+ grid variant), J, K, N (step-2) plus edge cases; `scheduling_engine/` at 100% branch coverage |
 | 2 | Data Access Layer | **Done** (merged `c2cb2c0`) | `stage-02-data-layer` | ORM models + repositories for all seven §3 entities plus the `task_instance_dependencies` join table. `UTCDateTime` column type added to fix a real SQLite+SQLAlchemy gap (tzinfo silently dropped on read - not in either source doc, a Stage 2 implementation-level fix). `Enum` columns use `create_constraint=True` for real DB-level CHECK constraints (SQLAlchemy 2.0 defaults this off). Alembic wired end-to-end (`alembic.ini`, `env.py` incl. a `render_item` hook for the custom type, initial migration) - upgrade/downgrade/round-trip verified. 42 new tests (migrations, per-entity repository CRUD, DB-level constraint rejection, dependency unlink-not-cascade) |
-| 3 | Auth & Sessions | **Implementation complete, awaiting PR/merge** | `stage-03-auth` | Built to design doc Rev 9 §3.6 + architecture-plan Rev 3 §6 (first-run setup wizard + setup token, IRR-2 B10/B10-token) - see the corrected "In scope" bullet below; the original placeholder-account recommendation this section carried was superseded before this stage started. `sessions` and `admin_password_reset_marker` tables added (new migration). Default-deny auth guard middleware, signed session cookie, argon2id, login throttle (N=5/15min, documented in `app/auth/throttle.py`). 63 new tests |
-| 4 | User Settings | Not started | `stage-04-settings` | |
+| 3 | Auth & Sessions | **Done** (merged `26bd55a`) | `stage-03-auth` | Built to design doc Rev 9 §3.6 + architecture-plan Rev 3 §6 (first-run setup wizard + setup token, IRR-2 B10/B10-token) - see the corrected "In scope" bullet below; the original placeholder-account recommendation this section carried was superseded before this stage started. `sessions` and `admin_password_reset_marker` tables added (new migration). Default-deny auth guard middleware, signed session cookie, argon2id, login throttle (N=5/15min, documented in `app/auth/throttle.py`). 63 new tests. Also fixed the container image: nothing ran migrations before app startup once the lifespan started querying the DB - added `docker/entrypoint.sh` |
+| 4 | User Settings | **Implementation complete, awaiting PR/merge** | `stage-04-settings` | `GET`/`PATCH /api/v1/settings`, singleton row auto-created at startup (timezone from `TZ`, falling back to UTC if unset/invalid). `active_hours`'s first-run default (09:00-17:00 every day) is confirmed with the user, not sourced from either doc - see the note below. Validation: real IANA timezone (`zoneinfo`), exact 7-day-key shape on `active_hours`/`daily_time_budget_minutes`, enums via Pydantic `Literal`. Regression guard test proves `first_day_of_week` has zero effect on `find_first_free_slot`'s output, per §3.7. 25 new tests |
 | 5 | Task Domain (Templates/Instances/Notifications) | Not started | `stage-05-task-domain` | Multi-component stage - see rationale in Stage 5 |
 | 6 | Jobs & Reconciliation | Not started | `stage-06-jobs` | |
 | 7 | Calendar Sync | Not started | `stage-07-calendar-sync` | |
@@ -251,21 +251,22 @@ A stage is **DONE** only when all of the following hold:
 
 **In scope**
 - `GET`/`PATCH /api/v1/settings` (singleton, single-user POC).
-- Default row created on first run; `timezone` defaulted from container `TZ`.
+- Default row created on first run (at app startup, alongside Stage 3's setup-token/`RESET_ADMIN_PASSWORD` bootstrap - not lazily on first `GET`, so the row is guaranteed to exist by the time any request is handled); `timezone` defaulted from container `TZ`, falling back to UTC (with a startup warning) if `TZ` is unset or not a real IANA name.
+- **Gap not covered by either source doc, resolved with the user:** neither design doc §3.7 nor architecture-plan states a default `active_hours` for a freshly-created row. This matters more than a typical default gap - a per-day `null` means *excluded* (§3.2/§3.7), so "every day null" would silently prevent any flexible task from ever being scheduled until the user visits Settings. Confirmed with the user: every day defaults to `09:00-17:00`. `daily_time_budget_minutes` defaults to `null` (unlimited) for every day and `blackout_dates` to `[]` - both the uncontroversial "no constraint yet" neutral state for their respective shapes, not treated as needing the same sign-off.
 - Validation: real IANA timezone name; `budget_enforcement` enum; `active_hours`/`daily_time_budget` shape (7 valid day keys, `null` allowed).
 - `first_day_of_week` stored as specified - display-only. Prove it, don't just assert it (see test below).
 
-**Out of scope:** anything reading these settings for actual scheduling - that wiring is Stage 5.
+**Out of scope:** anything reading these settings for actual scheduling - that wiring is Stage 5. The regression-guard test below calls Stage 1's `find_first_free_slot` directly with a test-local translation from `UserSettings.active_hours` into the engine's `ActiveHoursMap` - that translation is test code proving the invariant holds, not the Stage 5 wiring itself.
 
-**Key modules/files:** `app/settings/`.
+**Key modules/files:** `app/settings/` (service layer - default creation, validation), `app/api/v1/routes/settings.py`.
 
 **Tests required**
 - CRUD/validation integration tests (bad timezone rejected, bad enum rejected, valid partial PATCH succeeds).
 - **Regression guard:** two `UserSettings` identical except for `first_day_of_week`, fed through Stage 1's engine functions directly, produce identical output - proves display-only in code, guards against a future "helpful" regression.
 
 **Exit criteria**
-- [ ] Tests green.
-- [ ] §7.1 table still accurate.
+- [x] Tests green.
+- [x] §7.1 table still accurate (added `tz` to `app.core.config.Settings` - `TZ` itself was already documented and in `.env.example` since Stage 0).
 
 ---
 
