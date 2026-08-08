@@ -131,7 +131,7 @@ jobs:
           docker run --rm -d \
             --name tessera-test \
             -e SECRET_KEY=test-key \
-            -e DATABASE_PATH=:memory: \
+            -e DATABASE_PATH=/app/data/ci-smoke-test.db \
             -p 8000:8000 \
             tessera:test
           sleep 5
