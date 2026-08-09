@@ -6,17 +6,26 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+import pytest
 from sqlalchemy.orm import Session
 
+import app.calendar_sync.service as calendar_sync_service
+from app.calendar_sync.token_crypto import encrypt
 from app.db.base import generate_id, utcnow
 from app.db.repositories import (
+    ExternalCalendarConnectionRepository,
     NotificationRepository,
+    OAuthTokenRepository,
     TaskInstanceRepository,
     TaskTemplateRepository,
 )
-from app.db.schemas import Recurrence, StatusHistoryEntry, TaskInstance, TaskTemplate, UserSettings
+from app.db.schemas import ExternalCalendarConnection, Recurrence, StatusHistoryEntry, TaskInstance, TaskTemplate, UserSettings
 from app.jobs import handlers
+from tests.fixtures.calendar_providers import MockCalendarProvider
+from tests.fixtures.db_entities import make_oauth_token
 from tests.fixtures.jobs import RecordingJobScheduler
+
+_SECRET_KEY = "test-secret-key-not-for-production-use"
 
 
 def _persist_template(db: Session, **overrides: object) -> TaskTemplate:
@@ -303,3 +312,56 @@ class TestRunOccurrenceBoundary:
 
         instances = TaskInstanceRepository(db_session).list_by_template(template.id)
         assert len(instances) == 1
+
+
+class TestRunCalendarPoll:
+    """§6.4's interval-job trigger, wired through Stage 6's scheduling mechanism to Stage
+    7's actual fetch/diff/collision logic (`app.calendar_sync.service.sync_connection`).
+    """
+
+    def _persist_connection(self, db: Session, *, enabled: bool = True) -> ExternalCalendarConnection:
+        token = OAuthTokenRepository(db).create(
+            make_oauth_token(
+                encrypted_access_token=encrypt("access-token", secret_key=_SECRET_KEY),
+                encrypted_refresh_token=encrypt("refresh-token", secret_key=_SECRET_KEY),
+                access_token_expires_at=utcnow() + timedelta(hours=1),
+            )
+        )
+        connection = ExternalCalendarConnectionRepository(db).create(
+            ExternalCalendarConnection(
+                id=generate_id(), provider="google", oauth_credentials_ref=token.id, refresh_interval_minutes=15, enabled=enabled
+            )
+        )
+        db.commit()
+        return connection
+
+    def test_syncs_an_enabled_connection(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        connection = self._persist_connection(db_session)
+        provider = MockCalendarProvider()
+        monkeypatch.setattr(calendar_sync_service, "get_provider_client", lambda _provider, *, settings: provider)
+
+        handlers.run_calendar_poll(db_session, jobs, connection_id=connection.id)
+        db_session.commit()
+
+        assert len(provider.fetch_calls) == 1
+        refreshed = ExternalCalendarConnectionRepository(db_session).get(connection.id)
+        assert refreshed is not None and refreshed.last_synced_at is not None
+
+    def test_no_ops_for_a_disabled_connection(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        connection = self._persist_connection(db_session, enabled=False)
+        provider = MockCalendarProvider()
+        monkeypatch.setattr(calendar_sync_service, "get_provider_client", lambda _provider, *, settings: provider)
+
+        handlers.run_calendar_poll(db_session, jobs, connection_id=connection.id)
+        db_session.commit()
+
+        assert provider.fetch_calls == []
+
+    def test_no_ops_for_a_deleted_connection(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        handlers.run_calendar_poll(db_session, jobs, connection_id="does-not-exist")  # must not raise

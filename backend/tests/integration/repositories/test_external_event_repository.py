@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from sqlalchemy.orm import Session
 
 from app.db.base import utcnow
@@ -56,3 +58,62 @@ def test_get_by_provider_event_id_returns_none_when_absent(db_session: Session) 
     connection_id = _persisted_connection(db_session)
     repo = ExternalEventRepository(db_session)
     assert repo.get_by_provider_event_id(connection_id, "does-not-exist") is None
+
+
+class TestPurgeEndedBefore:
+    """§3.12: "purges events whose `end` is more than 30 days past" - covers both
+    still-active and already-soft-deleted rows.
+    """
+
+    def test_purges_rows_ended_before_the_cutoff(self, db_session: Session) -> None:
+        connection_id = _persisted_connection(db_session)
+        repo = ExternalEventRepository(db_session)
+        now = utcnow()
+        old = repo.upsert(
+            make_external_event(connection_id=connection_id, provider_event_id="evt-old", start=now, end=now - timedelta(days=40))
+        )
+        db_session.commit()
+
+        purged = repo.purge_ended_before(connection_id, now - timedelta(days=30))
+        db_session.commit()
+
+        assert purged == 1
+        assert repo.get_by_provider_event_id(connection_id, "evt-old") is None
+        assert old.id  # sanity: the fixture actually built a row before purging it
+
+    def test_retains_rows_ended_after_the_cutoff(self, db_session: Session) -> None:
+        connection_id = _persisted_connection(db_session)
+        repo = ExternalEventRepository(db_session)
+        now = utcnow()
+        recent = repo.upsert(
+            make_external_event(
+                connection_id=connection_id, provider_event_id="evt-recent", start=now, end=now - timedelta(days=5)
+            )
+        )
+        db_session.commit()
+
+        purged = repo.purge_ended_before(connection_id, now - timedelta(days=30))
+        db_session.commit()
+
+        assert purged == 0
+        assert repo.get_by_provider_event_id(connection_id, "evt-recent") == recent
+
+    def test_purges_soft_deleted_rows_too(self, db_session: Session) -> None:
+        connection_id = _persisted_connection(db_session)
+        repo = ExternalEventRepository(db_session)
+        now = utcnow()
+        repo.upsert(
+            make_external_event(
+                connection_id=connection_id,
+                provider_event_id="evt-gone",
+                start=now,
+                end=now - timedelta(days=40),
+                deleted_at=now,
+            )
+        )
+        db_session.commit()
+
+        purged = repo.purge_ended_before(connection_id, now - timedelta(days=30))
+        db_session.commit()
+
+        assert purged == 1

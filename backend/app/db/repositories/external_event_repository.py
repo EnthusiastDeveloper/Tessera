@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.db.models.external_event import ExternalEventORM
@@ -51,6 +52,24 @@ class ExternalEventRepository:
             ExternalEventORM.deleted_at.is_(None),
         )
         return tuple(_to_domain(orm) for orm in self._session.scalars(stmt))
+
+    def purge_ended_before(self, connection_id: str, cutoff: datetime) -> int:
+        """§3.12's retention sweep: hard-delete rows (soft-deleted or not) whose `end` is
+        more than 30 days past, run on the same poll pass as the diff (§6.4 step 1).
+        Returns the number of rows purged.
+        """
+        ids = list(
+            self._session.scalars(
+                select(ExternalEventORM.id).where(
+                    ExternalEventORM.connection_id == connection_id,
+                    ExternalEventORM.end < cutoff,
+                )
+            )
+        )
+        if ids:
+            self._session.execute(delete(ExternalEventORM).where(ExternalEventORM.id.in_(ids)))
+            self._session.flush()
+        return len(ids)
 
 
 def _to_orm_kwargs(event: ExternalEvent) -> dict[str, Any]:

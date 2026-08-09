@@ -9,9 +9,15 @@ from datetime import timedelta
 import pytest
 from sqlalchemy.orm import Session
 
-from app.db.base import utcnow
-from app.db.repositories import TaskInstanceRepository
-from app.db.schemas import Recurrence, UserSettings
+from app.db.base import generate_id, utcnow
+from app.db.repositories import (
+    ExternalCalendarConnectionRepository,
+    ExternalEventRepository,
+    NotificationRepository,
+    OAuthTokenRepository,
+    TaskInstanceRepository,
+)
+from app.db.schemas import ExternalCalendarConnection, ExternalEvent, Notification, Recurrence, UserSettings
 from app.task_instances.service import (
     InstanceValidationError,
     complete,
@@ -21,6 +27,7 @@ from app.task_instances.service import (
     reschedule,
 )
 from app.task_templates.service import TaskTemplateDraft, create_template
+from tests.fixtures.db_entities import make_oauth_token
 from tests.fixtures.jobs import RecordingJobScheduler
 
 
@@ -145,6 +152,53 @@ class TestReschedule:
         with pytest.raises(InstanceValidationError) as exc_info:
             reschedule(db_session, jobs, second.instance.id, new_scheduled_time=first.instance.scheduled_time)
         assert exc_info.value.code == "creation_conflict"
+
+    def test_rescheduling_clear_of_a_colliding_external_event_resolves_its_sync_conflict(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        """§3.9/§6.4/§6.6 Rev 7: a manual reschedule that clears the collision resolves the
+        `sync_conflict` immediately, rather than waiting for the next poll (Stage 7).
+        """
+        created = create_template(db_session, jobs, _fixed_draft())
+        db_session.commit()
+        assert created.instance.scheduled_time is not None
+        conflict_start = created.instance.scheduled_time
+        conflict_end = conflict_start + timedelta(hours=1)
+
+        token = OAuthTokenRepository(db_session).create(make_oauth_token())
+        connection = ExternalCalendarConnectionRepository(db_session).create(
+            ExternalCalendarConnection(
+                id=generate_id(), provider="google", oauth_credentials_ref=token.id, refresh_interval_minutes=15, enabled=True
+            )
+        )
+        ExternalEventRepository(db_session).upsert(
+            ExternalEvent(
+                id=generate_id(),
+                connection_id=connection.id,
+                provider_event_id="evt-1",
+                start=conflict_start,
+                end=conflict_end,
+                title="Surprise meeting",
+                fetched_at=utcnow(),
+            )
+        )
+        sync_conflict = NotificationRepository(db_session).create(
+            Notification(
+                id=generate_id(),
+                type="sync_conflict",
+                related_instance_id=created.instance.id,
+                message="collision",
+                created_at=utcnow(),
+            )
+        )
+        db_session.commit()
+
+        new_time = conflict_start + timedelta(days=3)  # clear of the external event
+        reschedule(db_session, jobs, created.instance.id, new_scheduled_time=new_time)
+        db_session.commit()
+
+        refreshed = NotificationRepository(db_session).get(sync_conflict.id)
+        assert refreshed is not None and refreshed.resolved_at is not None
 
 
 class TestComplete:

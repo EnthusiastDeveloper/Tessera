@@ -26,7 +26,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
-from app.db.repositories import TaskInstanceRepository
+from app.db.repositories import ExternalCalendarConnectionRepository, ExternalEventRepository, TaskInstanceRepository
 from app.db.schemas import ActiveHoursWindow as DomainActiveHoursWindow
 from app.db.schemas import DayName, TaskInstance, TaskTemplate, UserSettings
 from app.scheduling_engine.calendar_rules import merge_active_hours
@@ -69,11 +69,26 @@ def build_blackout_dates(settings: UserSettings) -> tuple[EngineBlackoutDate, ..
     return tuple(EngineBlackoutDate(start=b.start, end=b.end, label=b.label) for b in settings.blackout_dates)
 
 
-def gather_obstacles(db: Session, *, exclude_instance_id: str | None = None) -> tuple[Obstacle, ...]:
-    """Every `scheduled`/`in_progress` instance, both types, as opaque busy blocks (§6.2's obstacle set).
+def gather_external_obstacles(db: Session) -> tuple[Obstacle, ...]:
+    """Cached `ExternalEvent` rows (§3.11) across every connection, as opaque busy blocks -
+    filtered per §7: transparent/"Free" events and all-day events never obstruct placement
+    or fixed-task conflict checks, so they are excluded here rather than at fetch time
+    (§7: "Filtering ... happens when the obstacle set is assembled, not at fetch time").
+    """
+    connection_repo = ExternalCalendarConnectionRepository(db)
+    event_repo = ExternalEventRepository(db)
+    obstacles: list[Obstacle] = []
+    for connection in connection_repo.list():
+        for event in event_repo.list_active_for_connection(connection.id):
+            if event.is_transparent or event.is_all_day:
+                continue
+            obstacles.append(Obstacle(start=event.start, end=event.end))
+    return tuple(obstacles)
 
-    External-calendar obstacles are Stage 7's concern (calendar sync is explicitly out of
-    scope for Stage 5) and are not gathered here.
+
+def gather_obstacles(db: Session, *, exclude_instance_id: str | None = None) -> tuple[Obstacle, ...]:
+    """Every `scheduled`/`in_progress` instance, both types, plus every filtered external
+    busy-block (§7) - the full §6.2 obstacle set.
     """
     repo = TaskInstanceRepository(db)
     obstacles: list[Obstacle] = []
@@ -82,7 +97,24 @@ def gather_obstacles(db: Session, *, exclude_instance_id: str | None = None) -> 
             continue
         end = instance.scheduled_time + timedelta(minutes=instance.estimated_duration_minutes)
         obstacles.append(Obstacle(start=instance.scheduled_time, end=end))
+    obstacles.extend(gather_external_obstacles(db))
     return tuple(obstacles)
+
+
+def find_overlapping_scheduled_instances(db: Session, *, start: datetime, end: datetime) -> tuple[TaskInstance, ...]:
+    """Every `scheduled`/`in_progress` instance whose window overlaps `[start, end)` -
+    §6.4 step 3's "for new/moved events colliding with a `scheduled` instance" lookup,
+    the reverse direction of `gather_obstacles`.
+    """
+    repo = TaskInstanceRepository(db)
+    overlapping: list[TaskInstance] = []
+    for instance in repo.list_by_statuses(OBSTACLE_STATUSES):
+        if instance.scheduled_time is None:
+            continue
+        instance_end = instance.scheduled_time + timedelta(minutes=instance.estimated_duration_minutes)
+        if instance.scheduled_time < end and start < instance_end:
+            overlapping.append(instance)
+    return tuple(overlapping)
 
 
 def build_candidate(db: Session, instance: TaskInstance, template: TaskTemplate, *, tz: tzinfo) -> FlexibleTaskCandidate:
@@ -155,6 +187,8 @@ __all__ = [
     "build_active_hours_map",
     "build_blackout_dates",
     "build_candidate",
+    "find_overlapping_scheduled_instances",
+    "gather_external_obstacles",
     "gather_obstacles",
     "has_fixed_conflict",
     "to_engine_active_hours",

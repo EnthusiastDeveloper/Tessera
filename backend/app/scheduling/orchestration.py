@@ -39,7 +39,7 @@ from app.jobs.interface import (
     overdue_job_key,
     reminder_job_key,
 )
-from app.scheduling.adapter import attempt_placement, has_fixed_conflict
+from app.scheduling.adapter import attempt_placement, gather_external_obstacles, has_fixed_conflict
 from app.scheduling.generation import generate_next_instance
 from app.scheduling_engine.deadlines import is_deadline_elapsed
 
@@ -52,6 +52,8 @@ DEADLINE_MISSED = "deadline_missed"
 #: Stage 6 addition - see generate_and_place_next_instance's docstring for why an
 #: auto-generated fixed instance gets a Notification instead of a synchronous rejection.
 CREATION_CONFLICT = "creation_conflict"
+#: Stage 7 addition - §6.4's fixed-instance collision Notification.
+SYNC_CONFLICT = "sync_conflict"
 
 
 def place_or_defer(
@@ -196,6 +198,31 @@ def schedule_next_occurrence_boundary(
     jobs.schedule_at(job_key=occurrence_boundary_job_key(template.id), run_at=upcoming.nominal_date)
 
 
+def resolve_cleared_sync_conflicts(db: Session, *, now: datetime) -> None:
+    """§3.9: a `sync_conflict` auto-resolves once its instance no longer overlaps any
+    filtered external-event obstacle (§7) - whether because the event moved/was removed
+    (`app.calendar_sync.service.sync_connection`'s poll) or the instance itself was
+    rescheduled clear of it (§6.6 Rev 7 manual reschedule, `app.task_instances.service.reschedule`).
+    A global sweep, not scoped to one connection or one instance - §3.9 draws no such
+    distinction, and both call sites already hold a fresh `now`.
+    """
+    notification_repo = NotificationRepository(db)
+    instance_repo = TaskInstanceRepository(db)
+    external_obstacles = gather_external_obstacles(db)
+
+    for notification in notification_repo.list_active():
+        if notification.type != SYNC_CONFLICT:
+            continue
+        instance = instance_repo.get(notification.related_instance_id)
+        if instance is None or instance.status != "scheduled" or instance.scheduled_time is None:
+            notification_repo.update(notification.model_copy(update={"resolved_at": now}))
+            continue
+        end = instance.scheduled_time + timedelta(minutes=instance.estimated_duration_minutes)
+        still_conflicts = any(instance.scheduled_time < obstacle.end and obstacle.start < end for obstacle in external_obstacles)
+        if not still_conflicts:
+            notification_repo.update(notification.model_copy(update={"resolved_at": now}))
+
+
 def _transition_to_missed(db: Session, jobs: JobScheduler, *, instance: TaskInstance, now: datetime) -> TaskInstance:
     updated = TaskInstanceRepository(db).update(
         instance.model_copy(
@@ -268,8 +295,10 @@ __all__ = [
     "BUDGET_EXCEEDED",
     "CREATION_CONFLICT",
     "DEADLINE_MISSED",
+    "SYNC_CONFLICT",
     "UNSCHEDULABLE",
     "generate_and_place_next_instance",
     "place_or_defer",
+    "resolve_cleared_sync_conflicts",
     "schedule_next_occurrence_boundary",
 ]

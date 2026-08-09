@@ -6,6 +6,7 @@ from app.db.models.admin_password_reset_marker import AdminPasswordResetMarkerOR
 from app.db.models.external_calendar_connection import ExternalCalendarConnectionORM
 from app.db.models.external_event import ExternalEventORM
 from app.db.models.notification import NotificationORM
+from app.db.models.oauth_token import OAuthTokenORM
 from app.db.models.session import SessionORM
 from app.db.models.task_instance import TaskInstanceORM, task_instance_dependencies
 from app.db.models.task_template import TaskTemplateORM
@@ -17,6 +18,7 @@ __all__ = [
     "ExternalCalendarConnectionORM",
     "ExternalEventORM",
     "NotificationORM",
+    "OAuthTokenORM",
     "SessionORM",
     "TaskInstanceORM",
     "TaskTemplateORM",

@@ -8,6 +8,7 @@ from app.db.repositories.admin_password_reset_marker_repository import AdminPass
 from app.db.repositories.external_calendar_connection_repository import ExternalCalendarConnectionRepository
 from app.db.repositories.external_event_repository import ExternalEventRepository
 from app.db.repositories.notification_repository import NotificationRepository
+from app.db.repositories.oauth_token_repository import OAuthTokenRepository
 from app.db.repositories.session_repository import SessionRepository
 from app.db.repositories.task_instance_repository import TaskInstanceRepository
 from app.db.repositories.task_template_repository import TaskTemplateRepository
@@ -19,6 +20,7 @@ __all__ = [
     "ExternalCalendarConnectionRepository",
     "ExternalEventRepository",
     "NotificationRepository",
+    "OAuthTokenRepository",
     "SessionRepository",
     "TaskInstanceRepository",
     "TaskTemplateRepository",

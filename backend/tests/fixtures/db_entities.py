@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Any
 
 from app.db.base import generate_id, utcnow
@@ -10,6 +11,7 @@ from app.db.schemas import (
     ExternalCalendarConnection,
     ExternalEvent,
     Notification,
+    OAuthToken,
     Recurrence,
     TaskInstance,
     TaskTemplate,
@@ -102,6 +104,20 @@ def make_external_event(*, connection_id: str, **overrides: Any) -> ExternalEven
     }
     defaults.update(overrides)
     return ExternalEvent(**defaults)
+
+
+def make_oauth_token(**overrides: Any) -> OAuthToken:
+    now = utcnow()
+    defaults: dict[str, Any] = {
+        "id": generate_id(),
+        "encrypted_access_token": "encrypted-access-token",
+        "encrypted_refresh_token": "encrypted-refresh-token",
+        "access_token_expires_at": now + timedelta(hours=1),
+        "created_at": now,
+        "updated_at": now,
+    }
+    defaults.update(overrides)
+    return OAuthToken(**defaults)
 
 
 def make_user(**overrides: Any) -> User:

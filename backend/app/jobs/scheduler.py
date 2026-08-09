@@ -108,6 +108,8 @@ def _dispatch(job_key: str) -> None:
                 handlers.run_occurrence_boundary(db, jobs, template_id=parts[1])
             elif kind == "sweep" and len(parts) > 1 and parts[1] == "deadline_elapsed":
                 handlers.run_deadline_elapsed_sweep(db, jobs)
+            elif kind == "calendar_poll":
+                handlers.run_calendar_poll(db, jobs, connection_id=parts[1])
             else:
                 logger.warning("Unrecognized job key fired: %s", job_key)
     except Exception:

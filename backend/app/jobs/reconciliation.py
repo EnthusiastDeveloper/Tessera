@@ -5,10 +5,11 @@ Jobs are event-driven rather than periodic scans (§4), which means a process ki
 mid-batch can leave SQLite and the job store silently out of sync with no later scan that
 would ever notice on its own - this closes that gap.
 
-Items 1-2 reconcile the *job store* against the database (recreate missing jobs, cancel
-orphans). Items 3-4 reconcile *missed events* - work that should have happened while the
-process was down and that no future event will re-trigger, since the event that would
-have triggered it has already been consumed.
+Items 1-3 reconcile the *job store* against the database (recreate missing jobs, cancel
+orphans) - architecture-plan §4.2's original four items plus Stage 7's calendar-poll
+addition, same principle. Item 4 reconciles *missed events* - work that should have
+happened while the process was down and that no future event will re-trigger, since the
+event that would have triggered it has already been consumed.
 """
 
 from __future__ import annotations
@@ -18,10 +19,16 @@ from datetime import timedelta
 from sqlalchemy.orm import Session
 
 from app.db.base import utcnow
-from app.db.repositories import TaskInstanceRepository, TaskTemplateRepository, UserSettingsRepository
+from app.db.repositories import (
+    ExternalCalendarConnectionRepository,
+    TaskInstanceRepository,
+    TaskTemplateRepository,
+    UserSettingsRepository,
+)
 from app.jobs.handlers import DEPENDENCY_AT_RISK_THRESHOLD
 from app.jobs.interface import (
     JobScheduler,
+    calendar_poll_job_key,
     deadline_elapsed_job_key,
     dependency_at_risk_job_key,
     occurrence_boundary_job_key,
@@ -35,12 +42,14 @@ _LIVE_SCHEDULED_STATUSES = ("scheduled", "in_progress")
 
 
 def reconcile_on_startup(db: Session, jobs: JobScheduler) -> None:
-    """Runs all four reconciliation items in sequence. Idempotent - every `schedule_at`
-    call replaces any existing job under the same key, and every `cancel` is a no-op if
-    nothing exists, so running this twice (e.g. two restarts in a row) is harmless.
+    """Runs all reconciliation items in sequence. Idempotent - every `schedule_at`/
+    `schedule_interval` call replaces any existing job under the same key, and every
+    `cancel` is a no-op if nothing exists, so running this twice (e.g. two restarts in a
+    row) is harmless.
     """
     _recreate_or_cancel_instance_jobs(db, jobs)
     _reconcile_occurrence_boundary_jobs(db, jobs)
+    _reconcile_calendar_poll_jobs(db, jobs)
     _run_missed_unblocks(db, jobs)
 
 
@@ -114,6 +123,22 @@ def _reconcile_occurrence_boundary_jobs(db: Session, jobs: JobScheduler) -> None
         if not instances:
             continue  # generation is mid-transaction elsewhere or genuinely missing - not this pass's job to fix
         schedule_next_occurrence_boundary(db, jobs, template=template, latest_instance=instances[0], settings=settings, now=now)
+
+
+def _reconcile_calendar_poll_jobs(db: Session, jobs: JobScheduler) -> None:
+    """Stage 7 addition, same principle as items 1-3 above applied to the poll job
+    architecture-plan §4's job breakdown table lists as "interval-based" - Stage 6 built
+    only the scaffolding (`schedule_interval` itself) since no `ExternalCalendarConnection`
+    could exist yet; this stage is what actually creates connections, so it must also be
+    the one to keep their poll jobs consistent across a restart. `schedule_interval`'s
+    replace-existing semantics make this safe to run unconditionally, same as item 1's
+    `schedule_at` calls.
+    """
+    for connection in ExternalCalendarConnectionRepository(db).list():
+        if connection.enabled:
+            jobs.schedule_interval(job_key=calendar_poll_job_key(connection.id), minutes=connection.refresh_interval_minutes)
+        else:
+            jobs.cancel(job_key=calendar_poll_job_key(connection.id))
 
 
 def _run_missed_unblocks(db: Session, jobs: JobScheduler) -> None:
