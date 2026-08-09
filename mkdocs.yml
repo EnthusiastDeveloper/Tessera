@@ -1,0 +1,57 @@
+site_name: Tessera
+site_description: Self-hosted task scheduling that respects the real shape of your day.
+site_url: https://enthusiastdeveloper.github.io/Tessera/
+repo_url: https://github.com/EnthusiastDeveloper/Tessera
+repo_name: EnthusiastDeveloper/Tessera
+edit_uri: edit/main/docsite/
+
+docs_dir: docsite
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.top
+    - navigation.footer
+    - content.code.copy
+    - content.action.edit
+    - search.suggest
+    - toc.follow
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting Started: installation.md
+  - Capabilities: capabilities.md
+  - Configuration: configuration.md
+  - Tasks & Events: tasks-and-events.md
+  - Scheduling Algorithm: scheduling-algorithm.md
+  - Notifications: notifications.md
+  - FAQ & Troubleshooting: faq.md
+  - Project Status & Scope: project-status.md
+  - Contributing: contributing.md
