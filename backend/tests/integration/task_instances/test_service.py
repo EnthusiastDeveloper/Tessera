@@ -29,6 +29,7 @@ from app.task_instances.service import (
     extend_deadline,
     list_instances,
     reschedule,
+    start_progress,
 )
 from app.task_templates.service import TaskTemplateDraft, create_template
 from tests.fixtures.db_entities import make_oauth_token
@@ -264,6 +265,53 @@ class TestComplete:
         unblocked = TaskInstanceRepository(db_session).get(inspection.instance.id)
         assert unblocked is not None
         assert unblocked.status in ("scheduled", "pending")  # promoted out of blocked, placed in the same transaction
+
+
+class TestStartProgress:
+    """§4 state diagram: `scheduled` -> `in_progress`, the only inbound edge."""
+
+    def test_transitions_a_scheduled_instance_to_in_progress(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        created = create_template(db_session, jobs, _fixed_draft())
+        db_session.commit()
+        instance = TaskInstanceRepository(db_session).get(created.instance.id)
+        assert instance is not None
+        assert instance.status == "scheduled"
+
+        started = start_progress(db_session, created.instance.id)
+        db_session.commit()
+
+        assert started.status == "in_progress"
+        assert any(entry.status == "in_progress" for entry in started.status_history)
+
+    def test_rejects_starting_a_non_scheduled_instance(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        """Uses a `blocked` instance (deterministic - a dependency is never immediately
+        placed, unlike a plain flexible instance which might land as `scheduled`).
+        """
+        prep = create_template(db_session, jobs, _flexible_draft(name="Prepare car"))
+        db_session.commit()
+        inspection = create_template(db_session, jobs, _flexible_draft(name="Inspection", dependencies=(prep.instance.id,)))
+        db_session.commit()
+        assert inspection.instance.status == "blocked"
+
+        with pytest.raises(InstanceValidationError) as exc_info:
+            start_progress(db_session, inspection.instance.id)
+        assert exc_info.value.code == "invalid_field"
+
+    def test_rejects_starting_an_already_in_progress_instance(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        created = create_template(db_session, jobs, _fixed_draft())
+        db_session.commit()
+        start_progress(db_session, created.instance.id)
+        db_session.commit()
+
+        with pytest.raises(InstanceValidationError) as exc_info:
+            start_progress(db_session, created.instance.id)
+        assert exc_info.value.code == "invalid_field"
 
 
 class TestExtendDeadline:

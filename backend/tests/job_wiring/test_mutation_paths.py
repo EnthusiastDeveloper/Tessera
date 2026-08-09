@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.db.repositories import TaskInstanceRepository
 from app.db.schemas import Recurrence, UserSettings
 from app.jobs.interface import dependency_at_risk_job_key, occurrence_boundary_job_key
-from app.task_instances.service import complete, delete_instance, dismiss
+from app.task_instances.service import complete, delete_instance, dismiss, start_progress
 from app.task_templates.service import TaskTemplateDraft, archive_template, create_template
 from tests.fixtures.jobs import RecordingJobScheduler
 
@@ -161,6 +161,25 @@ class TestArchiveRecurringCalendarAnchor:
         db_session.commit()
 
         assert occurrence_boundary_job_key(created.template.id) not in jobs.cancelled
+
+
+class TestStartProgress:
+    def test_starting_touches_no_jobs(self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler) -> None:
+        """§4: `scheduled` -> `in_progress` has no job side effects - the reminder and
+        overdue-check handlers already treat `in_progress` identically to `scheduled`
+        (`app/jobs/handlers.py`). `start_progress` doesn't even take a `jobs` param, so
+        this just confirms the fixture's job-store state is untouched by the call.
+        """
+        created = create_template(db_session, jobs, _fixed_draft())
+        db_session.commit()
+        scheduled_before = set(jobs.scheduled_keys())
+        cancelled_before = set(jobs.cancelled)
+
+        start_progress(db_session, created.instance.id)
+        db_session.commit()
+
+        assert set(jobs.scheduled_keys()) == scheduled_before
+        assert set(jobs.cancelled) == cancelled_before
 
 
 class TestDismiss:
