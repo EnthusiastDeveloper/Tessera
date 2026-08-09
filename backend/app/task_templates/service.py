@@ -76,6 +76,18 @@ class CreatedTemplate:
     instance: TaskInstance
 
 
+def get_template(db: Session, template_id: str) -> TaskTemplate:
+    """`GET /task-templates/{id}` (architecture-plan §3's resource shape). Returns an
+    archived template too - §3.8 keeps the row specifically so historical/`template_id`
+    references stay valid, and a caller reopening a stale "this and future" reference
+    needs to see `archived: true`, not a 404.
+    """
+    template = TaskTemplateRepository(db).get(template_id)
+    if template is None:
+        raise TemplateValidationError("not_found", f"TaskTemplate {template_id} not found")
+    return template
+
+
 def create_template(db: Session, jobs: JobScheduler, draft: TaskTemplateDraft) -> CreatedTemplate:
     """§3.1/§9.1: creating a template always spawns its initial instance in the same
     transaction. Every check below can reject the whole save (§6.1, §6.5, §6.8) and none
@@ -386,4 +398,5 @@ __all__ = [
     "archive_template",
     "create_template",
     "edit_template_this_and_future",
+    "get_template",
 ]

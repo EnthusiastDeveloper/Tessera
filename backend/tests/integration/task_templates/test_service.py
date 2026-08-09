@@ -10,7 +10,14 @@ from sqlalchemy.orm import Session
 from app.db.repositories import TaskInstanceRepository, TaskTemplateRepository
 from app.db.schemas import Recurrence, UserSettings
 from app.task_instances.service import edit_this_occurrence
-from app.task_templates.service import TaskTemplateDraft, TemplateValidationError, create_template, edit_template_this_and_future
+from app.task_templates.service import (
+    TaskTemplateDraft,
+    TemplateValidationError,
+    archive_template,
+    create_template,
+    edit_template_this_and_future,
+    get_template,
+)
 from tests.fixtures.jobs import RecordingJobScheduler
 
 
@@ -135,12 +142,39 @@ class TestCreateTemplate:
         assert exc_info.value.code == "cycle_detected"
 
 
+class TestGetTemplate:
+    def test_returns_the_template(self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler) -> None:
+        created = create_template(db_session, jobs, _flexible_draft())
+        db_session.commit()
+
+        fetched = get_template(db_session, created.template.id)
+        assert fetched == created.template
+
+    def test_returns_an_archived_template_rather_than_404ing(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        """§3.8: archived, not hard-deleted, specifically to keep template_id references
+        valid - a caller reopening a stale reference must see archived: true, not a 404."""
+        created = create_template(db_session, jobs, _flexible_draft())
+        db_session.commit()
+        archive_template(db_session, jobs, created.template.id)
+        db_session.commit()
+
+        fetched = get_template(db_session, created.template.id)
+        assert fetched.archived is True
+
+    def test_missing_template_raises_not_found(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        with pytest.raises(TemplateValidationError) as exc_info:
+            get_template(db_session, "does-not-exist")
+        assert exc_info.value.code == "not_found"
+
+
 class TestArchiveTemplate:
     def test_archive_soft_deletes_and_keeps_history(
         self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
     ) -> None:
-        from app.task_templates.service import archive_template
-
         result = create_template(db_session, jobs, _flexible_draft())
         db_session.commit()
 

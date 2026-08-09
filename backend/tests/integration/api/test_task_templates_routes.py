@@ -32,6 +32,25 @@ def _flexible_payload(**overrides: object) -> dict[str, object]:
     return payload
 
 
+class TestGetTemplate:
+    def test_requires_authentication(self, app_client: TestClient) -> None:
+        assert app_client.get("/api/v1/task-templates/anything").status_code == 401
+
+    def test_returns_the_template(self, app_client: TestClient) -> None:
+        _login(app_client)
+        created = app_client.post("/api/v1/task-templates", json=_flexible_payload()).json()
+        response = app_client.get(f"/api/v1/task-templates/{created['template']['id']}")
+        assert response.status_code == 200, response.text
+        assert response.json()["id"] == created["template"]["id"]
+        assert response.json()["name"] == "Deep clean garage"
+
+    def test_missing_template_returns_404(self, app_client: TestClient) -> None:
+        _login(app_client)
+        response = app_client.get("/api/v1/task-templates/does-not-exist")
+        assert response.status_code == 404
+        assert response.json()["code"] == "not_found"
+
+
 class TestCreateTemplate:
     def test_requires_authentication(self, app_client: TestClient) -> None:
         assert app_client.post("/api/v1/task-templates", json=_flexible_payload()).status_code == 401
