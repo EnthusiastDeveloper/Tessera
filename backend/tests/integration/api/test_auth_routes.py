@@ -163,6 +163,7 @@ class TestLogin:
 
 class TestLogoutAndMe:
     def test_me_requires_authentication(self, app_client: TestClient) -> None:
+        _complete_setup(app_client)
         response = app_client.get("/api/v1/auth/me")
         assert response.status_code == 401
         assert response.json()["code"] == "unauthenticated"
@@ -185,6 +186,7 @@ class TestLogoutAndMe:
         assert app_client.get("/api/v1/auth/me").status_code == 401
 
     def test_logout_without_a_session_is_rejected_by_the_guard(self, app_client: TestClient) -> None:
+        _complete_setup(app_client)
         response = app_client.post("/api/v1/auth/logout")
         assert response.status_code == 401
 
@@ -230,6 +232,34 @@ def _iter_api_routes(routes: object) -> list[object]:
     return flattened
 
 
+class TestSetupGuard:
+    """§8.1 screen 0: every route but setup/health is unreachable until an account exists,
+    including login - there's nothing to log into yet. See `SETUP_ALLOWED_ROUTES`.
+    """
+
+    def test_login_before_setup_returns_setup_required(self, app_client: TestClient) -> None:
+        response = app_client.post("/api/v1/auth/login", json={"username": "admin", "password": VALID_PASSWORD})
+        assert response.status_code == 403
+        assert response.json()["code"] == "setup_required"
+
+    def test_me_before_setup_returns_setup_required(self, app_client: TestClient) -> None:
+        response = app_client.get("/api/v1/auth/me")
+        assert response.status_code == 403
+        assert response.json()["code"] == "setup_required"
+
+    def test_health_is_reachable_before_setup(self, app_client: TestClient) -> None:
+        assert app_client.get("/health").status_code == 200
+
+    def test_setup_itself_is_reachable_before_setup(self, app_client: TestClient) -> None:
+        response = app_client.post("/api/v1/auth/setup", json={"token": "wrong-token", "password": VALID_PASSWORD})
+        assert response.status_code == 401  # reaches the real handler, rejected on the token itself
+
+    def test_login_works_again_once_setup_completes(self, app_client: TestClient) -> None:
+        _complete_setup(app_client)
+        response = app_client.post("/api/v1/auth/login", json={"username": "admin", "password": VALID_PASSWORD})
+        assert response.status_code == 200
+
+
 class TestAuthGuardCoverage:
     """See architecture-plan §6.3: every registered route is either allowlisted or guarded."""
 
@@ -253,6 +283,7 @@ class TestAuthGuardCoverage:
     def test_every_non_public_route_rejects_an_unauthenticated_request(self, app_client: TestClient) -> None:
         from app.api.middleware import PUBLIC_ROUTES
 
+        _complete_setup(app_client)  # otherwise every route 403s with setup_required, not 401
         checked = 0
         for route in _iter_api_routes(app.routes):
             methods = getattr(route, "methods", None)

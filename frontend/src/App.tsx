@@ -1,11 +1,59 @@
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { AuthProvider } from './auth/AuthContext';
+import { RouteGuard } from './routes/RouteGuard';
+import { LoginScreen } from './views/auth/LoginScreen';
+import { SetupScreen } from './views/auth/SetupScreen';
+import { AppShell } from './views/shell/AppShell';
+import { ComingSoon } from './views/shell/ComingSoon';
+
 function App(): JSX.Element {
   return (
-    <div className="app">
-      <h1>Tessera</h1>
-      <p>Self-hosted task scheduling that respects the real shape of your day.</p>
-      <p>Coming soon...</p>
-    </div>
-  )
+    <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <AuthProvider>
+        <Routes>
+          <Route
+            path="/setup"
+            element={
+              <RouteGuard allow={['setup_required']}>
+                <SetupScreen />
+              </RouteGuard>
+            }
+          />
+          <Route
+            path="/login"
+            element={
+              <RouteGuard allow={['unauthenticated']}>
+                <LoginScreen />
+              </RouteGuard>
+            }
+          />
+          <Route
+            path="/"
+            element={
+              <RouteGuard allow={['authenticated']}>
+                <AppShell />
+              </RouteGuard>
+            }
+          >
+            <Route index element={<ComingSoon title="Timeline" note="Built in Stage 9d." />} />
+            <Route
+              path="backlog"
+              element={<ComingSoon title="Backlog" note="Built in Stage 9c." />}
+            />
+            <Route
+              path="notifications"
+              element={<ComingSoon title="Notifications" note="Built in Stage 9e." />}
+            />
+            <Route
+              path="settings"
+              element={<ComingSoon title="Settings" note="Built in Stage 9f." />}
+            />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Route>
+        </Routes>
+      </AuthProvider>
+    </BrowserRouter>
+  );
 }
 
-export default App
+export default App;

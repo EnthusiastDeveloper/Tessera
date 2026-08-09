@@ -1,0 +1,53 @@
+/* Design tokens - see ../../DESIGN.md. Components consume var(--token-name); never a
+   hardcoded color/spacing/font-size value. */
+
+:root {
+  --color-bg: #ffffff;
+  --color-surface: #f6f7f9;
+  --color-border: #d9dce1;
+  --color-text: #1b1e24;
+  --color-text-muted: #5b6270;
+  --color-accent: #4a55c7;
+  --color-accent-contrast: #ffffff;
+  --color-danger: #c1352b;
+  --color-success: #1f8a4c;
+  --color-warning: #b2790a;
+  --color-status-blocked: #7a5ea8;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+
+  --font-size-xs: 12px;
+  --font-size-sm: 14px;
+  --font-size-base: 16px;
+  --font-size-lg: 20px;
+  --font-size-xl: 24px;
+  --font-size-2xl: 32px;
+  --line-height-body: 1.5;
+  --line-height-heading: 1.2;
+
+  --radius: 8px;
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #1a1a1a;
+    --color-surface: #242424;
+    --color-border: #3a3a3a;
+    --color-text: #ececec;
+    --color-text-muted: #a3a3a3;
+    --color-accent: #8791f2;
+    --color-accent-contrast: #1a1a1a;
+    --color-danger: #e8756a;
+    --color-success: #59c785;
+    --color-warning: #e0a83f;
+    --color-status-blocked: #b79ee0;
+    --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.3);
+  }
+}

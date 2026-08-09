@@ -9,15 +9,20 @@ from app.auth.setup_token import setup_token_store
 VALID_PASSWORD = "correcthorsebatterystaple"
 
 
-def _login(client: TestClient) -> None:
+def _complete_setup(client: TestClient) -> None:
     token = setup_token_store._token  # test-only introspection, see test_auth_routes.py
     assert token is not None
     client.post("/api/v1/auth/setup", json={"token": token, "password": VALID_PASSWORD})
+
+
+def _login(client: TestClient) -> None:
+    _complete_setup(client)
     client.post("/api/v1/auth/login", json={"username": "admin", "password": VALID_PASSWORD})
 
 
 class TestGetSettings:
     def test_requires_authentication(self, app_client: TestClient) -> None:
+        _complete_setup(app_client)
         assert app_client.get("/api/v1/settings").status_code == 401
 
     def test_default_row_exists_from_startup_with_utc_timezone(self, app_client: TestClient) -> None:
@@ -38,6 +43,7 @@ class TestGetSettings:
 
 class TestPatchSettings:
     def test_requires_authentication(self, app_client: TestClient) -> None:
+        _complete_setup(app_client)
         assert app_client.patch("/api/v1/settings", json={"timezone": "UTC"}).status_code == 401
 
     def test_valid_partial_patch_succeeds_and_touches_only_that_field(self, app_client: TestClient) -> None:

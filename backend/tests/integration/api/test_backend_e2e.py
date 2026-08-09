@@ -26,8 +26,10 @@ def _login(client: TestClient) -> None:
 
 class TestLogin:
     def test_full_login_lifecycle(self, app_client: TestClient) -> None:
-        # Unauthenticated first - the guard rejects.
-        assert app_client.get("/api/v1/task-instances").status_code == 401
+        # No account yet - the guard rejects with setup_required, not a generic 401.
+        pre_setup = app_client.get("/api/v1/task-instances")
+        assert pre_setup.status_code == 403
+        assert pre_setup.json()["code"] == "setup_required"
 
         token = setup_token_store._token
         assert token is not None

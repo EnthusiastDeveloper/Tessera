@@ -12,6 +12,14 @@ htmlcov/
 node_modules/
 dist/
 
+# Playwright
+test-results/
+playwright-report/
+blob-report/
+
 # Data / secrets
 *.db
 .env
+
+# MkDocs build output
+/site/

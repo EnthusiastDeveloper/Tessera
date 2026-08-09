@@ -15,6 +15,7 @@ from starlette.responses import JSONResponse, Response
 
 from app.auth.cookie_signing import unsign
 from app.auth.service import validate_session
+from app.auth.setup_token import setup_token_store
 from app.core.config import get_settings
 from app.db.session import session_scope
 
@@ -30,12 +31,33 @@ PUBLIC_ROUTES: frozenset[tuple[str, str]] = frozenset(
     }
 )
 
+# Reachable while zero `User` rows exist (design doc §8.1 screen 0). Deliberately a strict
+# subset of PUBLIC_ROUTES: login must NOT work pre-setup, since there is no account to log
+# into yet. This is what makes "every other screen redirects to setup until one exists" a
+# backend guarantee the frontend can rely on for *every* route (including its own session
+# check on load), rather than something the SPA has to infer from a generic 401.
+SETUP_ALLOWED_ROUTES: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("GET", "/health"),
+        ("POST", "/api/v1/auth/setup"),
+    }
+)
+
 
 class AuthGuardMiddleware(BaseHTTPMiddleware):
-    """Rejects any request outside `PUBLIC_ROUTES` that lacks a valid session cookie."""
+    """Rejects any request outside `PUBLIC_ROUTES` that lacks a valid session cookie.
+
+    Also rejects, with a distinct `setup_required` code, any request outside
+    `SETUP_ALLOWED_ROUTES` while first-run setup hasn't happened yet.
+    """
 
     async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
-        if (request.method, request.url.path) in PUBLIC_ROUTES:
+        path_key = (request.method, request.url.path)
+
+        if setup_token_store.is_active and path_key not in SETUP_ALLOWED_ROUTES:
+            return _setup_required()
+
+        if path_key in PUBLIC_ROUTES:
             return await call_next(request)
 
         cookie_value = request.cookies.get(SESSION_COOKIE_NAME)
@@ -60,3 +82,10 @@ class AuthGuardMiddleware(BaseHTTPMiddleware):
 
 def _unauthorized(code: str) -> JSONResponse:
     return JSONResponse(status_code=401, content={"code": code, "message": "Authentication required."})
+
+
+def _setup_required() -> JSONResponse:
+    return JSONResponse(
+        status_code=403,
+        content={"code": "setup_required", "message": "No account exists yet - complete first-run setup."},
+    )
