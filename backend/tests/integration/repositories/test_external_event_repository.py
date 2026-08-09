@@ -44,6 +44,130 @@ def test_upsert_updates_existing_event_in_place(db_session: Session) -> None:
     assert len(repo.list_active_for_connection(connection_id)) == 1
 
 
+class TestUpsertAndDiff:
+    """§6.4 step 3's "new/moved" collision trigger - see app.calendar_sync.service.sync_connection."""
+
+    def test_a_brand_new_event_is_reported_as_changed(self, db_session: Session) -> None:
+        connection_id = _persisted_connection(db_session)
+        repo = ExternalEventRepository(db_session)
+
+        _, changed = repo.upsert_and_diff(make_external_event(connection_id=connection_id, provider_event_id="evt-1"))
+        db_session.commit()
+
+        assert changed is True
+
+    def test_an_unchanged_event_is_not_reported_as_changed(self, db_session: Session) -> None:
+        connection_id = _persisted_connection(db_session)
+        repo = ExternalEventRepository(db_session)
+        now = utcnow()
+        repo.upsert_and_diff(
+            make_external_event(connection_id=connection_id, provider_event_id="evt-1", start=now, end=now + timedelta(hours=1))
+        )
+        db_session.commit()
+
+        _, changed = repo.upsert_and_diff(
+            make_external_event(connection_id=connection_id, provider_event_id="evt-1", start=now, end=now + timedelta(hours=1))
+        )
+        db_session.commit()
+
+        assert changed is False
+
+    def test_a_moved_time_is_reported_as_changed(self, db_session: Session) -> None:
+        connection_id = _persisted_connection(db_session)
+        repo = ExternalEventRepository(db_session)
+        now = utcnow()
+        repo.upsert_and_diff(
+            make_external_event(connection_id=connection_id, provider_event_id="evt-1", start=now, end=now + timedelta(hours=1))
+        )
+        db_session.commit()
+
+        _, changed = repo.upsert_and_diff(
+            make_external_event(
+                connection_id=connection_id,
+                provider_event_id="evt-1",
+                start=now + timedelta(hours=2),
+                end=now + timedelta(hours=3),
+            )
+        )
+        db_session.commit()
+
+        assert changed is True
+
+    def test_a_transparency_flip_at_the_same_time_is_reported_as_changed(self, db_session: Session) -> None:
+        """Regression test: `start`/`end` alone missed a "Free" -> "Busy" flip (or the
+        reverse) at the same time, silently skipping the collision check that flip should
+        trigger."""
+        connection_id = _persisted_connection(db_session)
+        repo = ExternalEventRepository(db_session)
+        now = utcnow()
+        repo.upsert_and_diff(
+            make_external_event(
+                connection_id=connection_id,
+                provider_event_id="evt-1",
+                start=now,
+                end=now + timedelta(hours=1),
+                is_transparent=True,
+            )
+        )
+        db_session.commit()
+
+        _, changed = repo.upsert_and_diff(
+            make_external_event(
+                connection_id=connection_id,
+                provider_event_id="evt-1",
+                start=now,
+                end=now + timedelta(hours=1),
+                is_transparent=False,
+            )
+        )
+        db_session.commit()
+
+        assert changed is True
+
+    def test_an_all_day_flip_at_the_same_time_is_reported_as_changed(self, db_session: Session) -> None:
+        connection_id = _persisted_connection(db_session)
+        repo = ExternalEventRepository(db_session)
+        now = utcnow()
+        repo.upsert_and_diff(
+            make_external_event(
+                connection_id=connection_id, provider_event_id="evt-1", start=now, end=now + timedelta(hours=1), is_all_day=True
+            )
+        )
+        db_session.commit()
+
+        _, changed = repo.upsert_and_diff(
+            make_external_event(
+                connection_id=connection_id,
+                provider_event_id="evt-1",
+                start=now,
+                end=now + timedelta(hours=1),
+                is_all_day=False,
+            )
+        )
+        db_session.commit()
+
+        assert changed is True
+
+    def test_a_reappearing_soft_deleted_event_is_reported_as_changed(self, db_session: Session) -> None:
+        connection_id = _persisted_connection(db_session)
+        repo = ExternalEventRepository(db_session)
+        now = utcnow()
+        repo.upsert_and_diff(
+            make_external_event(connection_id=connection_id, provider_event_id="evt-1", start=now, end=now + timedelta(hours=1))
+        )
+        stored = repo.get_by_provider_event_id(connection_id, "evt-1")
+        assert stored is not None
+        repo.upsert(stored.model_copy(update={"deleted_at": now}))
+        db_session.commit()
+
+        _, changed = repo.upsert_and_diff(
+            make_external_event(connection_id=connection_id, provider_event_id="evt-1", start=now, end=now + timedelta(hours=1))
+        )
+        db_session.commit()
+
+        assert changed is True
+
+
 def test_list_active_for_connection_excludes_soft_deleted(db_session: Session) -> None:
     connection_id = _persisted_connection(db_session)
     repo = ExternalEventRepository(db_session)

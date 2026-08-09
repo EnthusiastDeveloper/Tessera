@@ -85,7 +85,8 @@ class TestConnect:
         authorize_url = response.json()["authorize_url"]
         query = parse_qs(urlparse(authorize_url).query)
         assert "state" in query
-        assert query["state"][0].startswith("30.")  # refresh_interval_minutes is embedded
+        # state is "google:<session_id>:30:<issued_at>.<signature>" - refresh_interval_minutes embedded.
+        assert ":30:" in query["state"][0]
 
 
 class TestCallback:

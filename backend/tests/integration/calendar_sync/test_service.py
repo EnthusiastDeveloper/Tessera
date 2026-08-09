@@ -416,6 +416,184 @@ class TestCollisionHandling:
         assert len(sync_conflicts) == 1
         assert sync_conflicts[0].resolved_at is not None
 
+    def test_in_progress_fixed_instance_is_never_flagged(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """§6.4 step 3 scopes collision eviction to a `scheduled` instance, not
+        `in_progress` - regression test for a bug where `_handle_collision` created a
+        `sync_conflict` for an `in_progress` instance and `resolve_cleared_sync_conflicts`
+        then immediately auto-resolved it in the same `sync_connection` call, since the
+        resolution check originally treated any non-`scheduled` status as "cleared".
+        """
+        connection = _persist_connection(db_session)
+        now = utcnow()
+        instance = _persist_fixed_instance(db_session, scheduled_time=now + timedelta(days=1), status="in_progress")
+        db_session.commit()
+
+        provider = MockCalendarProvider(
+            events=(
+                ProviderEvent(
+                    provider_event_id="evt-collide",
+                    start=now + timedelta(days=1, minutes=-15),
+                    end=now + timedelta(days=1, minutes=15),
+                    title="Surprise meeting",
+                    is_all_day=False,
+                    is_transparent=False,
+                ),
+            )
+        )
+        _install_mock_provider(monkeypatch, provider)
+
+        sync_connection(db_session, jobs, connection=connection, app_settings=_app_settings(), now=now)
+        db_session.commit()
+
+        assert NotificationRepository(db_session).list_for_instance(instance.id) == ()
+
+    def test_in_progress_flexible_instance_is_never_evicted(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Same regression as above, flexible branch: an `in_progress` task must not be
+        yanked off the timeline mid-work by a sync collision.
+        """
+        connection = _persist_connection(db_session)
+        now = utcnow()
+        scheduled_time = now + timedelta(days=1)
+        instance = _persist_flexible_instance(
+            db_session, scheduled_time=scheduled_time, deadline=now + timedelta(days=10), status="in_progress"
+        )
+        db_session.commit()
+
+        provider = MockCalendarProvider(
+            events=(
+                ProviderEvent(
+                    provider_event_id="evt-collide",
+                    start=scheduled_time - timedelta(minutes=15),
+                    end=scheduled_time + timedelta(minutes=75),
+                    title="Concert",
+                    is_all_day=False,
+                    is_transparent=False,
+                ),
+            )
+        )
+        _install_mock_provider(monkeypatch, provider)
+
+        sync_connection(db_session, jobs, connection=connection, app_settings=_app_settings(), now=now)
+        db_session.commit()
+
+        refreshed = TaskInstanceRepository(db_session).get(instance.id)
+        assert refreshed is not None
+        assert refreshed.status == "in_progress"
+        assert refreshed.scheduled_time == scheduled_time
+
+    def test_a_still_active_sync_conflict_on_an_in_progress_instance_is_not_auto_resolved(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`resolve_cleared_sync_conflicts` must keep checking overlap for an `in_progress`
+        instance rather than treating "not scheduled" as "resolved" - the instance still
+        occupies `scheduled_time` and the underlying collision may still be real.
+        """
+        connection = _persist_connection(db_session)
+        now = utcnow()
+        scheduled_time = now + timedelta(days=1)
+        instance = _persist_fixed_instance(db_session, scheduled_time=scheduled_time, status="scheduled")
+        db_session.commit()
+
+        colliding_event = ProviderEvent(
+            provider_event_id="evt-collide",
+            start=scheduled_time - timedelta(minutes=15),
+            end=scheduled_time + timedelta(minutes=15),
+            title="Meeting",
+            is_all_day=False,
+            is_transparent=False,
+        )
+        provider = MockCalendarProvider(events=(colliding_event,))
+        _install_mock_provider(monkeypatch, provider)
+        sync_connection(db_session, jobs, connection=connection, app_settings=_app_settings(), now=now)
+        db_session.commit()
+        assert any(
+            n.type == "sync_conflict" and n.resolved_at is None
+            for n in NotificationRepository(db_session).list_for_instance(instance.id)
+        )
+
+        # The user starts working on it - the external event has not moved or been removed.
+        started = TaskInstanceRepository(db_session).update(instance.model_copy(update={"status": "in_progress"}))
+        db_session.commit()
+        assert started.status == "in_progress"
+
+        # A later poll with the same still-colliding event must not silently clear the notification.
+        sync_connection(db_session, jobs, connection=connection, app_settings=_app_settings(), now=now + timedelta(minutes=15))
+        db_session.commit()
+
+        notifications = NotificationRepository(db_session).list_for_instance(instance.id)
+        assert any(n.type == "sync_conflict" and n.resolved_at is None for n in notifications)
+
+    def test_transparency_flip_at_the_same_time_still_triggers_collision_handling(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Regression test: an event whose `start`/`end` never change but flips from
+        transparent ("Free") to opaque must still be treated as "moved" for §6.4's
+        new/moved collision trigger - otherwise it silently becomes a real obstacle
+        without ever being checked against live instances.
+        """
+        connection = _persist_connection(db_session)
+        now = utcnow()
+        instance = _persist_fixed_instance(db_session, scheduled_time=now + timedelta(days=1))
+        db_session.commit()
+        event_start = now + timedelta(days=1, minutes=-15)
+        event_end = now + timedelta(days=1, minutes=15)
+
+        provider = MockCalendarProvider(
+            events=(
+                ProviderEvent(
+                    provider_event_id="evt-1",
+                    start=event_start,
+                    end=event_end,
+                    title="Optional",
+                    is_all_day=False,
+                    is_transparent=True,
+                ),
+            )
+        )
+        _install_mock_provider(monkeypatch, provider)
+        sync_connection(db_session, jobs, connection=connection, app_settings=_app_settings(), now=now)
+        db_session.commit()
+        assert NotificationRepository(db_session).list_for_instance(instance.id) == ()
+
+        # Same time window, now marked busy - the organizer flipped it without moving it.
+        provider.events = (
+            ProviderEvent(
+                provider_event_id="evt-1",
+                start=event_start,
+                end=event_end,
+                title="Optional",
+                is_all_day=False,
+                is_transparent=False,
+            ),
+        )
+        sync_connection(db_session, jobs, connection=connection, app_settings=_app_settings(), now=now + timedelta(minutes=15))
+        db_session.commit()
+
+        assert any(n.type == "sync_conflict" for n in NotificationRepository(db_session).list_for_instance(instance.id))
+
+    def test_disconnect_deletes_before_cancelling_the_job(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Regression test: the connection row must already be gone from the DB at the
+        moment the poll job is cancelled - not the other way around - so a failure between
+        the two steps never leaves an enabled, still-listed connection with no poll job.
+        """
+        connection = _persist_connection(db_session)
+
+        class _OrderCheckingScheduler(RecordingJobScheduler):
+            def cancel(self, *, job_key: str) -> None:
+                assert ExternalCalendarConnectionRepository(db_session).get(connection.id) is None
+                super().cancel(job_key=job_key)
+
+        from app.calendar_sync.service import disconnect
+
+        disconnect(db_session, _OrderCheckingScheduler(), connection.id)
+        db_session.commit()
+
 
 class TestTokenLifecycle:
     def test_refreshes_an_expired_access_token(

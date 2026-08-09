@@ -7,11 +7,17 @@ in CI, same rationale as `google.py`.
 from __future__ import annotations
 
 import re
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 import httpx
 
-from app.calendar_sync.providers.base import CalendarProviderClient, ProviderError, ProviderEvent, ProviderTokenSet
+from app.calendar_sync.providers.base import (
+    CalendarProviderClient,
+    ProviderError,
+    ProviderEvent,
+    ProviderTokenSet,
+    parse_token_response,
+)
 
 AUTHORIZE_URL = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
 TOKEN_URL = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
@@ -51,7 +57,7 @@ class OutlookCalendarProvider(CalendarProviderClient):
                 "scope": SCOPE,
             },
         )
-        return _parse_token_response(response)
+        return parse_token_response(response, provider_label="Microsoft")
 
     def refresh_access_token(self, *, refresh_token: str) -> ProviderTokenSet:
         response = httpx.post(
@@ -64,7 +70,7 @@ class OutlookCalendarProvider(CalendarProviderClient):
                 "scope": SCOPE,
             },
         )
-        return _parse_token_response(response, fallback_refresh_token=refresh_token)
+        return parse_token_response(response, provider_label="Microsoft", fallback_refresh_token=refresh_token)
 
     def fetch_events(self, *, access_token: str, horizon_start: datetime, horizon_end: datetime) -> tuple[ProviderEvent, ...]:
         response = httpx.get(
@@ -80,18 +86,6 @@ class OutlookCalendarProvider(CalendarProviderClient):
             raise ProviderError(f"Graph calendarView fetch failed: {response.status_code} {response.text}")
         body = response.json()
         return tuple(_parse_event(item) for item in body.get("value", []))
-
-
-def _parse_token_response(response: httpx.Response, *, fallback_refresh_token: str | None = None) -> ProviderTokenSet:
-    if response.is_error:
-        raise ProviderError(f"Microsoft OAuth token request failed: {response.status_code} {response.text}")
-    body = response.json()
-    expires_in = int(body.get("expires_in", 3600))
-    return ProviderTokenSet(
-        access_token=body["access_token"],
-        refresh_token=body.get("refresh_token", fallback_refresh_token),
-        expires_at=datetime.now(UTC) + timedelta(seconds=expires_in),
-    )
 
 
 def _parse_event(item: dict[str, object]) -> ProviderEvent:

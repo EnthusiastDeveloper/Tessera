@@ -32,10 +32,12 @@ def test_wrong_secret_key_is_rejected() -> None:
 
 def test_tampered_refresh_interval_is_rejected() -> None:
     """An attacker flipping the embedded interval must invalidate the signature - it isn't
-    a separate unsigned field."""
+    a separate unsigned field. `state` is `<provider>:<session_id>:<interval>:<issued_at>.<signature>`
+    (`app.core.hmac_signing.sign`'s `<value>.<signature>` shape)."""
     state = generate_state(session_id="sess-1", provider="google", refresh_interval_minutes=30, secret_key="k")
-    interval, issued_at, signature = state.split(".", 2)
-    tampered = f"999.{issued_at}.{signature}"
+    payload, signature = state.rsplit(".", 1)
+    provider, session_id, _interval, issued_at = payload.split(":", 3)
+    tampered = f"{provider}:{session_id}:999:{issued_at}.{signature}"
     assert verify_state(tampered, session_id="sess-1", provider="google", secret_key="k") is None
 
 

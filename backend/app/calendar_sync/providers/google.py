@@ -7,11 +7,17 @@ Manual smoke-testing against a real account is this stage's own exit criterion.
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 
 import httpx
 
-from app.calendar_sync.providers.base import CalendarProviderClient, ProviderError, ProviderEvent, ProviderTokenSet
+from app.calendar_sync.providers.base import (
+    CalendarProviderClient,
+    ProviderError,
+    ProviderEvent,
+    ProviderTokenSet,
+    parse_token_response,
+)
 
 AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -47,7 +53,7 @@ class GoogleCalendarProvider(CalendarProviderClient):
                 "grant_type": "authorization_code",
             },
         )
-        return _parse_token_response(response)
+        return parse_token_response(response, provider_label="Google")
 
     def refresh_access_token(self, *, refresh_token: str) -> ProviderTokenSet:
         response = httpx.post(
@@ -59,7 +65,7 @@ class GoogleCalendarProvider(CalendarProviderClient):
                 "grant_type": "refresh_token",
             },
         )
-        return _parse_token_response(response, fallback_refresh_token=refresh_token)
+        return parse_token_response(response, provider_label="Google", fallback_refresh_token=refresh_token)
 
     def fetch_events(self, *, access_token: str, horizon_start: datetime, horizon_end: datetime) -> tuple[ProviderEvent, ...]:
         response = httpx.get(
@@ -76,18 +82,6 @@ class GoogleCalendarProvider(CalendarProviderClient):
             raise ProviderError(f"Google Calendar events fetch failed: {response.status_code} {response.text}")
         body = response.json()
         return tuple(_parse_event(item) for item in body.get("items", []) if "start" in item and "end" in item)
-
-
-def _parse_token_response(response: httpx.Response, *, fallback_refresh_token: str | None = None) -> ProviderTokenSet:
-    if response.is_error:
-        raise ProviderError(f"Google OAuth token request failed: {response.status_code} {response.text}")
-    body = response.json()
-    expires_in = int(body.get("expires_in", 3600))
-    return ProviderTokenSet(
-        access_token=body["access_token"],
-        refresh_token=body.get("refresh_token", fallback_refresh_token),
-        expires_at=datetime.now(UTC) + timedelta(seconds=expires_in),
-    )
 
 
 def _parse_event(item: dict[str, object]) -> ProviderEvent:

@@ -101,6 +101,23 @@ class TestFiltering:
 
         assert gather_external_obstacles(db_session) == ()
 
+    def test_a_disabled_connections_events_are_never_obstacles(self, db_session: Session) -> None:
+        """Regression test: a disabled connection stops being polled (its cache is never
+        diffed/soft-deleted/purged again), so its events must not go on obstructing
+        placement/fixed-conflict checks forever - matches what the poll job and
+        reconciliation already do by respecting `enabled`.
+        """
+        disabled = ExternalCalendarConnectionRepository(db_session).create(make_external_calendar_connection(enabled=False))
+        db_session.commit()
+        ExternalEventRepository(db_session).upsert(
+            make_external_event(
+                connection_id=disabled.id, provider_event_id="evt-1", start=ny(2026, 3, 2, 18, 0), end=ny(2026, 3, 2, 19, 0)
+            )
+        )
+        db_session.commit()
+
+        assert gather_external_obstacles(db_session) == ()
+
     def test_gather_obstacles_includes_external_events_alongside_instances(self, db_session: Session) -> None:
         connection_id = _persisted_connection(db_session)
         ExternalEventRepository(db_session).upsert(

@@ -141,17 +141,24 @@ def complete_oauth_callback(
 
 
 def disconnect(db: Session, jobs: JobScheduler, connection_id: str) -> None:
-    """Cancels the poll job, deletes the encrypted token row, then the connection itself -
-    `ExternalEvent` rows cascade-delete via the FK's `ondelete="CASCADE"` (see
+    """Deletes the encrypted token row and the connection itself, then cancels the poll
+    job - `ExternalEvent` rows cascade-delete via the FK's `ondelete="CASCADE"` (see
     `app.db.models.external_event`), so no separate cleanup is needed for the cache.
+
+    DB deletes happen **before** the job cancel, matching every other mutation in this
+    codebase (e.g. `app.task_instances.service.complete`) - the job store is a separate
+    SQLite file whose writes commit independently of `db`'s transaction (architecture-plan
+    §4's `jobs_database_path`), so a cancel is irreversible the instant it's called. Doing
+    it last means a failure in the DB deletes (which `db`'s own transaction can still roll
+    back) never leaves an enabled, still-listed connection with its poll job already gone.
     """
     connection = ExternalCalendarConnectionRepository(db).get(connection_id)
     if connection is None:
         raise CalendarSyncError("not_found", f"ExternalCalendarConnection {connection_id} not found")
 
-    jobs.cancel(job_key=calendar_poll_job_key(connection_id))
     OAuthTokenRepository(db).delete(connection.oauth_credentials_ref)
     ExternalCalendarConnectionRepository(db).delete(connection_id)
+    jobs.cancel(job_key=calendar_poll_job_key(connection_id))
 
 
 def sync_connection(
@@ -208,16 +215,11 @@ def sync_connection(
 
     for provider_event in provider_events:
         seen_provider_ids.add(provider_event.provider_event_id)
-        existing = event_repo.get_by_provider_event_id(connection.id, provider_event.provider_event_id)
-        moved = (
-            existing is None
-            or existing.start != provider_event.start
-            or existing.end != provider_event.end
-            or existing.deleted_at is not None
-        )
-        stored = event_repo.upsert(
+        # `id` is only used on insert - `upsert_and_diff` preserves the existing row's id
+        # on update, so there's no need to look one up here first.
+        stored, moved = event_repo.upsert_and_diff(
             ExternalEvent(
-                id=existing.id if existing is not None else generate_id(),
+                id=generate_id(),
                 connection_id=connection.id,
                 provider_event_id=provider_event.provider_event_id,
                 start=provider_event.start,

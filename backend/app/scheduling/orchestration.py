@@ -198,6 +198,15 @@ def schedule_next_occurrence_boundary(
     jobs.schedule_at(job_key=occurrence_boundary_job_key(template.id), run_at=upcoming.nominal_date)
 
 
+#: Statuses for which a `sync_conflict` is moot regardless of overlap - the instance left
+#: the timeline (terminal) or never held a real slot to begin with. Deliberately *not*
+#: "status != scheduled": an `in_progress` instance still occupies `scheduled_time` and
+#: must keep being checked for overlap, not treated as already resolved the moment the
+#: user starts it (that conflated the two would silently auto-resolve a notification
+#: `_handle_collision` had just created for it in the same poll pass).
+_SYNC_CONFLICT_MOOT_STATUSES = frozenset({"completed", "dismissed", "missed"})
+
+
 def resolve_cleared_sync_conflicts(db: Session, *, now: datetime) -> None:
     """§3.9: a `sync_conflict` auto-resolves once its instance no longer overlaps any
     filtered external-event obstacle (§7) - whether because the event moved/was removed
@@ -210,11 +219,9 @@ def resolve_cleared_sync_conflicts(db: Session, *, now: datetime) -> None:
     instance_repo = TaskInstanceRepository(db)
     external_obstacles = gather_external_obstacles(db)
 
-    for notification in notification_repo.list_active():
-        if notification.type != SYNC_CONFLICT:
-            continue
+    for notification in notification_repo.list_active(notification_type=SYNC_CONFLICT):
         instance = instance_repo.get(notification.related_instance_id)
-        if instance is None or instance.status != "scheduled" or instance.scheduled_time is None:
+        if instance is None or instance.status in _SYNC_CONFLICT_MOOT_STATUSES or instance.scheduled_time is None:
             notification_repo.update(notification.model_copy(update={"resolved_at": now}))
             continue
         end = instance.scheduled_time + timedelta(minutes=instance.estimated_duration_minutes)

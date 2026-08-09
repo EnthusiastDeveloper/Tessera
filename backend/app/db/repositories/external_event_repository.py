@@ -28,12 +28,30 @@ class ExternalEventRepository:
 
     def upsert(self, event: ExternalEvent) -> ExternalEvent:
         """Insert, or update in place if `(connection_id, provider_event_id)` already exists (§3.11, §6.4)."""
+        return self.upsert_and_diff(event)[0]
+
+    def upsert_and_diff(self, event: ExternalEvent) -> tuple[ExternalEvent, bool]:
+        """Same as `upsert`, but also reports whether this is a new row, or an existing one
+        whose `start`/`end`/`is_all_day`/`is_transparent` changed, or one that was
+        previously soft-deleted and has reappeared - §6.4 step 3's "new/moved" collision
+        trigger, which needs exactly this comparison. Saves the caller (`app.calendar_sync.
+        service.sync_connection`) a separate `get_by_provider_event_id` lookup per event,
+        since `upsert` already has to fetch `existing` to decide insert-vs-update anyway.
+        """
         existing = self._session.scalars(
             select(ExternalEventORM).where(
                 ExternalEventORM.connection_id == event.connection_id,
                 ExternalEventORM.provider_event_id == event.provider_event_id,
             )
         ).first()
+        changed = (
+            existing is None
+            or existing.start != event.start
+            or existing.end != event.end
+            or existing.is_all_day != event.is_all_day
+            or existing.is_transparent != event.is_transparent
+            or existing.deleted_at is not None
+        )
         if existing is None:
             orm = ExternalEventORM(**_to_orm_kwargs(event))
             self._session.add(orm)
@@ -43,7 +61,7 @@ class ExternalEventRepository:
                 if key != "id":
                     setattr(orm, key, value)
         self._session.flush()
-        return _to_domain(orm)
+        return _to_domain(orm), changed
 
     def list_active_for_connection(self, connection_id: str) -> tuple[ExternalEvent, ...]:
         """Non-soft-deleted cached events - the obstacle set the engine reads (§6.2, §3.11)."""

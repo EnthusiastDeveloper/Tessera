@@ -32,9 +32,15 @@ class NotificationRepository:
         stmt = select(NotificationORM).where(NotificationORM.related_instance_id == instance_id)
         return tuple(_to_domain(orm) for orm in self._session.scalars(stmt))
 
-    def list_active(self) -> tuple[Notification, ...]:
-        """System-wide, undismissed and unresolved - the Notifications panel (§8.1 item 5)."""
+    def list_active(self, *, notification_type: str | None = None) -> tuple[Notification, ...]:
+        """System-wide, undismissed and unresolved - the Notifications panel (§8.1 item 5).
+        `notification_type` narrows the scan at the DB layer - e.g. §3.9's `sync_conflict`
+        auto-resolution sweep, which would otherwise pay for every unrelated active
+        notification's row on every poll pass.
+        """
         stmt = select(NotificationORM).where(NotificationORM.dismissed_at.is_(None), NotificationORM.resolved_at.is_(None))
+        if notification_type is not None:
+            stmt = stmt.where(NotificationORM.type == notification_type)
         return tuple(_to_domain(orm) for orm in self._session.scalars(stmt))
 
     def update(self, notification: Notification) -> Notification:

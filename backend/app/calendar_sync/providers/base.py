@@ -12,7 +12,9 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
+
+import httpx
 
 
 @dataclass(frozen=True)
@@ -72,4 +74,24 @@ class CalendarProviderClient(ABC):
         """Every event in `[horizon_start, horizon_end)` - §7's 90-day rolling horizon."""
 
 
-__all__ = ["CalendarProviderClient", "ProviderError", "ProviderEvent", "ProviderTokenSet"]
+def parse_token_response(
+    response: httpx.Response, *, provider_label: str, fallback_refresh_token: str | None = None
+) -> ProviderTokenSet:
+    """Shared OAuth2 token-endpoint response parsing - Google's and Microsoft's token
+    endpoints return the same `{access_token, refresh_token?, expires_in}` shape, so
+    `google.py`/`outlook.py` both call this rather than each keeping its own copy.
+    `fallback_refresh_token` covers a refresh call: some providers omit `refresh_token`
+    entirely when it isn't rotated, in which case the caller keeps the one it already had.
+    """
+    if response.is_error:
+        raise ProviderError(f"{provider_label} OAuth token request failed: {response.status_code} {response.text}")
+    body = response.json()
+    expires_in = int(body.get("expires_in", 3600))
+    return ProviderTokenSet(
+        access_token=body["access_token"],
+        refresh_token=body.get("refresh_token", fallback_refresh_token),
+        expires_at=datetime.now(UTC) + timedelta(seconds=expires_in),
+    )
+
+
+__all__ = ["CalendarProviderClient", "ProviderError", "ProviderEvent", "ProviderTokenSet", "parse_token_response"]

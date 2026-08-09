@@ -10,7 +10,7 @@ import httpx
 import pytest
 
 from app.calendar_sync.providers import google, outlook
-from app.calendar_sync.providers.base import ProviderError
+from app.calendar_sync.providers.base import ProviderError, parse_token_response
 
 
 class TestGoogleEventParsing:
@@ -53,10 +53,33 @@ class TestGoogleEventParsing:
         )
         assert event.title == "(untitled)"
 
+
+class TestSharedTokenResponseParsing:
+    """Both providers' token endpoints share the same response shape - see
+    `app.calendar_sync.providers.base.parse_token_response`.
+    """
+
     def test_error_response_raises_provider_error(self) -> None:
         response = httpx.Response(401, json={"error": "invalid_grant"}, request=httpx.Request("POST", "https://x"))
         with pytest.raises(ProviderError):
-            google._parse_token_response(response)
+            parse_token_response(response, provider_label="Google")
+
+    def test_success_response_is_parsed(self) -> None:
+        response = httpx.Response(
+            200,
+            json={"access_token": "abc", "refresh_token": "def", "expires_in": 3600},
+            request=httpx.Request("POST", "https://x"),
+        )
+        tokens = parse_token_response(response, provider_label="Google")
+        assert tokens.access_token == "abc"
+        assert tokens.refresh_token == "def"
+
+    def test_missing_refresh_token_falls_back_to_the_existing_one(self) -> None:
+        response = httpx.Response(
+            200, json={"access_token": "abc", "expires_in": 3600}, request=httpx.Request("POST", "https://x")
+        )
+        tokens = parse_token_response(response, provider_label="Microsoft", fallback_refresh_token="still-valid")
+        assert tokens.refresh_token == "still-valid"
 
 
 class TestOutlookEventParsing:
