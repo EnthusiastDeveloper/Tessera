@@ -5,6 +5,8 @@ import { LoginScreen } from './views/auth/LoginScreen';
 import { SetupScreen } from './views/auth/SetupScreen';
 import { AppShell } from './views/shell/AppShell';
 import { ComingSoon } from './views/shell/ComingSoon';
+import { CreateTaskPage } from './views/tasks/CreateTaskPage';
+import { EditTaskPage } from './views/tasks/EditTaskPage';
 
 function App(): JSX.Element {
   return (
@@ -36,6 +38,8 @@ function App(): JSX.Element {
             }
           >
             <Route index element={<ComingSoon title="Timeline" note="Built in Stage 9d." />} />
+            <Route path="tasks/new" element={<CreateTaskPage />} />
+            <Route path="tasks/:instanceId/edit" element={<EditTaskPage />} />
             <Route
               path="backlog"
               element={<ComingSoon title="Backlog" note="Built in Stage 9c." />}
