@@ -138,30 +138,32 @@ class TestSyncConflictShape:
 
     def test_sync_conflict_notification_has_the_documented_shape(self, app_client: TestClient) -> None:
         _login(app_client)
-        payload = {
-            "name": "Team sync",
-            "type": "fixed",
-            "fixed_time_of_day": "18:00",
-            "recurrence": {"pattern": "one_time", "anchor": "calendar"},
-            "priority": "medium",
-            "estimated_duration_minutes": 60,
-        }
-        instance = app_client.post("/api/v1/task-templates", json=payload).json()["instance"]
 
-        # Directly exercise the notification the same way §6.4's poll would create one -
-        # the poll pipeline itself is covered end-to-end in tests/integration/calendar_sync/;
-        # this test's job is only the wire shape once it reaches the API.
+        # Seed the instance directly via the DB fixtures rather than through
+        # POST /task-templates - the poll pipeline itself is covered end-to-end in
+        # tests/integration/calendar_sync/, this test's job is only the wire shape once
+        # a notification reaches the API. Going through the real creation endpoint here
+        # used to install a genuinely `fixed`/`scheduled` instance under this fixture's
+        # default UTC settings timezone; a hardcoded same-day `fixed_time_of_day` landed
+        # in the past whenever the suite happened to run after that clock time, which
+        # this `app_client` fixture's real APScheduler adapter (see its module docstring)
+        # then fired almost immediately (`misfire_grace_time=None`) as a genuine `overdue`
+        # notification racing this test's own `GET` a few lines down - an intermittent
+        # extra row, not a real defect in the sync_conflict shape under test.
         from app.db.base import generate_id, utcnow
-        from app.db.repositories import NotificationRepository
+        from app.db.repositories import NotificationRepository, TaskInstanceRepository, TaskTemplateRepository
         from app.db.schemas import Notification
         from app.db.session import session_scope
+        from tests.fixtures.db_entities import make_task_instance, make_task_template
 
         with session_scope() as db:
+            template = TaskTemplateRepository(db).create(make_task_template(name="Team sync"))
+            instance = TaskInstanceRepository(db).create(make_task_instance(template_id=template.id, name="Team sync"))
             NotificationRepository(db).create(
                 Notification(
                     id=generate_id(),
                     type="sync_conflict",
-                    related_instance_id=instance["id"],
+                    related_instance_id=instance.id,
                     message="collides with an external event",
                     created_at=utcnow(),
                 )
@@ -170,7 +172,7 @@ class TestSyncConflictShape:
         response = app_client.get("/api/v1/notifications")
         assert response.status_code == 200, response.text
         notifications = response.json()
-        matching = [n for n in notifications if n["related_instance_id"] == instance["id"]]
+        matching = [n for n in notifications if n["related_instance_id"] == instance.id]
         assert len(matching) == 1
         notification = matching[0]
         assert notification["type"] == "sync_conflict"
