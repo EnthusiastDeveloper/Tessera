@@ -1,4 +1,4 @@
-import { NavLink, Outlet } from 'react-router-dom';
+import { Link, NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthContext';
 
 const NAV_ITEMS = [
@@ -23,6 +23,11 @@ export function AppShell(): JSX.Element {
           ))}
         </nav>
         <div>
+          <Link to="/tasks/new" style={{ marginRight: 'var(--space-4)' }}>
+            <button type="button" className="primary">
+              New task
+            </button>
+          </Link>
           <span style={{ marginRight: 'var(--space-4)', color: 'var(--color-text-muted)' }}>
             {user?.username}
           </span>
