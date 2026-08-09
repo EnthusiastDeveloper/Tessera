@@ -9,11 +9,12 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
+    exclude: ['**/node_modules/**', 'e2e/**'],
   },
   server: {
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
     },

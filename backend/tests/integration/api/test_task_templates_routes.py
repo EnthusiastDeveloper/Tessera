@@ -12,10 +12,14 @@ from app.auth.setup_token import setup_token_store
 VALID_PASSWORD = "correcthorsebatterystaple"
 
 
-def _login(client: TestClient) -> None:
+def _complete_setup(client: TestClient) -> None:
     token = setup_token_store._token  # test-only introspection, see test_auth_routes.py
     assert token is not None
     client.post("/api/v1/auth/setup", json={"token": token, "password": VALID_PASSWORD})
+
+
+def _login(client: TestClient) -> None:
+    _complete_setup(client)
     client.post("/api/v1/auth/login", json={"username": "admin", "password": VALID_PASSWORD})
 
 
@@ -34,6 +38,7 @@ def _flexible_payload(**overrides: object) -> dict[str, object]:
 
 class TestGetTemplate:
     def test_requires_authentication(self, app_client: TestClient) -> None:
+        _complete_setup(app_client)
         assert app_client.get("/api/v1/task-templates/anything").status_code == 401
 
     def test_returns_the_template(self, app_client: TestClient) -> None:
@@ -53,6 +58,7 @@ class TestGetTemplate:
 
 class TestCreateTemplate:
     def test_requires_authentication(self, app_client: TestClient) -> None:
+        _complete_setup(app_client)
         assert app_client.post("/api/v1/task-templates", json=_flexible_payload()).status_code == 401
 
     def test_creates_a_template_and_its_initial_instance(self, app_client: TestClient) -> None:

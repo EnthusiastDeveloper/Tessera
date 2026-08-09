@@ -21,4 +21,13 @@ module.exports = {
     'react-hooks/rules-of-hooks': 'error',
     'react-hooks/exhaustive-deps': 'warn',
   },
+  overrides: [
+    {
+      files: ['e2e/**/*.ts', 'playwright.config.ts'],
+      env: { node: true, browser: false },
+      parserOptions: {
+        project: './tsconfig.e2e.json',
+      },
+    },
+  ],
 }

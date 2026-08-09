@@ -12,10 +12,14 @@ from app.auth.setup_token import setup_token_store
 VALID_PASSWORD = "correcthorsebatterystaple"
 
 
-def _login(client: TestClient) -> None:
+def _complete_setup(client: TestClient) -> None:
     token = setup_token_store._token  # test-only introspection, see test_auth_routes.py
     assert token is not None
     client.post("/api/v1/auth/setup", json={"token": token, "password": VALID_PASSWORD})
+
+
+def _login(client: TestClient) -> None:
+    _complete_setup(client)
     client.post("/api/v1/auth/login", json={"username": "admin", "password": VALID_PASSWORD})
 
 
@@ -37,6 +41,7 @@ def _create_unschedulable_notification(client: TestClient) -> str:
 
 class TestListNotifications:
     def test_requires_authentication(self, app_client: TestClient) -> None:
+        _complete_setup(app_client)
         assert app_client.get("/api/v1/notifications").status_code == 401
 
     def test_lists_an_active_unschedulable_notification(self, app_client: TestClient) -> None:
@@ -50,6 +55,7 @@ class TestListNotifications:
 
 class TestDismissNotification:
     def test_requires_authentication(self, app_client: TestClient) -> None:
+        _complete_setup(app_client)
         assert app_client.post("/api/v1/notifications/anything/dismiss").status_code == 401
 
     def test_dismiss_removes_it_from_the_active_list(self, app_client: TestClient) -> None:
