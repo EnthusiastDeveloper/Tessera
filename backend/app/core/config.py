@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     # --- Settings (Stage 4) ---
     tz: str | None = None  # default timezone for the first-run UserSettings row, design doc §14.1
 
+    # --- Calendar sync (Stage 7) ---
+    google_client_id: str | None = None
+    google_client_secret: str | None = None
+    outlook_client_id: str | None = None
+    outlook_client_secret: str | None = None
+
     def resolve_session_cookie_secure(self) -> bool:
         """Whether the session cookie should carry `Secure`. See architecture-plan §6.1.
 

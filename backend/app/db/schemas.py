@@ -199,6 +199,25 @@ class AdminPasswordResetMarker(_Frozen):
     consumed_at: datetime
 
 
+class OAuthToken(_Frozen):
+    """The "secret storage" `ExternalCalendarConnection.oauth_credentials_ref` points at
+    (design doc §3.5: "reference to secret storage, not raw tokens in this table").
+
+    Not one of design doc §3's seven entities - like `UserSession`/`AdminPasswordResetMarker`
+    (Stage 3), a new table architecture-plan §6 requires implicitly ("Secrets at rest:
+    OAuth tokens encrypted with Fernet ... keyed by SECRET_KEY") without naming its shape.
+    Token values are Fernet ciphertext (`app.calendar_sync.token_crypto`), never plaintext -
+    this layer and everything below it only ever handles opaque strings.
+    """
+
+    id: str
+    encrypted_access_token: str
+    encrypted_refresh_token: str | None = None
+    access_token_expires_at: datetime
+    created_at: datetime
+    updated_at: datetime
+
+
 __all__ = [
     "ActiveHoursWindow",
     "AdminPasswordResetMarker",
@@ -210,6 +229,7 @@ __all__ = [
     "ExternalEvent",
     "Notification",
     "NotificationType",
+    "OAuthToken",
     "Priority",
     "Recurrence",
     "RecurrenceAnchor",

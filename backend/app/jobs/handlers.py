@@ -3,8 +3,9 @@ design doc §6.3, §6.6, §6.7; architecture-plan §4's job breakdown table.
 
 `app.jobs` sits outside import-linter's "Layering" contract's sibling tier (see
 `backend/pyproject.toml`), so it may freely call into `app.task_instances`,
-`app.task_templates`, `app.scheduling`, and `app.db` - the one restriction that still
-applies is that `app.scheduling_engine` must never import back into it.
+`app.task_templates`, `app.calendar_sync`, `app.scheduling`, and `app.db` - the one
+restriction that still applies is that `app.scheduling_engine` must never import back
+into it.
 
 Every handler re-reads the instance fresh from the DB and no-ops if it is no longer in
 the state the job was scheduled for (completed/dismissed/deleted in the meantime,
@@ -19,8 +20,11 @@ from typing import cast
 
 from sqlalchemy.orm import Session
 
+from app.calendar_sync import service as calendar_sync_service
+from app.core.config import get_settings
 from app.db.base import generate_id, utcnow
 from app.db.repositories import (
+    ExternalCalendarConnectionRepository,
     NotificationRepository,
     TaskInstanceRepository,
     TaskTemplateRepository,
@@ -194,6 +198,20 @@ def run_occurrence_boundary(db: Session, jobs: JobScheduler, *, template_id: str
     schedule_next_occurrence_boundary(db, jobs, template=template, latest_instance=generated, settings=settings, now=now)
 
 
+def run_calendar_poll(db: Session, jobs: JobScheduler, *, connection_id: str) -> None:
+    """§6.4's poll trigger - Stage 6 built the interval-scheduling mechanism
+    (`schedule_interval`); this stage supplies the fetch/diff/collision logic
+    (`app.calendar_sync.service.sync_connection`). No-ops if the connection was disabled
+    or removed since the job was scheduled - `disconnect()`/reconciliation are what
+    actually cancel the job, this is the same defensive fallback pattern as
+    `run_occurrence_boundary`'s archived-template check.
+    """
+    connection = ExternalCalendarConnectionRepository(db).get(connection_id)
+    if connection is None or not connection.enabled:
+        return
+    calendar_sync_service.sync_connection(db, jobs, connection=connection, app_settings=get_settings(), now=utcnow())
+
+
 def _all_dependencies_completed(db: Session, instance: TaskInstance) -> bool:
     repo = TaskInstanceRepository(db)
     return all((dep := repo.get(dep_id)) is not None and dep.status == "completed" for dep_id in instance.dependencies)
@@ -220,6 +238,7 @@ def _create_notification(db: Session, *, type_: str, instance_id: str, message: 
 
 __all__ = [
     "DEPENDENCY_AT_RISK_THRESHOLD",
+    "run_calendar_poll",
     "run_deadline_elapsed_check",
     "run_deadline_elapsed_sweep",
     "run_dependency_at_risk_check",

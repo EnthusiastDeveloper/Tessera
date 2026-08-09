@@ -11,9 +11,10 @@ from datetime import timedelta
 from sqlalchemy.orm import Session
 
 from app.db.base import generate_id, utcnow
-from app.db.repositories import TaskInstanceRepository, TaskTemplateRepository
-from app.db.schemas import Recurrence, StatusHistoryEntry, TaskInstance, TaskTemplate, UserSettings
+from app.db.repositories import ExternalCalendarConnectionRepository, TaskInstanceRepository, TaskTemplateRepository
+from app.db.schemas import ExternalCalendarConnection, Recurrence, StatusHistoryEntry, TaskInstance, TaskTemplate, UserSettings
 from app.jobs.interface import (
+    calendar_poll_job_key,
     deadline_elapsed_job_key,
     dependency_at_risk_job_key,
     occurrence_boundary_job_key,
@@ -203,6 +204,40 @@ class TestMissedUnblocks:
         refreshed = TaskInstanceRepository(db_session).get(dependent.id)
         assert refreshed is not None
         assert refreshed.status == "blocked"
+
+
+class TestCalendarPollJobs:
+    """Stage 7 addition to reconciliation - every enabled connection keeps its poll
+    interval job, every disabled one has it cancelled.
+    """
+
+    def test_enabled_connection_gets_its_poll_job_scheduled(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        connection = ExternalCalendarConnectionRepository(db_session).create(
+            ExternalCalendarConnection(
+                id=generate_id(), provider="google", oauth_credentials_ref="ref-1", refresh_interval_minutes=20, enabled=True
+            )
+        )
+        db_session.commit()
+
+        reconcile_on_startup(db_session, jobs)
+
+        assert (calendar_poll_job_key(connection.id), 20) in jobs.intervals
+
+    def test_disabled_connection_has_its_poll_job_cancelled(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        connection = ExternalCalendarConnectionRepository(db_session).create(
+            ExternalCalendarConnection(
+                id=generate_id(), provider="google", oauth_credentials_ref="ref-1", refresh_interval_minutes=20, enabled=False
+            )
+        )
+        db_session.commit()
+
+        reconcile_on_startup(db_session, jobs)
+
+        assert calendar_poll_job_key(connection.id) in jobs.cancelled
 
 
 class TestIdempotent:

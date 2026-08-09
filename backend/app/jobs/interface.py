@@ -87,6 +87,15 @@ def occurrence_boundary_job_key(template_id: str) -> str:
     return f"occurrence_boundary:{template_id}"
 
 
+def calendar_poll_job_key(connection_id: str) -> str:
+    """Stage 7's external-calendar poll job (architecture-plan §4's job breakdown:
+    interval-based, per `refresh_interval_minutes`) - connection-scoped, not
+    instance-scoped, so deliberately outside `cancel_all_for_instance`'s reach, same as
+    `occurrence_boundary_job_key`.
+    """
+    return f"calendar_poll:{connection_id}"
+
+
 #: Singleton key for the §6.7 periodic deadline-elapsed safety-net sweep - one recurring
 #: job for the whole table, not per-instance (the inline gate + the one-off per-instance
 #: job are the primary mechanism; this just catches anything they missed).

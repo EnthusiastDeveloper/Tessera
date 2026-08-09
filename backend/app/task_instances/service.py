@@ -22,7 +22,12 @@ from app.db.repositories import (
 from app.db.schemas import StatusHistoryEntry, TaskInstance, TaskTemplate, UserSettings
 from app.jobs.interface import JobScheduler, overdue_job_key, reminder_job_key
 from app.scheduling.adapter import build_active_hours_map, has_fixed_conflict
-from app.scheduling.orchestration import DEADLINE_MISSED, generate_and_place_next_instance, place_or_defer
+from app.scheduling.orchestration import (
+    DEADLINE_MISSED,
+    generate_and_place_next_instance,
+    place_or_defer,
+    resolve_cleared_sync_conflicts,
+)
 from app.scheduling_engine.feasibility import validate_feasible_duration
 
 _TERMINAL_STATUSES = frozenset({"completed", "dismissed"})
@@ -91,6 +96,7 @@ def reschedule(db: Session, jobs: JobScheduler, instance_id: str, *, new_schedul
     if has_fixed_conflict(db, start=new_scheduled_time, end=end, exclude_instance_id=instance.id):
         raise InstanceValidationError("creation_conflict", "This time collides with an existing fixed task or external event.")
 
+    now = utcnow()
     updated = TaskInstanceRepository(db).update(
         instance.model_copy(update={"scheduled_time": new_scheduled_time, "detached": True})
     )
@@ -100,6 +106,9 @@ def reschedule(db: Session, jobs: JobScheduler, instance_id: str, *, new_schedul
     for offset in template.reminder_offsets_minutes:
         jobs.cancel(job_key=reminder_job_key(instance.id, offset))
         jobs.schedule_at(job_key=reminder_job_key(instance.id, offset), run_at=new_scheduled_time - timedelta(minutes=offset))
+    # §3.9: a manual reschedule that clears the collision resolves any sync_conflict this
+    # instance was carrying, immediately rather than waiting for the next poll (Stage 7).
+    resolve_cleared_sync_conflicts(db, now=now)
     return updated
 
 
