@@ -7,6 +7,7 @@ import { AppShell } from './views/shell/AppShell';
 import { ComingSoon } from './views/shell/ComingSoon';
 import { CreateTaskPage } from './views/tasks/CreateTaskPage';
 import { EditTaskPage } from './views/tasks/EditTaskPage';
+import { TaskDetailPage } from './views/tasks/TaskDetailPage';
 
 function App(): JSX.Element {
   return (
@@ -40,9 +41,10 @@ function App(): JSX.Element {
             <Route index element={<ComingSoon title="Timeline" note="Built in Stage 9d." />} />
             <Route path="tasks/new" element={<CreateTaskPage />} />
             <Route path="tasks/:instanceId/edit" element={<EditTaskPage />} />
+            <Route path="tasks/:instanceId" element={<TaskDetailPage />} />
             <Route
               path="backlog"
-              element={<ComingSoon title="Backlog" note="Built in Stage 9c." />}
+              element={<ComingSoon title="Backlog" note="Not yet scheduled - see implementation-plan.md." />}
             />
             <Route
               path="notifications"

@@ -187,6 +187,31 @@ def complete(db: Session, jobs: JobScheduler, instance_id: str) -> TaskInstance:
     return updated
 
 
+def start_progress(db: Session, instance_id: str) -> TaskInstance:
+    """§4 state diagram: `scheduled` -> `in_progress`, user-triggered and optional. The
+    only inbound edge in the diagram is from `scheduled`, so that's the only status this
+    accepts from. No `jobs` param (unlike `dismiss`/`complete`) - the reminder and
+    overdue-check handlers already treat `in_progress` identically to `scheduled`
+    (`app/jobs/handlers.py`'s `status not in ("scheduled", "in_progress")` guards), so
+    this transition has no job side effects to co-locate, matching
+    `app.notifications.service.dismiss`'s precedent for a job-free mutation.
+    """
+    instance = _require_instance(db, instance_id)
+    if instance.status != "scheduled":
+        raise InstanceValidationError(
+            "invalid_field", f"Cannot mark a {instance.status} instance in-progress - only a scheduled instance can be started."
+        )
+    now = utcnow()
+    return TaskInstanceRepository(db).update(
+        instance.model_copy(
+            update={
+                "status": "in_progress",
+                "status_history": (*instance.status_history, StatusHistoryEntry(status="in_progress", at=now)),
+            }
+        )
+    )
+
+
 def dismiss(db: Session, jobs: JobScheduler, instance_id: str) -> TaskInstance:
     """§3.8 "skip this occurrence" - terminal (`dismissed`), preserving the row rather
     than destroying it (the routine way to clear a stale predecessor under calendar
@@ -379,4 +404,5 @@ __all__ = [
     "list_instances",
     "promote_if_unblocked",
     "reschedule",
+    "start_progress",
 ]

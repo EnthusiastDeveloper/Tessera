@@ -128,6 +128,27 @@ class TestComplete:
         assert response.json()["code"] == "invalid_field"
 
 
+class TestStart:
+    def test_requires_authentication(self, app_client: TestClient) -> None:
+        _complete_setup(app_client)
+        assert app_client.post("/api/v1/task-instances/anything/start").status_code == 401
+
+    def test_starts_a_scheduled_instance(self, app_client: TestClient) -> None:
+        _login(app_client)
+        instance = _create_fixed(app_client)
+        response = app_client.post(f"/api/v1/task-instances/{instance['id']}/start")
+        assert response.status_code == 200, response.text
+        assert response.json()["status"] == "in_progress"
+
+    def test_starting_twice_is_rejected(self, app_client: TestClient) -> None:
+        _login(app_client)
+        instance = _create_fixed(app_client)
+        app_client.post(f"/api/v1/task-instances/{instance['id']}/start")
+        response = app_client.post(f"/api/v1/task-instances/{instance['id']}/start")
+        assert response.status_code == 422
+        assert response.json()["code"] == "invalid_field"
+
+
 class TestDismiss:
     def test_requires_authentication(self, app_client: TestClient) -> None:
         _complete_setup(app_client)

@@ -114,6 +114,17 @@ def extend_deadline_endpoint(
         raise AppError(_VALIDATION_ERROR_STATUS[exc.code], exc.code, str(exc)) from exc
 
 
+@router.post("/{instance_id}/start")
+def start_endpoint(instance_id: str, db: Session = Depends(get_db)) -> TaskInstance:
+    """§4 state diagram: `scheduled` -> `in_progress`. No `jobs` dependency - this
+    transition has no job side effects (see `service.start_progress`'s docstring).
+    """
+    try:
+        return service.start_progress(db, instance_id)
+    except service.InstanceValidationError as exc:
+        raise AppError(_VALIDATION_ERROR_STATUS[exc.code], exc.code, str(exc)) from exc
+
+
 @router.post("/{instance_id}/dismiss")
 def dismiss_endpoint(
     instance_id: str, db: Session = Depends(get_db), jobs: JobScheduler = Depends(get_job_scheduler)

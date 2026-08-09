@@ -44,3 +44,32 @@ export function deleteInstance(instanceId: string, scope?: EditScope): Promise<D
   const suffix = scope ? `?scope=${scope}` : '';
   return apiClient.delete<DeleteInstanceResult>(`/task-instances/${instanceId}${suffix}`);
 }
+
+/** §3.3/§4: reachable directly from `pending`, `blocked`, or `scheduled` - not only via
+ * `in_progress`. */
+export function completeInstance(instanceId: string): Promise<TaskInstance> {
+  return apiClient.post<TaskInstance>(`/task-instances/${instanceId}/complete`);
+}
+
+/** §3.8 "skip this occurrence" - terminal (`dismissed`), reachable from any non-terminal
+ * status. Preserves the row rather than destroying it. */
+export function dismissInstance(instanceId: string): Promise<TaskInstance> {
+  return apiClient.post<TaskInstance>(`/task-instances/${instanceId}/dismiss`);
+}
+
+/** §4 state diagram: `scheduled` -> `in_progress`, user-triggered and optional - the
+ * only inbound edge in the diagram is from `scheduled`. */
+export function startInstance(instanceId: string): Promise<TaskInstance> {
+  return apiClient.post<TaskInstance>(`/task-instances/${instanceId}/start`);
+}
+
+/** §6.6/§3.10: retiming a `fixed` instance - a "this occurrence" edit of
+ * `scheduled_time` specifically, so it gets §6.5's hard-block conflict validation. */
+export function rescheduleInstance(instanceId: string, scheduledTime: string): Promise<TaskInstance> {
+  return apiClient.post<TaskInstance>(`/task-instances/${instanceId}/reschedule`, { scheduled_time: scheduledTime });
+}
+
+/** §6.7 resolution path: `missed` -> `pending`, a "this occurrence" edit of `deadline`. */
+export function extendDeadline(instanceId: string, deadline: string): Promise<TaskInstance> {
+  return apiClient.post<TaskInstance>(`/task-instances/${instanceId}/extend-deadline`, { deadline });
+}
