@@ -120,3 +120,56 @@ def test_update_can_change_dependencies(db_session: Session) -> None:
     db_session.commit()
 
     assert updated.dependencies == (dependency_b.id,)
+
+
+class TestListFiltered:
+    """`GET /task-instances?status=&priority=&type=` (architecture-plan §3)."""
+
+    def test_no_filters_returns_everything(self, db_session: Session) -> None:
+        template_id = _persisted_template(db_session)
+        repo = TaskInstanceRepository(db_session)
+        repo.create(make_task_instance(template_id=template_id, status="pending"))
+        repo.create(make_task_instance(template_id=template_id, status="scheduled"))
+        db_session.commit()
+
+        assert len(repo.list_filtered()) == 2
+
+    def test_filters_by_status(self, db_session: Session) -> None:
+        template_id = _persisted_template(db_session)
+        repo = TaskInstanceRepository(db_session)
+        scheduled = repo.create(make_task_instance(template_id=template_id, status="scheduled"))
+        repo.create(make_task_instance(template_id=template_id, status="pending"))
+        db_session.commit()
+
+        results = repo.list_filtered(status="scheduled")
+        assert {i.id for i in results} == {scheduled.id}
+
+    def test_filters_by_priority(self, db_session: Session) -> None:
+        template_id = _persisted_template(db_session)
+        repo = TaskInstanceRepository(db_session)
+        high = repo.create(make_task_instance(template_id=template_id, status="pending", priority=3))
+        repo.create(make_task_instance(template_id=template_id, status="pending", priority=1))
+        db_session.commit()
+
+        results = repo.list_filtered(priority=3)
+        assert {i.id for i in results} == {high.id}
+
+    def test_filters_by_type(self, db_session: Session) -> None:
+        template_id = _persisted_template(db_session)
+        repo = TaskInstanceRepository(db_session)
+        fixed = repo.create(make_task_instance(template_id=template_id, status="pending", type="fixed"))
+        repo.create(make_task_instance(template_id=template_id, status="pending", type="flexible"))
+        db_session.commit()
+
+        results = repo.list_filtered(type_="fixed")
+        assert {i.id for i in results} == {fixed.id}
+
+    def test_filters_combine_with_and_semantics(self, db_session: Session) -> None:
+        template_id = _persisted_template(db_session)
+        repo = TaskInstanceRepository(db_session)
+        match = repo.create(make_task_instance(template_id=template_id, status="scheduled", priority=3, type="fixed"))
+        repo.create(make_task_instance(template_id=template_id, status="scheduled", priority=1, type="fixed"))
+        db_session.commit()
+
+        results = repo.list_filtered(status="scheduled", priority=3, type_="fixed")
+        assert {i.id for i in results} == {match.id}

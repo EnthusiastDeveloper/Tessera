@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from sqlalchemy.orm import Session
 
@@ -24,6 +24,8 @@ from app.jobs.interface import JobScheduler, overdue_job_key, reminder_job_key
 from app.scheduling.adapter import build_active_hours_map, has_fixed_conflict
 from app.scheduling.orchestration import (
     DEADLINE_MISSED,
+    UNSCHEDULABLE,
+    archive_template_and_cancel_jobs,
     generate_and_place_next_instance,
     place_or_defer,
     resolve_cleared_sync_conflicts,
@@ -35,6 +37,14 @@ _TERMINAL_STATUSES = frozenset({"completed", "dismissed"})
 #: deliberately excluded - retiming a fixed instance goes through `reschedule()`, which
 #: needs §6.5's conflict validation `PATCH` doesn't run.
 _THIS_OCCURRENCE_FIELDS = ("name", "description", "location", "priority", "estimated_duration_minutes", "deadline")
+#: §3.8's dismiss side effect: "auto-resolve its open notifications per 3.9 (overdue,
+#: unschedulable, deadline_missed): the condition has cleared because the user has closed
+#: the occurrence out." `sync_conflict` is deliberately not listed here - it already
+#: auto-resolves through `resolve_cleared_sync_conflicts` once the instance is no longer
+#: `scheduled` (see that function's `_SYNC_CONFLICT_MOOT_STATUSES`), no second mechanism needed.
+_DISMISS_RESOLVED_NOTIFICATION_TYPES = ("overdue", UNSCHEDULABLE, DEADLINE_MISSED)
+
+DeleteScope = Literal["this_occurrence", "this_and_future"]
 
 
 class InstanceValidationError(Exception):
@@ -49,6 +59,38 @@ class InstanceValidationError(Exception):
 class DeleteResult:
     deleted_instance_id: str
     unblocked_instance_ids: tuple[str, ...]
+
+
+def list_instances(
+    db: Session, *, status: str | None = None, priority: int | None = None, type: str | None = None, view: str | None = None
+) -> tuple[TaskInstance, ...]:
+    """`GET /task-instances` (architecture-plan §3). `view=backlog` is the Backlog view
+    (design doc §8.1, architecture-plan §3 Rev 3): "a filter on the existing collection,
+    not its own resource" - `blocked`/`missed` instances, plus `pending` instances
+    carrying an active `unschedulable` notification. Not specified whether `view=backlog`
+    may be combined with the other filters - chosen behavior: it takes over the query
+    entirely and the other filters are ignored, since the Backlog view already fully
+    determines its own status set.
+    """
+    if view == "backlog":
+        return _list_backlog(db)
+    return TaskInstanceRepository(db).list_filtered(status=status, priority=priority, type_=type)
+
+
+def _list_backlog(db: Session) -> tuple[TaskInstance, ...]:
+    repo = TaskInstanceRepository(db)
+    blocked_or_missed = repo.list_by_statuses(("blocked", "missed"))
+    pending_unschedulable = tuple(
+        instance for instance in repo.list_by_statuses(("pending",)) if _has_active(db, instance.id, UNSCHEDULABLE)
+    )
+    return blocked_or_missed + pending_unschedulable
+
+
+def _has_active(db: Session, instance_id: str, notification_type: str) -> bool:
+    return any(
+        n.type == notification_type and n.resolved_at is None and n.dismissed_at is None
+        for n in NotificationRepository(db).list_for_instance(instance_id)
+    )
 
 
 def edit_this_occurrence(db: Session, jobs: JobScheduler, instance_id: str, *, patch: dict[str, Any]) -> TaskInstance:
@@ -145,6 +187,41 @@ def complete(db: Session, jobs: JobScheduler, instance_id: str) -> TaskInstance:
     return updated
 
 
+def dismiss(db: Session, jobs: JobScheduler, instance_id: str) -> TaskInstance:
+    """§3.8 "skip this occurrence" - terminal (`dismissed`), preserving the row rather
+    than destroying it (the routine way to clear a stale predecessor under calendar
+    anchoring, §9.1). Reachable from any non-terminal status. Dependents are deliberately
+    left `blocked` - `dismissed` does not satisfy a dependency (§4).
+    """
+    instance = _require_instance(db, instance_id)
+    if instance.status in _TERMINAL_STATUSES:
+        raise InstanceValidationError("invalid_field", f"Cannot dismiss a {instance.status} instance - it is terminal.")
+    now = utcnow()
+
+    updated = TaskInstanceRepository(db).update(
+        instance.model_copy(
+            update={
+                "status": "dismissed",
+                "status_history": (*instance.status_history, StatusHistoryEntry(status="dismissed", at=now)),
+            }
+        )
+    )
+    jobs.cancel_all_for_instance(instance_id=instance.id)
+    _resolve_notifications(db, instance_id=instance.id, types=_DISMISS_RESOLVED_NOTIFICATION_TYPES, now=now)
+
+    template = _require_template(db, instance.template_id)
+    if template.recurrence.anchor == "completion" and not template.archived:
+        # §3.8 "Re-anchoring on this_occurrence": dismissing isn't completing, so there is
+        # no completed_at to anchor against - the successor's nominal date is
+        # `now + cadence`. `predecessor=None` is exactly that: the same "advance the rule
+        # from now" path `generate_next_instance` already uses for a template's very
+        # first instance (see its module docstring's `_next_nominal_instant`).
+        settings = _require_settings(db)
+        generate_and_place_next_instance(db, jobs, template=template, predecessor=None, settings=settings, now=now)
+
+    return updated
+
+
 def extend_deadline(db: Session, jobs: JobScheduler, instance_id: str, *, new_deadline: datetime) -> TaskInstance:
     """§6.7 resolution path: `missed` -> `pending`, a "this occurrence" edit of `deadline`
     (sets `detached=True`), re-entering §6.2 immediately (design doc §6.2's own trigger
@@ -172,15 +249,28 @@ def extend_deadline(db: Session, jobs: JobScheduler, instance_id: str, *, new_de
     return place_or_defer(db, jobs, instance=pending_instance, template=template, settings=settings, now=now)
 
 
-def delete_instance(db: Session, jobs: JobScheduler, instance_id: str) -> DeleteResult:
+def delete_instance(db: Session, jobs: JobScheduler, instance_id: str, *, scope: DeleteScope | None = None) -> DeleteResult:
     """§3.8: unlink, not cascade. Deleting an instance other instances depend on just
     removes the link; if that leaves a dependent with zero remaining dependencies, it
     unblocks and is placed immediately, in the same transaction (matching §6.9's
     co-location principle - design doc Example D's own expected outcome is "placed by
     6.2", not merely "eligible for a later pass").
+
+    `scope` mirrors §3.10's edit-scope prompt (§3.8): required for a recurring template
+    (the two scopes are equivalent for `one_time`, so the prompt - and this argument - is
+    skipped there, matching design doc §3.8's own framing). `this_occurrence` deletes just
+    this instance and the series continues (a successor is generated per §9.1 for a
+    `completion`-anchored template - a `calendar`-anchored one already continues on its
+    own via the independently-running occurrence-boundary job). `this_and_future` deletes
+    this instance **and** archives the template, ending the series.
     """
     repo = TaskInstanceRepository(db)
-    _require_instance(db, instance_id)  # 404s cleanly if the id is unknown
+    instance = _require_instance(db, instance_id)  # 404s cleanly if the id is unknown
+    template = _require_template(db, instance.template_id)
+    is_recurring = template.recurrence.pattern != "one_time"
+    if is_recurring and scope is None:
+        raise InstanceValidationError("scope_required", "scope is required when deleting an instance of a recurring template.")
+
     dependents = repo.list_dependents(instance_id)
 
     jobs.cancel_all_for_instance(instance_id=instance_id)
@@ -195,6 +285,14 @@ def delete_instance(db: Session, jobs: JobScheduler, instance_id: str) -> Delete
         promoted = promote_if_unblocked(db, jobs, refreshed, now=now)
         if promoted is not None:
             unblocked.append(promoted.id)
+
+    if scope == "this_and_future":
+        archive_template_and_cancel_jobs(db, jobs, template.id)
+    elif is_recurring and scope == "this_occurrence" and not template.archived and template.recurrence.anchor == "completion":
+        # See dismiss()'s identical §3.8 "Re-anchoring on this_occurrence" comment -
+        # deleting isn't completing, so the successor anchors at `now + cadence`.
+        settings = _require_settings(db)
+        generate_and_place_next_instance(db, jobs, template=template, predecessor=None, settings=settings, now=now)
 
     return DeleteResult(deleted_instance_id=instance_id, unblocked_instance_ids=tuple(unblocked))
 
@@ -271,11 +369,14 @@ def _require_settings(db: Session) -> UserSettings:
 
 __all__ = [
     "DeleteResult",
+    "DeleteScope",
     "InstanceValidationError",
     "complete",
     "delete_instance",
+    "dismiss",
     "edit_this_occurrence",
     "extend_deadline",
+    "list_instances",
     "promote_if_unblocked",
     "reschedule",
 ]

@@ -31,6 +31,43 @@ def _create_fixed(client: TestClient) -> dict[str, object]:
     return client.post("/api/v1/task-templates", json=payload).json()["instance"]  # type: ignore[no-any-return]
 
 
+def _create_recurring_fixed(client: TestClient) -> dict[str, object]:
+    payload = {
+        "name": "Daily standup",
+        "type": "fixed",
+        "fixed_time_of_day": "09:00",
+        "recurrence": {"pattern": "daily", "interval": 1, "anchor": "calendar"},
+        "priority": "medium",
+        "estimated_duration_minutes": 15,
+    }
+    return client.post("/api/v1/task-templates", json=payload).json()["instance"]  # type: ignore[no-any-return]
+
+
+class TestListInstances:
+    def test_requires_authentication(self, app_client: TestClient) -> None:
+        assert app_client.get("/api/v1/task-instances").status_code == 401
+
+    def test_lists_created_instances(self, app_client: TestClient) -> None:
+        _login(app_client)
+        instance = _create_fixed(app_client)
+        response = app_client.get("/api/v1/task-instances")
+        assert response.status_code == 200, response.text
+        assert instance["id"] in {i["id"] for i in response.json()}
+
+    def test_filters_by_status(self, app_client: TestClient) -> None:
+        _login(app_client)
+        _create_fixed(app_client)
+        response = app_client.get("/api/v1/task-instances", params={"status": "completed"})
+        assert response.status_code == 200, response.text
+        assert response.json() == []
+
+    def test_backlog_view(self, app_client: TestClient) -> None:
+        _login(app_client)
+        response = app_client.get("/api/v1/task-instances", params={"view": "backlog"})
+        assert response.status_code == 200, response.text
+        assert response.json() == []
+
+
 class TestPatchInstance:
     def test_requires_authentication(self, app_client: TestClient) -> None:
         assert app_client.patch("/api/v1/task-instances/anything", json={"name": "x"}).status_code == 401
@@ -85,6 +122,26 @@ class TestComplete:
         assert response.json()["code"] == "invalid_field"
 
 
+class TestDismiss:
+    def test_requires_authentication(self, app_client: TestClient) -> None:
+        assert app_client.post("/api/v1/task-instances/anything/dismiss").status_code == 401
+
+    def test_dismisses(self, app_client: TestClient) -> None:
+        _login(app_client)
+        instance = _create_fixed(app_client)
+        response = app_client.post(f"/api/v1/task-instances/{instance['id']}/dismiss")
+        assert response.status_code == 200, response.text
+        assert response.json()["status"] == "dismissed"
+
+    def test_dismissing_twice_is_rejected(self, app_client: TestClient) -> None:
+        _login(app_client)
+        instance = _create_fixed(app_client)
+        app_client.post(f"/api/v1/task-instances/{instance['id']}/dismiss")
+        response = app_client.post(f"/api/v1/task-instances/{instance['id']}/dismiss")
+        assert response.status_code == 422
+        assert response.json()["code"] == "invalid_field"
+
+
 class TestDelete:
     def test_deletes_and_returns_unblocked_ids(self, app_client: TestClient) -> None:
         _login(app_client)
@@ -94,3 +151,23 @@ class TestDelete:
         body = response.json()
         assert body["deleted_instance_id"] == instance["id"]
         assert body["unblocked_instance_ids"] == []
+
+    def test_scope_is_required_for_a_recurring_template(self, app_client: TestClient) -> None:
+        _login(app_client)
+        instance = _create_recurring_fixed(app_client)
+        response = app_client.delete(f"/api/v1/task-instances/{instance['id']}")
+        assert response.status_code == 422
+        assert response.json()["code"] == "scope_required"
+
+    def test_this_and_future_scope_deletes(self, app_client: TestClient) -> None:
+        _login(app_client)
+        instance = _create_recurring_fixed(app_client)
+        response = app_client.delete(f"/api/v1/task-instances/{instance['id']}?scope=this_and_future")
+        assert response.status_code == 200, response.text
+        assert response.json()["deleted_instance_id"] == instance["id"]
+
+    def test_invalid_scope_value_is_a_validation_error(self, app_client: TestClient) -> None:
+        _login(app_client)
+        instance = _create_recurring_fixed(app_client)
+        response = app_client.delete(f"/api/v1/task-instances/{instance['id']}?scope=not-a-real-scope")
+        assert response.status_code == 422

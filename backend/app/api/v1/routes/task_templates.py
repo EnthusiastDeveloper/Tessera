@@ -75,6 +75,14 @@ class ArchiveResponse(BaseModel):
     incomplete_instance_ids: tuple[str, ...]
 
 
+@router.get("/{template_id}")
+def get_template_endpoint(template_id: str, db: Session = Depends(get_db)) -> TaskTemplate:
+    try:
+        return service.get_template(db, template_id)
+    except service.TemplateValidationError as exc:
+        raise AppError(_VALIDATION_ERROR_STATUS[exc.code], exc.code, str(exc)) from exc
+
+
 @router.post("", status_code=201)
 def create_template_endpoint(
     payload: CreateTemplateRequest,

@@ -16,14 +16,18 @@ from app.db.repositories import (
     NotificationRepository,
     OAuthTokenRepository,
     TaskInstanceRepository,
+    TaskTemplateRepository,
 )
 from app.db.schemas import ExternalCalendarConnection, ExternalEvent, Notification, Recurrence, UserSettings
+from app.jobs.interface import occurrence_boundary_job_key
 from app.task_instances.service import (
     InstanceValidationError,
     complete,
     delete_instance,
+    dismiss,
     edit_this_occurrence,
     extend_deadline,
+    list_instances,
     reschedule,
 )
 from app.task_templates.service import TaskTemplateDraft, create_template
@@ -341,3 +345,235 @@ class TestDeleteInstance:
         unblocked = TaskInstanceRepository(db_session).get(inspection.instance.id)
         assert unblocked is not None
         assert unblocked.status != "blocked"
+
+
+class TestDismiss:
+    """§3.8 "skip this occurrence" - terminal, preserves the row."""
+
+    def test_transitions_to_dismissed(self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler) -> None:
+        created = create_template(db_session, jobs, _fixed_draft())
+        db_session.commit()
+
+        dismissed = dismiss(db_session, jobs, created.instance.id)
+        db_session.commit()
+
+        assert dismissed.status == "dismissed"
+        assert any(entry.status == "dismissed" for entry in dismissed.status_history)
+
+    def test_rejects_dismissing_an_already_terminal_instance(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        created = create_template(db_session, jobs, _fixed_draft())
+        db_session.commit()
+        complete(db_session, jobs, created.instance.id)
+        db_session.commit()
+
+        with pytest.raises(InstanceValidationError) as exc_info:
+            dismiss(db_session, jobs, created.instance.id)
+        assert exc_info.value.code == "invalid_field"
+
+    def test_cancels_all_jobs(self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler) -> None:
+        created = create_template(db_session, jobs, _fixed_draft())
+        db_session.commit()
+
+        dismiss(db_session, jobs, created.instance.id)
+        db_session.commit()
+
+        assert created.instance.id in jobs.cancelled_instances
+
+    def test_resolves_overdue_unschedulable_and_deadline_missed_notifications(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        created = create_template(db_session, jobs, _fixed_draft())
+        db_session.commit()
+        overdue = NotificationRepository(db_session).create(
+            Notification(
+                id=generate_id(), type="overdue", related_instance_id=created.instance.id, message="late", created_at=utcnow()
+            )
+        )
+        db_session.commit()
+
+        dismiss(db_session, jobs, created.instance.id)
+        db_session.commit()
+
+        refreshed = NotificationRepository(db_session).get(overdue.id)
+        assert refreshed is not None and refreshed.resolved_at is not None
+
+    def test_dependents_stay_blocked(self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler) -> None:
+        """§4: `dismissed` does not satisfy a dependency - unlike complete()/delete_instance(),
+        dismiss() must never unblock a dependent."""
+        prep = create_template(db_session, jobs, _flexible_draft(name="Prepare car"))
+        db_session.commit()
+        inspection = create_template(db_session, jobs, _flexible_draft(name="Inspection", dependencies=(prep.instance.id,)))
+        db_session.commit()
+        assert inspection.instance.status == "blocked"
+
+        dismiss(db_session, jobs, prep.instance.id)
+        db_session.commit()
+
+        still_blocked = TaskInstanceRepository(db_session).get(inspection.instance.id)
+        assert still_blocked is not None
+        assert still_blocked.status == "blocked"
+
+    def test_completion_anchored_template_generates_a_successor(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        """§3.8 "Re-anchoring on this_occurrence": dismissing isn't completing, so the
+        successor anchors at `now + cadence`, not at any `completed_at`."""
+        created = create_template(
+            db_session,
+            jobs,
+            _flexible_draft(recurrence=Recurrence(pattern="daily", interval=1, anchor="completion")),
+        )
+        db_session.commit()
+
+        dismiss(db_session, jobs, created.instance.id)
+        db_session.commit()
+
+        instances = TaskInstanceRepository(db_session).list_by_template(created.template.id)
+        assert len(instances) == 2
+        successor = next(i for i in instances if i.id != created.instance.id)
+        assert successor.status in ("pending", "scheduled")
+
+    def test_calendar_anchored_template_does_not_directly_generate_a_successor(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        """A `calendar`-anchored series already continues on its own via the independently
+        scheduled occurrence-boundary job - dismiss() must not also generate one directly,
+        or the series would double-generate."""
+        created = create_template(
+            db_session, jobs, _fixed_draft(recurrence=Recurrence(pattern="daily", interval=1, anchor="calendar"))
+        )
+        db_session.commit()
+
+        dismiss(db_session, jobs, created.instance.id)
+        db_session.commit()
+
+        instances = TaskInstanceRepository(db_session).list_by_template(created.template.id)
+        assert len(instances) == 1
+
+
+class TestDeleteInstanceScope:
+    """§3.8/§3.10: deletion scope for recurring tasks."""
+
+    def test_scope_is_not_required_for_a_one_time_template(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        created = create_template(db_session, jobs, _fixed_draft())
+        db_session.commit()
+
+        result = delete_instance(db_session, jobs, created.instance.id)  # no scope kwarg
+        db_session.commit()
+        assert result.deleted_instance_id == created.instance.id
+
+    def test_scope_is_required_for_a_recurring_template(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        created = create_template(
+            db_session, jobs, _fixed_draft(recurrence=Recurrence(pattern="daily", interval=1, anchor="calendar"))
+        )
+        db_session.commit()
+
+        with pytest.raises(InstanceValidationError) as exc_info:
+            delete_instance(db_session, jobs, created.instance.id)
+        assert exc_info.value.code == "scope_required"
+
+    def test_this_and_future_archives_the_template_and_cancels_its_boundary_job(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        created = create_template(
+            db_session, jobs, _fixed_draft(recurrence=Recurrence(pattern="daily", interval=1, anchor="calendar"))
+        )
+        db_session.commit()
+
+        delete_instance(db_session, jobs, created.instance.id, scope="this_and_future")
+        db_session.commit()
+
+        archived = TaskTemplateRepository(db_session).get(created.template.id)
+        assert archived is not None and archived.archived is True
+        assert occurrence_boundary_job_key(created.template.id) in jobs.cancelled
+
+    def test_this_occurrence_on_a_completion_anchored_template_generates_a_successor(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        created = create_template(
+            db_session,
+            jobs,
+            _flexible_draft(recurrence=Recurrence(pattern="daily", interval=1, anchor="completion")),
+        )
+        db_session.commit()
+
+        delete_instance(db_session, jobs, created.instance.id, scope="this_occurrence")
+        db_session.commit()
+
+        instances = TaskInstanceRepository(db_session).list_by_template(created.template.id)
+        assert len(instances) == 1  # the original was deleted, one successor remains
+        assert instances[0].id != created.instance.id
+
+    def test_this_occurrence_on_a_calendar_anchored_template_generates_nothing_directly(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        created = create_template(
+            db_session, jobs, _fixed_draft(recurrence=Recurrence(pattern="daily", interval=1, anchor="calendar"))
+        )
+        db_session.commit()
+
+        delete_instance(db_session, jobs, created.instance.id, scope="this_occurrence")
+        db_session.commit()
+
+        instances = TaskInstanceRepository(db_session).list_by_template(created.template.id)
+        assert instances == ()
+
+
+class TestListInstances:
+    """`GET /task-instances?status=&priority=&type=&view=backlog` (architecture-plan §3)."""
+
+    def test_filters_delegate_to_the_repository(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        created = create_template(db_session, jobs, _fixed_draft())
+        db_session.commit()
+
+        results = list_instances(db_session, status="scheduled", priority=created.instance.priority)
+        assert {i.id for i in results} == {created.instance.id}
+
+    def test_backlog_view_includes_blocked_and_missed(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        prep = create_template(db_session, jobs, _flexible_draft(name="Prepare car"))
+        db_session.commit()
+        inspection = create_template(db_session, jobs, _flexible_draft(name="Inspection", dependencies=(prep.instance.id,)))
+        db_session.commit()
+        assert inspection.instance.status == "blocked"
+
+        backlog = list_instances(db_session, view="backlog")
+        assert inspection.instance.id in {i.id for i in backlog}
+
+    def test_backlog_view_includes_pending_with_active_unschedulable_notification(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        created = create_template(db_session, jobs, _flexible_draft())
+        db_session.commit()
+        pending = TaskInstanceRepository(db_session).update(created.instance.model_copy(update={"status": "pending"}))
+        NotificationRepository(db_session).create(
+            Notification(
+                id=generate_id(),
+                type="unschedulable",
+                related_instance_id=pending.id,
+                message="no slot",
+                created_at=utcnow(),
+            )
+        )
+        db_session.commit()
+
+        backlog = list_instances(db_session, view="backlog")
+        assert pending.id in {i.id for i in backlog}
+
+    def test_backlog_view_excludes_scheduled_and_plain_pending(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        scheduled = create_template(db_session, jobs, _fixed_draft())
+        db_session.commit()
+
+        backlog = list_instances(db_session, view="backlog")
+        assert scheduled.instance.id not in {i.id for i in backlog}

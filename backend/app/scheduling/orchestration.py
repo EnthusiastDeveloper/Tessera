@@ -22,7 +22,7 @@ from typing import cast
 from sqlalchemy.orm import Session
 
 from app.db.base import generate_id
-from app.db.repositories import NotificationRepository, TaskInstanceRepository
+from app.db.repositories import NotificationRepository, TaskInstanceRepository, TaskTemplateRepository
 from app.db.schemas import (
     Notification,
     NotificationType,
@@ -198,6 +198,27 @@ def schedule_next_occurrence_boundary(
     jobs.schedule_at(job_key=occurrence_boundary_job_key(template.id), run_at=upcoming.nominal_date)
 
 
+def archive_template_and_cancel_jobs(db: Session, jobs: JobScheduler, template_id: str) -> TaskTemplate:
+    """§3.8: soft-delete a template (`archived=true`) and cancel its calendar-anchor
+    occurrence-boundary job if it has one, so a later reconciliation pass doesn't
+    resurrect a series the user just ended (architecture-plan §4.1 Rev 3).
+
+    Shared by `app.task_templates.service.archive_template` (user-initiated archival)
+    and `app.task_instances.service.delete_instance`'s `this_and_future` scope (§3.8:
+    "Delete, this_and_future: ... template archived") - independent siblings under the
+    layering contract that can't call each other directly, same reasoning as every other
+    function in this module.
+    """
+    repo = TaskTemplateRepository(db)
+    template = repo.get(template_id)
+    if template is None:
+        raise LookupError(f"TaskTemplate {template_id} not found")
+    archived = repo.archive(template_id)
+    if template.recurrence.pattern != "one_time" and template.recurrence.anchor == "calendar":
+        jobs.cancel(job_key=occurrence_boundary_job_key(template_id))
+    return archived
+
+
 #: Statuses for which a `sync_conflict` is moot regardless of overlap - the instance left
 #: the timeline (terminal) or never held a real slot to begin with. Deliberately *not*
 #: "status != scheduled": an `in_progress` instance still occupies `scheduled_time` and
@@ -304,6 +325,7 @@ __all__ = [
     "DEADLINE_MISSED",
     "SYNC_CONFLICT",
     "UNSCHEDULABLE",
+    "archive_template_and_cancel_jobs",
     "generate_and_place_next_instance",
     "place_or_defer",
     "resolve_cleared_sync_conflicts",
