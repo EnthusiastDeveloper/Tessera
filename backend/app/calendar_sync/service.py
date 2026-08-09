@@ -69,6 +69,37 @@ def list_connections(db: Session) -> tuple[ExternalCalendarConnection, ...]:
     return ExternalCalendarConnectionRepository(db).list()
 
 
+def list_display_events(db: Session) -> tuple[ExternalEvent, ...]:
+    """`GET /external-events` (added Stage 9d) - cached `ExternalEvent` rows (§3.11) across
+    every enabled connection, for the Timeline's read-only external busy-block/overlay
+    layer (§8.1 screen 2, §7).
+
+    Stage 8/9a-9c left no route exposing `ExternalEvent` at all, even though the scheduler
+    has read the cache internally since Stage 7 (`app.scheduling.adapter.gather_external_obstacles`)
+    - a real, previously-unbuilt gap, same category as prior stages' findings.
+
+    Reuses that function's connection-iteration pattern (every *enabled* connection's
+    active, non-soft-deleted events) but deliberately **not** its filter predicate:
+    `gather_external_obstacles` excludes both transparent *and* all-day events because
+    neither should obstruct placement (§7 - "transparent... excluded", "all-day...
+    display-only overlays... do not block flexible placement"). For *display* only
+    transparent events are dropped - a "Free" event was never meant to be seen as busy on
+    the Timeline either. All-day events are kept (§7: "imported and shown on the Timeline
+    ... as display-only overlays"), with `is_all_day` passed through so the frontend can
+    render them as the distinct non-blocking overlay category rather than a timed
+    busy-block.
+    """
+    connection_repo = ExternalCalendarConnectionRepository(db)
+    event_repo = ExternalEventRepository(db)
+    events: list[ExternalEvent] = []
+    for connection in connection_repo.list(enabled_only=True):
+        for event in event_repo.list_active_for_connection(connection.id):
+            if event.is_transparent:
+                continue
+            events.append(event)
+    return tuple(events)
+
+
 def build_authorize_url(
     *, provider: CalendarProvider, session_id: str, redirect_uri: str, refresh_interval_minutes: int, app_settings: Settings
 ) -> AuthorizeResult:
@@ -306,5 +337,6 @@ __all__ = [
     "complete_oauth_callback",
     "disconnect",
     "list_connections",
+    "list_display_events",
     "sync_connection",
 ]

@@ -100,3 +100,73 @@ class TestArchiveTemplate:
         response = app_client.delete(f"/api/v1/task-templates/{created['template']['id']}")
         assert response.status_code == 200, response.text
         assert response.json()["template"]["archived"] is True
+
+
+def _weekly_fixed_payload(**overrides: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "name": "Weekly team sync",
+        "type": "fixed",
+        "recurrence": {"pattern": "weekly", "interval": 1, "day_of_week": 0, "anchor": "calendar"},
+        "priority": "medium",
+        "estimated_duration_minutes": 30,
+        "fixed_time_of_day": "09:00",
+    }
+    payload.update(overrides)
+    return payload
+
+
+class TestProjections:
+    """`GET /task-templates/projections` (design doc §9.2, added Stage 9d). Business logic
+    (anchor branching, the horizon boundary, the completion-anchor rebase) is covered at
+    the unit level (tests/unit/scheduling/test_virtual_occurrences.py) - this file only
+    proves the route wires up: auth, the "/projections" vs "/{template_id}" path-matching
+    order, and the response shape (no `id`, no real-instance fields).
+    """
+
+    def test_requires_authentication(self, app_client: TestClient) -> None:
+        _complete_setup(app_client)
+        assert app_client.get("/api/v1/task-templates/projections").status_code == 401
+
+    def test_does_not_get_captured_by_the_template_id_path_param(self, app_client: TestClient) -> None:
+        """Regression guard: `/projections` must resolve to the dedicated route, not
+        `GET /{template_id}` with `template_id="projections"` (which would 404).
+        """
+        _login(app_client)
+        response = app_client.get("/api/v1/task-templates/projections")
+        assert response.status_code == 200, response.text
+        assert isinstance(response.json(), list)
+
+    def test_one_time_template_produces_no_ghosts(self, app_client: TestClient) -> None:
+        _login(app_client)
+        app_client.post("/api/v1/task-templates", json=_flexible_payload())
+        response = app_client.get("/api/v1/task-templates/projections")
+        assert response.status_code == 200, response.text
+        assert response.json() == []
+
+    def test_recurring_calendar_anchored_template_produces_ghosts_with_the_right_shape(self, app_client: TestClient) -> None:
+        _login(app_client)
+        created = app_client.post("/api/v1/task-templates", json=_weekly_fixed_payload()).json()
+        template_id = created["template"]["id"]
+
+        response = app_client.get("/api/v1/task-templates/projections")
+        assert response.status_code == 200, response.text
+        occurrences = [o for o in response.json() if o["template_id"] == template_id]
+        assert len(occurrences) >= 1
+        occurrence = occurrences[0]
+        assert occurrence["anchor"] == "calendar"
+        assert occurrence["name"] == "Weekly team sync"
+        assert occurrence["type"] == "fixed"
+        assert "occurs_at" in occurrence
+        assert "id" not in occurrence  # §9.2: never confused with a real TaskInstance
+        assert "status" not in occurrence
+        assert "detached" not in occurrence
+
+    def test_archived_template_produces_no_ghosts(self, app_client: TestClient) -> None:
+        _login(app_client)
+        created = app_client.post("/api/v1/task-templates", json=_weekly_fixed_payload()).json()
+        template_id = created["template"]["id"]
+        app_client.delete(f"/api/v1/task-templates/{template_id}")
+
+        response = app_client.get("/api/v1/task-templates/projections")
+        assert response.status_code == 200, response.text
+        assert all(o["template_id"] != template_id for o in response.json())

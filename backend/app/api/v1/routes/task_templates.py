@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Query
@@ -9,7 +10,17 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api.errors import AppError
-from app.db.schemas import ActiveHoursWindow, DayName, Priority, Recurrence, TaskInstance, TaskTemplate, TaskType
+from app.db.base import utcnow
+from app.db.schemas import (
+    ActiveHoursWindow,
+    DayName,
+    Priority,
+    Recurrence,
+    RecurrenceAnchor,
+    TaskInstance,
+    TaskTemplate,
+    TaskType,
+)
 from app.db.session import get_db
 from app.jobs.interface import JobScheduler, get_job_scheduler
 from app.task_templates import service
@@ -73,6 +84,43 @@ class PatchTemplateRequest(BaseModel):
 class ArchiveResponse(BaseModel):
     template: TaskTemplate
     incomplete_instance_ids: tuple[str, ...]
+
+
+class VirtualOccurrenceResponse(BaseModel):
+    """§9.2 - a projected, non-persisted ghost occurrence. Deliberately a distinct shape
+    from `TaskInstance` (no `id`, no status, no dependencies) so the frontend cannot
+    mistake one for a real, interactive row.
+    """
+
+    template_id: str
+    name: str
+    type: TaskType
+    priority: int
+    estimated_duration_minutes: int
+    occurs_at: datetime
+    anchor: RecurrenceAnchor
+
+
+@router.get("/projections")
+def list_projections_endpoint(db: Session = Depends(get_db)) -> list[VirtualOccurrenceResponse]:
+    """`GET /task-templates/projections` (design doc §9.2) - Timeline "ghost" occurrences
+    for every recurring template, out to the fixed 30-day horizon. Registered *before*
+    `/{template_id}` below so `"projections"` is never captured as a `template_id` path
+    parameter - FastAPI/Starlette matches routes in registration order.
+    """
+    occurrences = service.list_virtual_occurrences(db, now=utcnow())
+    return [
+        VirtualOccurrenceResponse(
+            template_id=occ.template_id,
+            name=occ.name,
+            type=occ.type,
+            priority=occ.priority,
+            estimated_duration_minutes=occ.estimated_duration_minutes,
+            occurs_at=occ.occurs_at,
+            anchor=occ.anchor,
+        )
+        for occ in occurrences
+    ]
 
 
 @router.get("/{template_id}")

@@ -8,6 +8,7 @@ import { ComingSoon } from './views/shell/ComingSoon';
 import { CreateTaskPage } from './views/tasks/CreateTaskPage';
 import { EditTaskPage } from './views/tasks/EditTaskPage';
 import { TaskDetailPage } from './views/tasks/TaskDetailPage';
+import { TimelinePage } from './views/timeline/TimelinePage';
 
 function App(): JSX.Element {
   return (
@@ -38,7 +39,7 @@ function App(): JSX.Element {
               </RouteGuard>
             }
           >
-            <Route index element={<ComingSoon title="Timeline" note="Built in Stage 9d." />} />
+            <Route index element={<TimelinePage />} />
             <Route path="tasks/new" element={<CreateTaskPage />} />
             <Route path="tasks/:instanceId/edit" element={<EditTaskPage />} />
             <Route path="tasks/:instanceId" element={<TaskDetailPage />} />
