@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api.errors import AppError
-from app.db.schemas import TaskInstance
+from app.db.schemas import TaskInstance, TaskInstanceStatus, TaskType
 from app.db.session import get_db
 from app.jobs.interface import JobScheduler, get_job_scheduler
 from app.task_instances import service
@@ -22,6 +22,7 @@ _VALIDATION_ERROR_STATUS = {
     "infeasible_duration": 422,
     "creation_conflict": 409,
     "not_found": 404,
+    "scope_required": 422,
 }
 
 
@@ -47,6 +48,20 @@ class ExtendDeadlineRequest(BaseModel):
 class DeleteResponse(BaseModel):
     deleted_instance_id: str
     unblocked_instance_ids: tuple[str, ...]
+
+
+@router.get("")
+def list_instances_endpoint(
+    status: TaskInstanceStatus | None = None,
+    priority: int | None = None,
+    type: TaskType | None = None,
+    view: Literal["backlog"] | None = None,
+    db: Session = Depends(get_db),
+) -> list[TaskInstance]:
+    """architecture-plan §3: `status`/`priority`/`type` filters, plus `?view=backlog`
+    (design doc §8.1) - a filter on this same collection, not its own resource.
+    """
+    return list(service.list_instances(db, status=status, priority=priority, type=type, view=view))
 
 
 @router.patch("/{instance_id}")
@@ -99,12 +114,25 @@ def extend_deadline_endpoint(
         raise AppError(_VALIDATION_ERROR_STATUS[exc.code], exc.code, str(exc)) from exc
 
 
+@router.post("/{instance_id}/dismiss")
+def dismiss_endpoint(
+    instance_id: str, db: Session = Depends(get_db), jobs: JobScheduler = Depends(get_job_scheduler)
+) -> TaskInstance:
+    try:
+        return service.dismiss(db, jobs, instance_id)
+    except service.InstanceValidationError as exc:
+        raise AppError(_VALIDATION_ERROR_STATUS[exc.code], exc.code, str(exc)) from exc
+
+
 @router.delete("/{instance_id}")
 def delete_instance_endpoint(
-    instance_id: str, db: Session = Depends(get_db), jobs: JobScheduler = Depends(get_job_scheduler)
+    instance_id: str,
+    scope: service.DeleteScope | None = None,
+    db: Session = Depends(get_db),
+    jobs: JobScheduler = Depends(get_job_scheduler),
 ) -> DeleteResponse:
     try:
-        result = service.delete_instance(db, jobs, instance_id)
+        result = service.delete_instance(db, jobs, instance_id, scope=scope)
     except service.InstanceValidationError as exc:
         raise AppError(_VALIDATION_ERROR_STATUS[exc.code], exc.code, str(exc)) from exc
     return DeleteResponse(deleted_instance_id=result.deleted_instance_id, unblocked_instance_ids=result.unblocked_instance_ids)

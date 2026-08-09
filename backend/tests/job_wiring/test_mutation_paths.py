@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.db.repositories import TaskInstanceRepository
 from app.db.schemas import Recurrence, UserSettings
 from app.jobs.interface import dependency_at_risk_job_key, occurrence_boundary_job_key
-from app.task_instances.service import complete
+from app.task_instances.service import complete, delete_instance, dismiss
 from app.task_templates.service import TaskTemplateDraft, archive_template, create_template
 from tests.fixtures.jobs import RecordingJobScheduler
 
@@ -161,3 +161,31 @@ class TestArchiveRecurringCalendarAnchor:
         db_session.commit()
 
         assert occurrence_boundary_job_key(created.template.id) not in jobs.cancelled
+
+
+class TestDismiss:
+    def test_dismissing_cancels_every_job_for_the_instance(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        created = create_template(db_session, jobs, _fixed_draft())
+        db_session.commit()
+
+        dismiss(db_session, jobs, created.instance.id)
+        db_session.commit()
+
+        assert created.instance.id in jobs.cancelled_instances
+
+
+class TestDeleteThisAndFuture:
+    def test_this_and_future_scope_cancels_the_occurrence_boundary_job(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        created = create_template(
+            db_session, jobs, _fixed_draft(recurrence=Recurrence(pattern="daily", interval=1, anchor="calendar"))
+        )
+        db_session.commit()
+
+        delete_instance(db_session, jobs, created.instance.id, scope="this_and_future")
+        db_session.commit()
+
+        assert occurrence_boundary_job_key(created.template.id) in jobs.cancelled

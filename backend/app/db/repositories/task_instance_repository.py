@@ -48,6 +48,23 @@ class TaskInstanceRepository:
         stmt = select(TaskInstanceORM).where(TaskInstanceORM.status.in_(statuses))
         return tuple(_to_domain(orm) for orm in self._session.scalars(stmt))
 
+    def list_filtered(
+        self, *, status: str | None = None, priority: int | None = None, type_: str | None = None
+    ) -> tuple[TaskInstance, ...]:
+        """`GET /task-instances?status=&priority=&type=` (architecture-plan §3) - each
+        provided filter becomes a `WHERE` constraint here, not an in-memory filter in the
+        service layer (CLAUDE.md's own layering pitfall: "the service layer calls the
+        data layer with constraints").
+        """
+        stmt = select(TaskInstanceORM)
+        if status is not None:
+            stmt = stmt.where(TaskInstanceORM.status == status)
+        if priority is not None:
+            stmt = stmt.where(TaskInstanceORM.priority == priority)
+        if type_ is not None:
+            stmt = stmt.where(TaskInstanceORM.type == type_)
+        return tuple(_to_domain(orm) for orm in self._session.scalars(stmt))
+
     def list_all_dependency_edges(self) -> tuple[tuple[str, str], ...]:
         """Every `(dependent_id, dependency_id)` edge system-wide - what `cycle_check`
         (§6.1) validates a proposed new edge set against.

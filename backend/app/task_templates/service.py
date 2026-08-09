@@ -28,13 +28,12 @@ from app.db.schemas import (
 from app.jobs.interface import (
     JobScheduler,
     dependency_at_risk_job_key,
-    occurrence_boundary_job_key,
     overdue_job_key,
     reminder_job_key,
 )
 from app.scheduling.adapter import build_active_hours_map, has_fixed_conflict
 from app.scheduling.generation import GeneratedInstanceFields, generate_next_instance
-from app.scheduling.orchestration import place_or_defer, schedule_next_occurrence_boundary
+from app.scheduling.orchestration import archive_template_and_cancel_jobs, place_or_defer, schedule_next_occurrence_boundary
 from app.scheduling_engine.dependencies import cycle_check
 from app.scheduling_engine.feasibility import validate_feasible_duration
 
@@ -266,11 +265,12 @@ def archive_template(db: Session, jobs: JobScheduler, template_id: str) -> Archi
     `template_id` references stay valid. Returns the ids of any non-terminal instances
     left behind, for the frontend's confirmation dialog to list.
 
-    Cancels the calendar-anchor occurrence-boundary job if one exists (architecture-plan
-    §4.1 Rev 3: forgetting that cancellation "leaves a job that will resurrect a series
-    the user just ended"). `app.jobs.handlers.run_occurrence_boundary` also no-ops
-    defensively on an archived template - this is the direct cancellation, that is the
-    fallback for the gap before the next startup reconciliation pass (§4.2 item 3).
+    The actual archive + calendar-anchor occurrence-boundary job cancellation is shared
+    with `app.task_instances.service.delete_instance`'s `this_and_future` scope - see
+    `archive_template_and_cancel_jobs`'s docstring. `app.jobs.handlers.run_occurrence_boundary`
+    also no-ops defensively on an archived template - this is the direct cancellation,
+    that is the fallback for the gap before the next startup reconciliation pass (§4.2
+    item 3).
     """
     repo = TaskTemplateRepository(db)
     template = repo.get(template_id)
@@ -282,9 +282,7 @@ def archive_template(db: Session, jobs: JobScheduler, template_id: str) -> Archi
         for instance in TaskInstanceRepository(db).list_by_template(template_id)
         if instance.status not in _TERMINAL_STATUSES
     )
-    archived = repo.archive(template_id)
-    if template.recurrence.pattern != "one_time" and template.recurrence.anchor == "calendar":
-        jobs.cancel(job_key=occurrence_boundary_job_key(template_id))
+    archived = archive_template_and_cancel_jobs(db, jobs, template_id)
     return ArchiveResult(template=archived, incomplete_instance_ids=incomplete)
 
 
