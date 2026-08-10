@@ -65,7 +65,7 @@ After setup, log in with `admin` and the password you chose, then head to **Sett
 - **Timezone** - defaults from the container's `TZ` env var, but confirm it's actually yours; every scheduling decision is computed in this timezone (see [Configuration](configuration.md)).
 - **Active hours** - the default window(s), per day of week, that flexible tasks may be scheduled into.
 - **Daily time budget** - an optional soft cap on flexible-task minutes per day.
-- **External calendars** - connect Google/Outlook if you want Tessera to read your existing events as scheduling obstacles (see [Capabilities](capabilities.md)).
+- **External calendars** - connect Google/Outlook if you want Tessera to read your existing events as scheduling obstacles (see [Connecting an External Calendar](calendar-integration.md) for the full setup steps).
 
 You're now ready to create your first task - see [Tasks & Events](tasks-and-events.md).
 

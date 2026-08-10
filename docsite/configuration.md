@@ -70,4 +70,4 @@ Display-only - controls calendar layout and the ordering of day-of-week rows els
 
 ### External calendar connections
 
-Per-provider OAuth connection (Google, Outlook, etc.), plus a configurable poll interval (`refresh_interval_minutes`). See [Capabilities](capabilities.md#external-calendar-sync) for how synced events are treated.
+Per-provider OAuth connection (Google, Outlook), each polled every `refresh_interval_minutes` (15 by default; changing it currently means disconnecting and reconnecting, not an in-place edit). See [Connecting an External Calendar](calendar-integration.md) for the setup steps and [Capabilities](capabilities.md#external-calendar-sync) for how synced events are treated.

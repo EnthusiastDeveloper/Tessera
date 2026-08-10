@@ -35,7 +35,7 @@ Eight distinct notification types - reminders, creation conflicts, sync conflict
 
 ## External calendar sync
 
-Connect Google Calendar or Outlook and Tessera polls them on an interval you set, caching events locally so scheduling stays fast and works even if the provider is briefly unreachable. Synced events become obstacles the algorithm won't schedule over - with two POC filtering rules that keep this from being over-aggressive:
+Connect Google Calendar or Outlook - see [Connecting an External Calendar](calendar-integration.md) for the full setup walkthrough - and Tessera polls it in the background, caching events locally so scheduling stays fast and works even if the provider is briefly unreachable. Synced events become obstacles the algorithm won't schedule over - with two POC filtering rules that keep this from being over-aggressive:
 
 - Events you've marked **"Free" / transparent** on the provider side don't block anything - you told the calendar you're actually available.
 - **All-day events** are imported and shown, but for now are display-only - they don't block flexible placement.
