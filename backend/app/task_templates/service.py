@@ -32,7 +32,12 @@ from app.jobs.interface import (
     reminder_job_key,
 )
 from app.scheduling.adapter import build_active_hours_map, has_fixed_conflict
-from app.scheduling.generation import GeneratedInstanceFields, generate_next_instance
+from app.scheduling.generation import (
+    GeneratedInstanceFields,
+    VirtualOccurrence,
+    generate_next_instance,
+    project_virtual_occurrences,
+)
 from app.scheduling.orchestration import archive_template_and_cancel_jobs, place_or_defer, schedule_next_occurrence_boundary
 from app.scheduling_engine.dependencies import cycle_check
 from app.scheduling_engine.feasibility import validate_feasible_duration
@@ -86,6 +91,28 @@ def get_template(db: Session, template_id: str) -> TaskTemplate:
     if template is None:
         raise TemplateValidationError("not_found", f"TaskTemplate {template_id} not found")
     return template
+
+
+def list_virtual_occurrences(db: Session, *, now: datetime) -> list[VirtualOccurrence]:
+    """`GET /task-templates/projections` (design doc §9.2, added Stage 9d) - the Timeline's
+    "ghost" preview of upcoming recurring occurrences beyond each template's current live
+    instance. Fetches every non-archived template and, per template, its most-recently
+    generated instance (`list_by_template` is already most-recent-first - see
+    `app.jobs.reconciliation`/`app.jobs.handlers` for the identical `instances[0]`
+    pattern), then delegates the actual anchor-aware projection math to
+    `app.scheduling.generation.project_virtual_occurrences` so it agrees with §9.1's real
+    generator by construction rather than by a second, separately-written implementation.
+    """
+    settings = _require_settings(db)
+    templates = TaskTemplateRepository(db).list(include_archived=False)
+    instance_repo = TaskInstanceRepository(db)
+    latest_by_template = {
+        template.id: (instances[0] if (instances := instance_repo.list_by_template(template.id)) else None)
+        for template in templates
+    }
+    return project_virtual_occurrences(
+        templates, latest_instance_by_template=latest_by_template, now=now, timezone=settings.timezone
+    )
 
 
 def create_template(db: Session, jobs: JobScheduler, draft: TaskTemplateDraft) -> CreatedTemplate:
@@ -399,4 +426,5 @@ __all__ = [
     "create_template",
     "edit_template_this_and_future",
     "get_template",
+    "list_virtual_occurrences",
 ]

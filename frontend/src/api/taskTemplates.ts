@@ -1,5 +1,6 @@
 import { apiClient } from './client';
 import type { ActiveHoursOverride, Priority, Recurrence, TaskInstance, TaskTemplate, TaskType } from '../types/task';
+import type { VirtualOccurrence } from '../types/timeline';
 
 export interface CreateTemplatePayload {
   name: string;
@@ -39,4 +40,12 @@ export function getTemplate(templateId: string): Promise<TaskTemplate> {
  * task's edit form uses (design doc §3.10). */
 export function patchTemplateThisAndFuture(templateId: string, patch: PatchTemplatePayload): Promise<TaskTemplate> {
   return apiClient.patch<TaskTemplate>(`/task-templates/${templateId}?scope=this_and_future`, patch);
+}
+
+/** `GET /task-templates/projections` (design doc §9.2; added Stage 9d) - Timeline "ghost"
+ * occurrences for every recurring template, out to the backend's fixed 30-day horizon.
+ * Registered ahead of `/{template_id}` on the backend specifically so this path is never
+ * captured as a `template_id` - nothing to replicate client-side, just the matching route. */
+export function listProjections(): Promise<VirtualOccurrence[]> {
+  return apiClient.get<VirtualOccurrence[]>('/task-templates/projections');
 }

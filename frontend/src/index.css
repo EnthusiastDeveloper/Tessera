@@ -163,3 +163,54 @@ input[type='password'] {
 .app-shell__content {
   padding: var(--space-6);
 }
+
+/* Timeline (design doc §8.1 screen 2, §9.2, §7) - visual-distinction rules for the four
+   overlaid layers. Real `scheduled` instances use FullCalendar's own default event
+   styling (they're the one interactive, "normal" layer); everything below is a variant
+   away from that baseline. */
+
+/* §9.2: virtual "ghost" projections are dimmed/hatched and never look like a real,
+   clickable task. The diagonal hatch (not just opacity) is the class/style signal the
+   Stage 9d test suite asserts on, since opacity alone can be too subtle to assert
+   reliably and reads poorly against status-colored real events. */
+.fc-event-virtual {
+  opacity: 0.55;
+  background-image: repeating-linear-gradient(
+    45deg,
+    rgba(255, 255, 255, 0.35),
+    rgba(255, 255, 255, 0.35) 4px,
+    transparent 4px,
+    transparent 8px
+  );
+  cursor: default;
+  pointer-events: none;
+}
+
+/* §9.2 closing paragraph: a completion-anchored ghost is "a best guess by construction,
+   not a prediction" and must read with less confidence than a calendar-anchored one -
+   an extra opacity step, on top of the shared hatch above. */
+.fc-event-virtual--completion {
+  opacity: 0.35;
+}
+
+/* §7: external busy-blocks are read-only overlays, visually distinguished from a real
+   task by a dashed border rather than a solid fill. */
+.fc-event-external {
+  border-style: dashed;
+  opacity: 0.85;
+  cursor: default;
+  pointer-events: none;
+}
+
+/* §7: all-day external events are the distinct display-only overlay category ("do not
+   block flexible placement"), never rendered as a timed busy-block. */
+.fc-event-external--all-day {
+  background-color: var(--color-text-muted);
+  border-color: var(--color-text-muted);
+}
+
+/* §3.7/§8.1 screen 2: blackout ranges mark the day itself, not a foreground event. */
+.fc-event-blackout {
+  background-color: var(--color-danger);
+  opacity: 0.15;
+}

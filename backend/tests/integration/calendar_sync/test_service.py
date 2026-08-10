@@ -26,7 +26,7 @@ from app.db.repositories import (
 )
 from app.db.schemas import ExternalCalendarConnection, Recurrence, StatusHistoryEntry, TaskInstance, TaskTemplate, UserSettings
 from tests.fixtures.calendar_providers import MockCalendarProvider
-from tests.fixtures.db_entities import make_oauth_token
+from tests.fixtures.db_entities import make_external_calendar_connection, make_external_event, make_oauth_token
 from tests.fixtures.jobs import RecordingJobScheduler
 
 SECRET_KEY = "test-secret-key-not-for-production-use"
@@ -132,6 +132,55 @@ def _persist_flexible_instance(db: Session, *, scheduled_time: object, deadline:
 
 def _install_mock_provider(monkeypatch: pytest.MonkeyPatch, provider: MockCalendarProvider) -> None:
     monkeypatch.setattr(calendar_sync_service, "get_provider_client", lambda _provider, *, settings: provider)
+
+
+class TestListDisplayEvents:
+    """`list_display_events` (added Stage 9d) - the Timeline's external busy-block/overlay
+    source (§8.1 screen 2). Deliberately a different filter from
+    `app.scheduling.adapter.gather_external_obstacles`: transparent events are excluded
+    from display too (a "Free" event was never meant to look busy), but all-day events are
+    *kept* for display (§7: "imported and shown on the Timeline ... as display-only
+    overlays"), unlike the obstacle set which drops them.
+    """
+
+    def test_excludes_transparent_events(self, db_session: Session) -> None:
+        connection = _persist_connection(db_session)
+        ExternalEventRepository(db_session).upsert(
+            make_external_event(connection_id=connection.id, provider_event_id="free", is_transparent=True)
+        )
+        db_session.commit()
+
+        assert calendar_sync_service.list_display_events(db_session) == ()
+
+    def test_includes_all_day_events_with_the_flag_set(self, db_session: Session) -> None:
+        connection = _persist_connection(db_session)
+        ExternalEventRepository(db_session).upsert(
+            make_external_event(connection_id=connection.id, provider_event_id="conf", is_all_day=True, is_transparent=False)
+        )
+        db_session.commit()
+
+        events = calendar_sync_service.list_display_events(db_session)
+        assert len(events) == 1
+        assert events[0].is_all_day is True
+
+    def test_includes_opaque_timed_events(self, db_session: Session) -> None:
+        connection = _persist_connection(db_session)
+        ExternalEventRepository(db_session).upsert(
+            make_external_event(connection_id=connection.id, provider_event_id="dentist", is_all_day=False, is_transparent=False)
+        )
+        db_session.commit()
+
+        events = calendar_sync_service.list_display_events(db_session)
+        assert len(events) == 1
+        assert events[0].is_all_day is False
+
+    def test_excludes_events_from_disabled_connections(self, db_session: Session) -> None:
+        disabled = ExternalCalendarConnectionRepository(db_session).create(make_external_calendar_connection(enabled=False))
+        db_session.commit()
+        ExternalEventRepository(db_session).upsert(make_external_event(connection_id=disabled.id, provider_event_id="evt-1"))
+        db_session.commit()
+
+        assert calendar_sync_service.list_display_events(db_session) == ()
 
 
 class TestFetchDiffAndRetention:

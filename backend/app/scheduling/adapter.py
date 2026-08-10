@@ -78,6 +78,11 @@ def gather_external_obstacles(db: Session) -> tuple[Obstacle, ...]:
     reconciliation, which both stop touching a disabled connection's cache entirely - its
     events would otherwise sit frozen (never diffed, soft-deleted, or retention-purged)
     and obstruct forever.
+
+    Obstacle-specific filtering only - for the Timeline's *display* purposes (§8.1 screen
+    2), all-day events are kept (not obstacle-excluded) as a distinct read-only overlay
+    category; see `app.calendar_sync.service.list_display_events`, which deliberately does
+    not reuse this function's predicate.
     """
     connection_repo = ExternalCalendarConnectionRepository(db)
     event_repo = ExternalEventRepository(db)
