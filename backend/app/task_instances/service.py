@@ -48,11 +48,15 @@ DeleteScope = Literal["this_occurrence", "this_and_future"]
 
 
 class InstanceValidationError(Exception):
-    """`code` maps to the API error envelope (architecture-plan §3)."""
+    """`code` maps to the API error envelope (architecture-plan §3). `details` carries
+    the `conflict` code's required payload (architecture-plan §3's error table: the body
+    "must name the conflicting fields and their current server-side values").
+    """
 
-    def __init__(self, code: str, message: str) -> None:
+    def __init__(self, code: str, message: str, *, details: dict[str, Any] | None = None) -> None:
         super().__init__(message)
         self.code = code
+        self.details = details
 
 
 @dataclass(frozen=True)
@@ -93,10 +97,17 @@ def _has_active(db: Session, instance_id: str, notification_type: str) -> bool:
     )
 
 
-def edit_this_occurrence(db: Session, jobs: JobScheduler, instance_id: str, *, patch: dict[str, Any]) -> TaskInstance:
+def edit_this_occurrence(
+    db: Session, jobs: JobScheduler, instance_id: str, *, patch: dict[str, Any], expected: dict[str, Any] | None = None
+) -> TaskInstance:
     """§3.10 "this occurrence": touches only the live instance, sets `detached=True`. A
     duration change is checked against §6.8 the same way a template-level one is; a
     duration or deadline change on a non-terminal flexible instance re-enters §6.2.
+
+    `expected` is architecture-plan §5.1's expected-values PATCH: for each field the
+    caller names, reject with `conflict` if the current row disagrees - fields the
+    caller doesn't name (because it never read them, or isn't touching them) are never
+    compared, so an unrelated background-job write can't bounce this edit.
     """
     instance = _require_instance(db, instance_id)
     template = _require_template(db, instance.template_id)
@@ -107,6 +118,20 @@ def edit_this_occurrence(db: Session, jobs: JobScheduler, instance_id: str, *, p
         raise InstanceValidationError("invalid_field", f"Fields not editable via this-occurrence scope: {sorted(unknown)}")
     if "deadline" in patch and instance.type != "flexible":
         raise InstanceValidationError("invalid_field", "deadline can only be edited on a flexible instance.")
+
+    if expected:
+        unknown_expected = set(expected) - set(_THIS_OCCURRENCE_FIELDS)
+        if unknown_expected:
+            raise InstanceValidationError(
+                "invalid_field", f"Fields not editable via this-occurrence scope: {sorted(unknown_expected)}"
+            )
+        conflicts = {field: getattr(instance, field) for field, value in expected.items() if getattr(instance, field) != value}
+        if conflicts:
+            raise InstanceValidationError(
+                "conflict",
+                f"Concurrently modified fields: {sorted(conflicts)}",
+                details={"conflicting_fields": conflicts},
+            )
 
     if "estimated_duration_minutes" in patch and instance.type == "flexible":
         effective_hours = build_active_hours_map(settings, template.active_hours_override)

@@ -21,9 +21,25 @@ _VALIDATION_ERROR_STATUS = {
     "invalid_field": 422,
     "infeasible_duration": 422,
     "creation_conflict": 409,
+    "conflict": 409,
     "not_found": 404,
     "scope_required": 422,
 }
+
+
+class PatchInstanceExpected(BaseModel):
+    """architecture-plan §5.1: the value the client read for each field it is changing.
+    Only fields actually present on the wire (`model_fields_set`) are compared - an
+    omitted field means the caller isn't asserting anything about it, not that it
+    expects `null`.
+    """
+
+    name: str | None = None
+    description: str | None = None
+    location: str | None = None
+    priority: int | None = None
+    estimated_duration_minutes: int | None = None
+    deadline: datetime | None = None
 
 
 class PatchInstanceRequest(BaseModel):
@@ -35,6 +51,7 @@ class PatchInstanceRequest(BaseModel):
     priority: int | None = None
     estimated_duration_minutes: int | None = None
     deadline: datetime | None = None
+    expected: PatchInstanceExpected | None = None
 
 
 class RescheduleRequest(BaseModel):
@@ -71,11 +88,16 @@ def patch_instance_endpoint(
     db: Session = Depends(get_db),
     jobs: JobScheduler = Depends(get_job_scheduler),
 ) -> TaskInstance:
-    patch: dict[str, Any] = {field: getattr(payload, field) for field in payload.model_fields_set}
+    patch: dict[str, Any] = {
+        field: getattr(payload, field) for field in payload.model_fields_set if field != "expected"
+    }
+    expected: dict[str, Any] | None = None
+    if payload.expected is not None:
+        expected = {field: getattr(payload.expected, field) for field in payload.expected.model_fields_set}
     try:
-        return service.edit_this_occurrence(db, jobs, instance_id, patch=patch)
+        return service.edit_this_occurrence(db, jobs, instance_id, patch=patch, expected=expected)
     except service.InstanceValidationError as exc:
-        raise AppError(_VALIDATION_ERROR_STATUS[exc.code], exc.code, str(exc)) from exc
+        raise AppError(_VALIDATION_ERROR_STATUS[exc.code], exc.code, str(exc), details=exc.details) from exc
 
 
 @router.post("/{instance_id}/reschedule")
@@ -88,7 +110,7 @@ def reschedule_endpoint(
     try:
         return service.reschedule(db, jobs, instance_id, new_scheduled_time=payload.scheduled_time)
     except service.InstanceValidationError as exc:
-        raise AppError(_VALIDATION_ERROR_STATUS[exc.code], exc.code, str(exc)) from exc
+        raise AppError(_VALIDATION_ERROR_STATUS[exc.code], exc.code, str(exc), details=exc.details) from exc
 
 
 @router.post("/{instance_id}/complete")
@@ -98,7 +120,7 @@ def complete_endpoint(
     try:
         return service.complete(db, jobs, instance_id)
     except service.InstanceValidationError as exc:
-        raise AppError(_VALIDATION_ERROR_STATUS[exc.code], exc.code, str(exc)) from exc
+        raise AppError(_VALIDATION_ERROR_STATUS[exc.code], exc.code, str(exc), details=exc.details) from exc
 
 
 @router.post("/{instance_id}/extend-deadline")
@@ -111,7 +133,7 @@ def extend_deadline_endpoint(
     try:
         return service.extend_deadline(db, jobs, instance_id, new_deadline=payload.deadline)
     except service.InstanceValidationError as exc:
-        raise AppError(_VALIDATION_ERROR_STATUS[exc.code], exc.code, str(exc)) from exc
+        raise AppError(_VALIDATION_ERROR_STATUS[exc.code], exc.code, str(exc), details=exc.details) from exc
 
 
 @router.post("/{instance_id}/start")
@@ -122,7 +144,7 @@ def start_endpoint(instance_id: str, db: Session = Depends(get_db)) -> TaskInsta
     try:
         return service.start_progress(db, instance_id)
     except service.InstanceValidationError as exc:
-        raise AppError(_VALIDATION_ERROR_STATUS[exc.code], exc.code, str(exc)) from exc
+        raise AppError(_VALIDATION_ERROR_STATUS[exc.code], exc.code, str(exc), details=exc.details) from exc
 
 
 @router.post("/{instance_id}/dismiss")
@@ -132,7 +154,7 @@ def dismiss_endpoint(
     try:
         return service.dismiss(db, jobs, instance_id)
     except service.InstanceValidationError as exc:
-        raise AppError(_VALIDATION_ERROR_STATUS[exc.code], exc.code, str(exc)) from exc
+        raise AppError(_VALIDATION_ERROR_STATUS[exc.code], exc.code, str(exc), details=exc.details) from exc
 
 
 @router.delete("/{instance_id}")
@@ -145,5 +167,5 @@ def delete_instance_endpoint(
     try:
         result = service.delete_instance(db, jobs, instance_id, scope=scope)
     except service.InstanceValidationError as exc:
-        raise AppError(_VALIDATION_ERROR_STATUS[exc.code], exc.code, str(exc)) from exc
+        raise AppError(_VALIDATION_ERROR_STATUS[exc.code], exc.code, str(exc), details=exc.details) from exc
     return DeleteResponse(deleted_instance_id=result.deleted_instance_id, unblocked_instance_ids=result.unblocked_instance_ids)
