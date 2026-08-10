@@ -23,7 +23,17 @@ from app.db.repositories import (
 )
 from app.db.schemas import ActiveHoursWindow, Recurrence, StatusHistoryEntry, TaskInstance, TaskTemplate, UserSettings
 from app.db.session import build_engine, get_engine, get_session_factory, session_scope, sqlite_url
-from app.jobs.interface import dependency_at_risk_job_key, overdue_job_key, reminder_job_key, set_job_scheduler
+from app.jobs import handlers
+from app.jobs.interface import (
+    DEADLINE_ELAPSED_SWEEP_JOB_KEY,
+    calendar_poll_job_key,
+    deadline_elapsed_job_key,
+    dependency_at_risk_job_key,
+    occurrence_boundary_job_key,
+    overdue_job_key,
+    reminder_job_key,
+    set_job_scheduler,
+)
 from app.jobs.scheduler import APSchedulerJobScheduler
 from app.settings.service import DAY_NAMES
 
@@ -132,6 +142,110 @@ class TestScheduleAtFiring:
                 return any(n.type == "reminder" for n in NotificationRepository(db).list_for_instance(instance.id))
 
         assert _wait_until(_reminder_created), "reminder job never fired"
+
+
+class TestDispatchRoutesEveryJobKind:
+    """`_dispatch` (`app/jobs/scheduler.py`) is the single place a fired APScheduler job
+    turns back into a handler call, by string-matching the `job_key`'s kind prefix - a
+    typo there would silently no-op a job in production (falls into the `else`
+    "unrecognized" branch, logged and swallowed, nothing else to surface it) rather than
+    fail loudly. Every other test either calls `handlers.run_*` directly (bypassing
+    key-parsing entirely) or only asserts *scheduling* happened (`tests/job_wiring/`),
+    never firing. `TestScheduleAtFiring` above already proves the `reminder` branch
+    fires for real through a live APScheduler thread; this proves the rest of the elif
+    chain routes correctly too, by monkeypatching each handler to a recording stub so
+    only the dispatch/parsing logic itself is under test, not each handler's own
+    (separately-tested) domain behavior.
+    """
+
+    def test_overdue_kind_dispatches_to_run_overdue_check(
+        self, wired_scheduler: APSchedulerJobScheduler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[str] = []
+        monkeypatch.setattr(handlers, "run_overdue_check", lambda db, jobs, *, instance_id: calls.append(instance_id))
+
+        wired_scheduler.schedule_at(job_key=overdue_job_key("instance-abc"), run_at=utcnow())
+
+        assert _wait_until(lambda: calls == ["instance-abc"]), "overdue job never dispatched"
+
+    def test_deadline_elapsed_kind_dispatches_to_run_deadline_elapsed_check(
+        self, wired_scheduler: APSchedulerJobScheduler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[str] = []
+        monkeypatch.setattr(handlers, "run_deadline_elapsed_check", lambda db, jobs, *, instance_id: calls.append(instance_id))
+
+        wired_scheduler.schedule_at(job_key=deadline_elapsed_job_key("instance-def"), run_at=utcnow())
+
+        assert _wait_until(lambda: calls == ["instance-def"]), "deadline_elapsed job never dispatched"
+
+    def test_dependency_at_risk_kind_dispatches_to_run_dependency_at_risk_check(
+        self, wired_scheduler: APSchedulerJobScheduler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[str] = []
+        monkeypatch.setattr(handlers, "run_dependency_at_risk_check", lambda db, *, instance_id: calls.append(instance_id))
+
+        wired_scheduler.schedule_at(job_key=dependency_at_risk_job_key("instance-ghi"), run_at=utcnow())
+
+        assert _wait_until(lambda: calls == ["instance-ghi"]), "dependency_at_risk job never dispatched"
+
+    def test_occurrence_boundary_kind_dispatches_to_run_occurrence_boundary(
+        self, wired_scheduler: APSchedulerJobScheduler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[str] = []
+        monkeypatch.setattr(handlers, "run_occurrence_boundary", lambda db, jobs, *, template_id: calls.append(template_id))
+
+        wired_scheduler.schedule_at(job_key=occurrence_boundary_job_key("template-jkl"), run_at=utcnow())
+
+        assert _wait_until(lambda: calls == ["template-jkl"]), "occurrence_boundary job never dispatched"
+
+    def test_calendar_poll_kind_dispatches_to_run_calendar_poll(
+        self, wired_scheduler: APSchedulerJobScheduler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[str] = []
+        monkeypatch.setattr(handlers, "run_calendar_poll", lambda db, jobs, *, connection_id: calls.append(connection_id))
+
+        wired_scheduler.schedule_at(job_key=calendar_poll_job_key("connection-mno"), run_at=utcnow())
+
+        assert _wait_until(lambda: calls == ["connection-mno"]), "calendar_poll job never dispatched"
+
+    def test_sweep_deadline_elapsed_kind_dispatches_to_run_deadline_elapsed_sweep(
+        self, wired_scheduler: APSchedulerJobScheduler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[bool] = []
+        monkeypatch.setattr(handlers, "run_deadline_elapsed_sweep", lambda db, jobs: calls.append(True))
+
+        wired_scheduler.schedule_at(job_key=DEADLINE_ELAPSED_SWEEP_JOB_KEY, run_at=utcnow())
+
+        assert _wait_until(lambda: calls == [True]), "sweep:deadline_elapsed job never dispatched"
+
+    def test_an_unrecognized_kind_is_logged_and_swallowed_rather_than_raised(
+        self, wired_scheduler: APSchedulerJobScheduler, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="app.jobs.scheduler"):
+            wired_scheduler.schedule_at(job_key="not_a_real_kind:xyz", run_at=utcnow())
+            assert _wait_until(lambda: "Unrecognized job key fired" in caplog.text)
+
+    def test_a_handler_that_raises_is_logged_and_does_not_kill_the_scheduler_thread(
+        self, wired_scheduler: APSchedulerJobScheduler, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import logging
+
+        def _boom(db: object, jobs: object, *, instance_id: str) -> None:
+            raise RuntimeError("simulated handler failure")
+
+        monkeypatch.setattr(handlers, "run_overdue_check", _boom)
+
+        with caplog.at_level(logging.ERROR, logger="app.jobs.scheduler"):
+            wired_scheduler.schedule_at(job_key=overdue_job_key("instance-boom"), run_at=utcnow())
+            assert _wait_until(lambda: "raised" in caplog.text)
+
+        # The scheduler thread survived the raise - a second, unrelated job still fires.
+        calls: list[str] = []
+        monkeypatch.setattr(handlers, "run_overdue_check", lambda db, jobs, *, instance_id: calls.append(instance_id))
+        wired_scheduler.schedule_at(job_key=overdue_job_key("instance-after-boom"), run_at=utcnow())
+        assert _wait_until(lambda: calls == ["instance-after-boom"])
 
 
 class TestCancel:

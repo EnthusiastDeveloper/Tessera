@@ -14,6 +14,7 @@ Set these in `.env` before bringing the container up (see `.env.example` in the 
 | `TZ` | No | (system default) | Default IANA timezone (e.g. `America/New_York`), used to seed the timezone in Settings on first run. Overridable per-user in Settings afterward. |
 | `RESET_ADMIN_PASSWORD` | No | (empty) | One-time password recovery - see [Getting Started](installation.md#password-recovery). Not a standing login mechanism. |
 | `SESSION_COOKIE_SECURE` | No | `auto` | `auto` derives the cookie's `Secure` flag from `APP_BASE_URL`'s scheme. **Never hardcode `true`** - it silently breaks login on a plain-HTTP LAN deployment, which is a supported setup. |
+| `ENABLE_API_DOCS` | No | `false` | Whether the interactive `/api/v1/docs`, `/api/v1/redoc` and `/api/v1/openapi.json` routes exist at all. Leave off in production - even though they're already auth-guarded, this is defense-in-depth against exposing the full API surface. Turn on locally if you want to browse the OpenAPI schema. |
 | `PORT` | No | `8000` | Port the app listens on inside the container. |
 | `LOG_LEVEL` | No | `info` | Application log verbosity. |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Only for Google Calendar sync | - | OAuth credentials for Google Calendar. |

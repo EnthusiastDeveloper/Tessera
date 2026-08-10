@@ -418,3 +418,26 @@ class TestIsFrontendRequest:
         from app.api.middleware import _is_frontend_request
 
         assert _is_frontend_request("POST", "/timeline") is False
+
+
+class TestApiDocsDisabledByDefault:
+    """architecture-plan §6 "API docs in production" (Rev 3, closed in Stage 11) -
+    `ENABLE_API_DOCS` defaults to false, so these routes shouldn't exist on the app this
+    whole test module already imports and boots (`_docs_urls`'s own unit tests, in
+    `tests/unit/test_frontend_serving.py`, cover the enabled branch directly - the real
+    app object is a module-level singleton constructed once at import time, so this test
+    can only observe whichever branch was in effect then, which is always "disabled"
+    since no test in this suite sets `ENABLE_API_DOCS`).
+    """
+
+    def test_docs_redoc_and_openapi_routes_do_not_exist(self, app_client: TestClient) -> None:
+        # Authenticate first - AuthGuardMiddleware 401s/403s an unregistered /api/...
+        # path exactly like a registered-but-unauthenticated one (it runs before
+        # routing), so an anonymous request can't distinguish "doesn't exist" from
+        # "exists but I'm not logged in". Only a real 404 from routing itself proves
+        # the route was never registered.
+        _complete_setup(app_client)
+        app_client.post("/api/v1/auth/login", json={"username": "admin", "password": VALID_PASSWORD})
+
+        for path in ("/api/v1/docs", "/api/v1/redoc", "/api/v1/openapi.json"):
+            assert app_client.get(path).status_code == 404, f"{path} should not be registered"
