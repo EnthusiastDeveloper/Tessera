@@ -1,8 +1,7 @@
 // Mirrors backend/app/db/schemas.py's `UserSettings`/`BlackoutDate` (architecture-plan
-// §9's traceability rule). The full Settings screen is Stage 9f - this stage only needs
-// `blackout_dates` (Timeline display, design doc §8.1 screen 2), but the type mirrors the
-// whole wire shape rather than a hand-picked subset, matching every other type in this
-// directory.
+// §9's traceability rule). Originally added in Stage 9d for the Timeline's read-only
+// `blackout_dates` need; the full Settings screen (Stage 9f, `src/views/settings/`)
+// reads and writes every other field here too.
 
 import type { ActiveHoursWindow, DayName } from './task';
 

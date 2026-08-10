@@ -58,6 +58,17 @@ export async function startBackend(): Promise<{ setupToken: string }> {
     DATABASE_PATH: join(dbDir, 'tessera.db'),
     SECRET_KEY: 'e2e-test-secret-key-not-for-production-use',
     SESSION_COOKIE_SECURE: 'false',
+    // APP_BASE_URL (backend's own origin, matching the single-container same-origin
+    // deployment topology - see CLAUDE.md's "FastAPI serves them directly") + fake
+    // Google OAuth client credentials, both needed only so settings.spec.ts's real
+    // `GET /calendar-connections/google/connect` reaches a genuine authorize_url
+    // instead of 400ing on `app_base_url_not_configured`/`provider_not_configured`
+    // first. No real Google endpoint is ever contacted (see that spec's own comment on
+    // why - the round trip is scoped down to what a real browser can complete without
+    // a live provider).
+    APP_BASE_URL: 'http://localhost:8000',
+    GOOGLE_CLIENT_ID: 'e2e-test-google-client-id',
+    GOOGLE_CLIENT_SECRET: 'e2e-test-google-client-secret',
   };
 
   // Mirrors docker/entrypoint.sh: migrations must run before the app queries the users

@@ -26,6 +26,10 @@ _AUTH_ERROR_STATUS = {
     "invalid_credentials": 401,
     "too_many_attempts": 429,
 }
+_CHANGE_PASSWORD_ERROR_STATUS = {
+    "invalid_credentials": 401,
+    "password_too_short": 422,
+}
 
 
 class SetupRequest(BaseModel):
@@ -36,6 +40,11 @@ class SetupRequest(BaseModel):
 class LoginRequest(BaseModel):
     username: str
     password: str
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
 
 
 class UserResponse(BaseModel):
@@ -98,4 +107,26 @@ def me_endpoint(request: Request) -> UserResponse:
     """Who the current session belongs to - lets the frontend confirm a stored session is
     still valid on load, without needing a separate throwaway "ping" endpoint.
     """
+    return _user_response(request.state.user)
+
+
+@router.post("/change-password")
+def change_password_endpoint(
+    payload: ChangePasswordRequest, request: Request, response: Response, db: Session = Depends(get_db)
+) -> UserResponse:
+    """Not in the public allowlist - reaching this handler already implies a valid
+    session (§8.1 screen 6 "Account: change password"). §3.6/§14.2's session policy is
+    not optional ("every session for the user is revoked on any password change"), which
+    necessarily includes the one making this request - `service.change_password` issues
+    a fresh session for it, rotated exactly like `login()` rotates on every successful
+    login, and this handler sets it as the new cookie so the caller's own device stays
+    logged in on the new password while every other device/tab is signed out.
+    """
+    try:
+        new_session = service.change_password(
+            db, user=request.state.user, current_password=payload.current_password, new_password=payload.new_password
+        )
+    except (service.AuthError, service.SetupError) as exc:
+        raise AppError(_CHANGE_PASSWORD_ERROR_STATUS[exc.code], exc.code, str(exc)) from exc
+    _set_session_cookie(response, new_session.id)
     return _user_response(request.state.user)

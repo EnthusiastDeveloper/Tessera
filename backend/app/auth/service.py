@@ -109,6 +109,42 @@ def validate_session(db: DBSession, *, session_id: str) -> User | None:
     return UserRepository(db).get(user_session.user_id)
 
 
+def change_password(db: DBSession, *, user: User, current_password: str, new_password: str) -> UserSession:
+    """Self-service change-password (§3.6 screen 6 "Account: change password"), distinct
+    from `apply_reset_admin_password_if_needed`'s *operator recovery* path: this one
+    verifies the caller's own current password (that function never does, since its
+    whole point is unlocking someone who's locked out) and applies the same
+    `MIN_PASSWORD_LENGTH` gate `setup()` does.
+
+    Session policy (§3.6, §14.2) is not optional: "every session for the user is revoked
+    on any password change or reset" - reused directly from the reset path
+    (`SessionRepository.delete_all_for_user`) rather than reimplemented. That necessarily
+    revokes the session making *this* request too, so - mirroring `login()`'s own
+    "rotate on every successful login" behavior - a fresh session is issued and returned
+    for the caller to set as the new cookie. Net effect: this device stays logged in on
+    the new password, every other device/tab is signed out.
+    """
+    if not verify_password(current_password, user.password_hash):
+        raise AuthError("invalid_credentials", "Current password is incorrect.")
+    if len(new_password) < MIN_PASSWORD_LENGTH:
+        raise SetupError("password_too_short", f"Password must be at least {MIN_PASSWORD_LENGTH} characters.")
+
+    user_repo = UserRepository(db)
+    user_repo.update(user.model_copy(update={"password_hash": hash_password(new_password)}))
+
+    session_repo = SessionRepository(db)
+    session_repo.delete_all_for_user(user.id)  # mandatory on any password change (§6.2)
+
+    now = utcnow()
+    new_session = UserSession(
+        id=secrets.token_urlsafe(32),
+        user_id=user.id,
+        created_at=now,
+        expires_at=now + SESSION_TTL,
+    )
+    return session_repo.create(new_session)
+
+
 def apply_reset_admin_password_if_needed(db: DBSession, *, reset_value: str | None) -> None:
     """Startup `RESET_ADMIN_PASSWORD` check (§3.6). One-time consumption via a DB marker row -
     a marker on the container's writable layer would be erased by a recreate, turning the

@@ -74,7 +74,10 @@ that until a screen actually needs one.
 - **Feedback:** inline field errors as above; page-level errors (e.g. a failed API call
   unrelated to a specific field) as a dismissible banner in `--color-danger` at the top
   of the content area. No toast library for the POC - two feedback mechanisms is enough
-  surface area.
+  surface area. **(Added 9f)** a page-level positive confirmation (e.g. "password
+  changed", a settings save) uses the same banner shape in `--color-success` instead
+  (`.banner-success`, `src/index.css`) - not a new mechanism, the existing one with the
+  other status color already reserved for this in the color table above.
 
 ## Accessibility baseline
 
