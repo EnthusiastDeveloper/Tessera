@@ -22,7 +22,11 @@ from app.db.session import session_scope
 SESSION_COOKIE_NAME = "tessera_session"
 
 # See design doc §14.2 for the exhaustive rationale behind each entry. Static assets and
-# SPA client routes join this list in Stage 10, when the backend starts serving them.
+# SPA client routes (any GET outside /api/) are handled separately below - there are
+# infinitely many of them (hashed asset filenames, arbitrary client routes), so they
+# can't live in a fixed allowlist. They're served publicly; the SPA enforces auth itself
+# by calling the (still fully guarded) API on load, per AuthContext's setup_required /
+# unauthenticated / authenticated states.
 PUBLIC_ROUTES: frozenset[tuple[str, str]] = frozenset(
     {
         ("GET", "/health"),
@@ -44,15 +48,26 @@ SETUP_ALLOWED_ROUTES: frozenset[tuple[str, str]] = frozenset(
 )
 
 
+def _is_frontend_request(method: str, path: str) -> bool:
+    """True for a same-origin static asset or SPA client route - never for `/api/...`
+    or `/health`, and never for anything but a read.
+    """
+    return method in ("GET", "HEAD") and path != "/health" and not path.startswith("/api/")
+
+
 class AuthGuardMiddleware(BaseHTTPMiddleware):
     """Rejects any request outside `PUBLIC_ROUTES` that lacks a valid session cookie.
 
     Also rejects, with a distinct `setup_required` code, any request outside
-    `SETUP_ALLOWED_ROUTES` while first-run setup hasn't happened yet.
+    `SETUP_ALLOWED_ROUTES` while first-run setup hasn't happened yet. Frontend static/SPA
+    requests bypass both checks - see `_is_frontend_request`.
     """
 
     async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         path_key = (request.method, request.url.path)
+
+        if _is_frontend_request(*path_key):
+            return await call_next(request)
 
         if setup_token_store.is_active and path_key not in SETUP_ALLOWED_ROUTES:
             return _setup_required()
