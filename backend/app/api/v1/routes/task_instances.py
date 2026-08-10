@@ -88,9 +88,7 @@ def patch_instance_endpoint(
     db: Session = Depends(get_db),
     jobs: JobScheduler = Depends(get_job_scheduler),
 ) -> TaskInstance:
-    patch: dict[str, Any] = {
-        field: getattr(payload, field) for field in payload.model_fields_set if field != "expected"
-    }
+    patch: dict[str, Any] = {field: getattr(payload, field) for field in payload.model_fields_set if field != "expected"}
     expected: dict[str, Any] | None = None
     if payload.expected is not None:
         expected = {field: getattr(payload.expected, field) for field in payload.expected.model_fields_set}
