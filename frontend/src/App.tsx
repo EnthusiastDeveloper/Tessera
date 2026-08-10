@@ -8,6 +8,7 @@ import { ComingSoon } from './views/shell/ComingSoon';
 import { CreateTaskPage } from './views/tasks/CreateTaskPage';
 import { EditTaskPage } from './views/tasks/EditTaskPage';
 import { TaskDetailPage } from './views/tasks/TaskDetailPage';
+import { NotificationsPanel } from './views/notifications/NotificationsPanel';
 import { TimelinePage } from './views/timeline/TimelinePage';
 
 function App(): JSX.Element {
@@ -47,10 +48,7 @@ function App(): JSX.Element {
               path="backlog"
               element={<ComingSoon title="Backlog" note="Not yet scheduled - see implementation-plan.md." />}
             />
-            <Route
-              path="notifications"
-              element={<ComingSoon title="Notifications" note="Built in Stage 9e." />}
-            />
+            <Route path="notifications" element={<NotificationsPanel />} />
             <Route
               path="settings"
               element={<ComingSoon title="Settings" note="Built in Stage 9f." />}

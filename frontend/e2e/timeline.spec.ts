@@ -18,8 +18,14 @@ test.describe('timeline view against the real backend', () => {
 
     await page.getByLabel('Name').fill('Timeline smoke test task');
     await page.getByLabel('Fixed').check();
-    // Default "Time of day" (09:00) is left as-is - no other e2e spec creates a fixed
-    // task, so there is nothing else on the calendar to collide with.
+    // Explicitly outside the default 09:00-17:00 active-hours window, not the form's
+    // 09:00 default - a flexible task auto-placed by an earlier spec (e.g. tasks.spec.ts,
+    // task-detail.spec.ts) always lands somewhere inside that window (design doc §6.2's
+    // `effective_hours` constrains every placement to it), including exactly 09:00 when
+    // the suite happens to run before 09:00 local time and "now" itself falls outside the
+    // window. This task's own time must stay outside that window too so a `creation_conflict`
+    // 409 (§6.5, both types are obstacles per CLAUDE.md) can never depend on wall-clock time.
+    await page.getByLabel('Time of day').fill('21:00');
     await page.getByRole('button', { name: 'Save' }).click();
 
     await expect(page).toHaveURL('http://localhost:4173/');
