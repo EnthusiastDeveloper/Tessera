@@ -118,6 +118,72 @@ class TestEditThisOccurrence:
         assert edited.estimated_duration_minutes == 90
         assert edited.status in ("scheduled", "pending")
 
+    def test_expected_value_agreeing_with_current_row_applies_the_patch(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        """architecture-plan §5.1: a field the caller names in `expected` that still
+        matches the current row is not a conflict - the patch goes through.
+        """
+        created = create_template(db_session, jobs, _flexible_draft(name="Water plants", priority="medium"))
+        db_session.commit()
+
+        edited = edit_this_occurrence(
+            db_session,
+            jobs,
+            created.instance.id,
+            patch={"name": "Water all the plants"},
+            expected={"name": "Water plants"},
+        )
+        db_session.commit()
+
+        assert edited.name == "Water all the plants"
+
+    def test_expected_value_disagreeing_with_current_row_is_a_conflict(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        """§5.1: the row moved underneath the caller on a field it's touching - reject
+        with `conflict`, naming the field and its current server-side value.
+        """
+        created = create_template(db_session, jobs, _flexible_draft(name="Water plants"))
+        db_session.commit()
+        edit_this_occurrence(db_session, jobs, created.instance.id, patch={"name": "Someone else's edit"})
+        db_session.commit()
+
+        with pytest.raises(InstanceValidationError) as exc_info:
+            edit_this_occurrence(
+                db_session,
+                jobs,
+                created.instance.id,
+                patch={"name": "My edit"},
+                expected={"name": "Water plants"},
+            )
+        assert exc_info.value.code == "conflict"
+        assert exc_info.value.details == {"conflicting_fields": {"name": "Someone else's edit"}}
+
+    def test_expected_value_for_an_untouched_field_does_not_block_an_unrelated_edit(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        """§5.1's core intent: a concurrent write to a field the caller isn't editing and
+        isn't asserting anything about must not bounce this edit.
+        """
+        created = create_template(db_session, jobs, _flexible_draft(name="Water plants", priority="medium"))
+        db_session.commit()
+        # Simulate a concurrent background write to `priority`, which this caller never mentions.
+        edit_this_occurrence(db_session, jobs, created.instance.id, patch={"priority": 4})
+        db_session.commit()
+
+        edited = edit_this_occurrence(
+            db_session,
+            jobs,
+            created.instance.id,
+            patch={"name": "Water all the plants"},
+            expected={"name": "Water plants"},
+        )
+        db_session.commit()
+
+        assert edited.name == "Water all the plants"
+        assert edited.priority == 4
+
 
 class TestReschedule:
     def test_moves_a_fixed_instance_and_rewires_its_jobs(

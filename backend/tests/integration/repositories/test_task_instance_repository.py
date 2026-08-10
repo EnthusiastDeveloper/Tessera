@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
-from sqlalchemy.orm import Session
+from pathlib import Path
 
-from app.db.base import utcnow
+import pytest
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm.exc import StaleDataError
+
+from app.db.base import Base, utcnow
+from app.db.models.task_instance import TaskInstanceORM
 from app.db.repositories import TaskInstanceRepository, TaskTemplateRepository
 from app.db.schemas import StatusHistoryEntry
+from app.db.session import build_engine, sqlite_url
 from tests.fixtures.db_entities import make_task_instance, make_task_template
 
 
@@ -106,6 +112,65 @@ def test_update_ignores_caller_supplied_version(db_session: Session) -> None:
     db_session.commit()
 
     assert updated.version == created.version + 1
+
+
+def test_update_raises_stale_data_error_on_a_genuine_concurrent_write(tmp_path: Path) -> None:
+    """architecture-plan §5's `version_id_col` contract: a write against a row that
+    already moved underneath the caller must be rejected, not silently overwritten.
+
+    Needs two truly independent `Session`s on a *file-backed* DB - the suite's usual
+    `db_session` fixture is a single session against `sqlite:///:memory:`, which can't
+    reproduce this: a single session always sees its own writes immediately, so there is
+    never a stale identity-mapped object to provoke the mismatch. See
+    `tests/integration/test_session.py` for the same file-backed-engine pattern.
+
+    This is the mechanism `app.api.errors`'s `StaleDataError` handler exists to catch
+    (see `tests/integration/api/test_error_envelope.py`'s `TestStaleDataErrorBackstop`
+    for the API-layer half of this contract) - this test proves the exception is
+    genuinely raised in the first place, not just that the handler would format it.
+
+    One more thing this needs, easy to miss: SQLAlchemy's identity map holds only *weak*
+    references to clean (already-flushed, no pending changes) ORM objects. Every
+    repository method here returns a converted `_to_domain()` snapshot rather than the
+    ORM object itself, so a caller who only keeps that snapshot leaves nothing pinning
+    the ORM object in memory - it gets garbage-collected, and the *next* `.get()` inside
+    `update()` silently re-fetches a fresh (non-stale) row from the DB instead of
+    reusing the cached one, defeating this whole test. Holding `session_a.get(...)`'s
+    return value directly (the actual mapped object, not a repository-converted copy) is
+    what keeps it alive long enough to go stale.
+    """
+    db_path = tmp_path / "concurrency.db"
+    engine = build_engine(sqlite_url(str(db_path)))
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    session_a, session_b = session_factory(), session_factory()
+    try:
+        template_id = _persisted_template(session_a)
+        created = TaskInstanceRepository(session_a).create(make_task_instance(template_id=template_id, status="pending"))
+        session_a.commit()
+
+        # A strong reference to the live ORM object, exactly as a service method's local
+        # variable would hold one for the duration of a request - this is the copy that
+        # will go stale. `session_a.get(...)` directly (not `TaskInstanceRepository.get()`,
+        # which would hand back a disposable domain snapshot instead) is what session_a's
+        # own identity map will keep finding for the rest of this test.
+        pinned_orm_object = session_a.get(TaskInstanceORM, created.id)
+        assert pinned_orm_object is not None
+
+        # A concurrent writer (session_b - standing in for a background job or a second
+        # request) changes the same row and commits first.
+        TaskInstanceRepository(session_b).update(created.model_copy(update={"status": "scheduled"}))
+        session_b.commit()
+
+        # session_a's cached object is now stale relative to the DB; its own write must
+        # be rejected rather than blindly overwriting session_b's change.
+        with pytest.raises(StaleDataError):
+            TaskInstanceRepository(session_a).update(created.model_copy(update={"priority": 4}))
+        del pinned_orm_object  # silence "assigned but never read" - its only job was staying alive
+    finally:
+        session_a.close()
+        session_b.close()
+        engine.dispose()
 
 
 def test_update_can_change_dependencies(db_session: Session) -> None:

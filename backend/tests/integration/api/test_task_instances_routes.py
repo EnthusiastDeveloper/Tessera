@@ -99,6 +99,33 @@ class TestPatchInstance:
         assert response.status_code == 422
         assert response.json()["code"] == "invalid_field"
 
+    def test_expected_mismatch_is_a_409_conflict_naming_the_field(self, app_client: TestClient) -> None:
+        """architecture-plan §5.1/§3's error table: `conflict` is `409` and the body must
+        name the conflicting field and its current server-side value.
+        """
+        _login(app_client)
+        instance = _create_fixed(app_client)
+        app_client.patch(f"/api/v1/task-instances/{instance['id']}", json={"name": "Changed by someone else"})
+
+        response = app_client.patch(
+            f"/api/v1/task-instances/{instance['id']}",
+            json={"name": "My edit", "expected": {"name": "Team sync"}},
+        )
+        assert response.status_code == 409, response.text
+        body = response.json()
+        assert body["code"] == "conflict"
+        assert body["details"]["conflicting_fields"] == {"name": "Changed by someone else"}
+
+    def test_expected_match_applies_the_patch(self, app_client: TestClient) -> None:
+        _login(app_client)
+        instance = _create_fixed(app_client)
+        response = app_client.patch(
+            f"/api/v1/task-instances/{instance['id']}",
+            json={"name": "Renamed", "expected": {"name": "Team sync"}},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["name"] == "Renamed"
+
 
 class TestReschedule:
     def test_moves_a_fixed_instance(self, app_client: TestClient) -> None:

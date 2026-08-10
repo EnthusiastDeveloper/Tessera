@@ -131,6 +131,44 @@ class TestSessionExpired:
         _assert_envelope(response, status=401, code="session_expired")
 
 
+class TestStaleDataErrorBackstop:
+    """`conflict`'s primary, real trigger - an `expected`-map mismatch on `PATCH
+    /task-instances/{id}` - is already covered against the real app in
+    `test_task_instances_routes.py::TestPatchInstance::test_expected_mismatch_is_a_409_conflict_naming_the_field`,
+    matching this file's usual convention of hitting a real business-logic condition.
+
+    `StaleDataError` is a second, independent trigger for the same `conflict` code: the
+    genuine ORM-level version race outside the `expected`-map's check window (see
+    `app/task_instances/service.py`'s `edit_this_occurrence` docstring). Reproducing a
+    real one through this app's HTTP surface needs two genuinely concurrent request
+    threads racing the same row - `tests/integration/repositories/test_task_instance_repository.py`'s
+    `test_update_raises_stale_data_error_on_a_genuine_concurrent_write` already proves
+    the exception itself fires under exactly that race, via two independent sessions.
+    What's untested elsewhere is the plumbing: that once raised, `app.api.errors` maps
+    it to `conflict`/`409` instead of leaking a bare `500`. A throwaway route against the
+    real registered handlers is the direct way to prove that without a flaky
+    multi-threaded HTTP test for no extra coverage.
+    """
+
+    def test_stale_data_error_maps_to_409_conflict(self) -> None:
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from sqlalchemy.orm.exc import StaleDataError
+
+        from app.api.errors import register_error_handlers
+
+        probe_app = FastAPI()
+        register_error_handlers(probe_app)
+
+        @probe_app.get("/raise-stale-data-error")
+        def _raise() -> None:
+            raise StaleDataError("simulated concurrent write")
+
+        with TestClient(probe_app, raise_server_exceptions=False) as client:
+            response = client.get("/raise-stale-data-error")
+        _assert_envelope(response, status=409, code="conflict")
+
+
 class TestSyncConflictShape:
     """`sync_conflict`'s Notification shape, not an HTTP error code - listed alongside the
     others in implementation-plan §8's own "Tests required" bullet.
