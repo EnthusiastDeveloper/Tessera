@@ -44,8 +44,8 @@ This project is built in sequential stages, each merged as its own PR. As of thi
 | 8 | API hardening & backend E2E | Done |
 | 9 | Frontend | Done |
 | 10 | Deployment & packaging | Done |
-| 11 | Hardening & release readiness | Not started |
+| 11 | Hardening & release readiness | Done |
 
-In short: the backend - scheduling engine, data layer, auth, settings, task/notification domain, background jobs, calendar sync, and the full API contract - is functionally complete, and the web frontend is built and served from the same container. Remaining work is Stage 11's pre-release hardening pass (security review, coverage review, non-goals audit) before tagging a `v0.1.0-poc`.
+In short: the full stack - scheduling engine, data layer, auth, settings, task/notification domain, background jobs, calendar sync, the API contract, and the web frontend - is functionally complete and has passed a full regression, coverage, and security review. Remaining: tagging `v0.1.0-poc`.
 
 For the authoritative, continuously-updated stage-by-stage tracker (including per-stage implementation notes and what was deferred within each), see [`docs/implementation-plan.md`](https://github.com/EnthusiastDeveloper/Tessera/blob/main/docs/implementation-plan.md) in the repository - that file, not this page, is the source of truth for build progress.

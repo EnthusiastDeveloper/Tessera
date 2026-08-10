@@ -314,6 +314,7 @@ Design doc 14.2 requires a guard around the entire app and 14.2 now enumerates t
 | `TZ` | Default timezone (IANA name), overridable in Settings | Optional, sensible default |
 | `RESET_ADMIN_PASSWORD` | One-time password **recovery** trigger (design doc 3.6). *(Rev 3)* Genuinely optional now that first-run account creation is the setup wizard - previously this label was wrong, since there was no other way to obtain an account | Optional |
 | `SESSION_COOKIE_SECURE` *(added Rev 3)* | `auto` \| `true` \| `false` - whether the session cookie carries the `Secure` attribute. `auto` derives it from `APP_BASE_URL`'s scheme. See 6.1 | Optional, defaults to `auto` |
+| `ENABLE_API_DOCS` *(added Stage 11)* | `true` \| `false` - whether `/api/v1/docs`, `/api/v1/redoc` and `/api/v1/openapi.json` are registered at all. See Section 6 "API docs in production" | Optional, defaults to `false` |
 | `APP_BASE_URL` | Base URL for OAuth redirect construction | Required if using calendar sync |
 | `SECRET_KEY` | Key for session signing + Fernet encryption of stored OAuth tokens | Required |
 | `DATABASE_PATH` | Path to the SQLite file (should point into the mounted volume) | Required, with default |

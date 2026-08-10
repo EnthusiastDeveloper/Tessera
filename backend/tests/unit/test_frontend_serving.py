@@ -14,7 +14,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.main import SPAStaticFiles
+from app.main import SPAStaticFiles, _docs_urls
 
 
 @pytest.fixture
@@ -57,3 +57,24 @@ class TestSPAStaticFiles:
         # a stale/removed API path with a misleading 200.
         response = spa_client.get("/api/does-not-exist")
         assert response.status_code == 404
+
+
+class TestDocsUrls:
+    """architecture-plan §6 "API docs in production" (Rev 3, closed in Stage 11):
+    `/docs`/`/redoc`/`/openapi.json` would otherwise expose the whole API surface
+    uncredentialed - disabled by default, opt-in via `ENABLE_API_DOCS`.
+    """
+
+    def test_disabled_by_default_means_every_url_is_none(self) -> None:
+        urls = _docs_urls(enable_api_docs=False)
+        assert urls == (None, None, None, None)
+
+    def test_enabled_scopes_every_url_under_api_v1(self) -> None:
+        urls = _docs_urls(enable_api_docs=True)
+        assert urls.openapi_url == "/api/v1/openapi.json"
+        assert urls.docs_url == "/api/v1/docs"
+        assert urls.redoc_url == "/api/v1/redoc"
+        # Must stay under /api/ - AuthGuardMiddleware._is_frontend_request treats
+        # anything outside that prefix as a public static path (Stage 10).
+        assert urls.swagger_ui_oauth2_redirect_url is not None
+        assert urls.swagger_ui_oauth2_redirect_url.startswith("/api/")

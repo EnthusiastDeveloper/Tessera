@@ -13,6 +13,7 @@ services:
       - DATABASE_PATH=${DATABASE_PATH:-/app/data/tessera.db}
       - APP_BASE_URL=${APP_BASE_URL:-http://localhost:8000}
       - SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-auto}
+      - ENABLE_API_DOCS=${ENABLE_API_DOCS:-false}
       - TZ=${TZ:-UTC}
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - RESET_ADMIN_PASSWORD=${RESET_ADMIN_PASSWORD:-}

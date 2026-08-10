@@ -245,3 +245,25 @@ class TestEditThisAndFuture:
         with pytest.raises(TemplateValidationError) as exc_info:
             edit_template_this_and_future(db_session, jobs, result.template.id, patch={"estimated_duration_minutes": 999_999})
         assert exc_info.value.code == "infeasible_duration"
+
+    def test_unknown_template_id_is_rejected(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        with pytest.raises(TemplateValidationError) as exc_info:
+            edit_template_this_and_future(db_session, jobs, "does-not-exist", patch={"name": "New name"})
+        assert exc_info.value.code == "not_found"
+
+    def test_completion_anchor_on_a_fixed_template_is_rejected(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        # §3.2: `anchor: "completion"` is only valid on a flexible template - this is the
+        # this-and-future edit path's own copy of that check (create_template's is tested
+        # separately), since an edit can change `type` in the same patch a create can't.
+        result = create_template(db_session, jobs, _fixed_draft())
+        db_session.commit()
+
+        with pytest.raises(TemplateValidationError) as exc_info:
+            edit_template_this_and_future(
+                db_session, jobs, result.template.id, patch={"recurrence": Recurrence(pattern="daily", anchor="completion")}
+            )
+        assert exc_info.value.code == "invalid_recurrence_anchor"

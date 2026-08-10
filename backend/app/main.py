@@ -5,7 +5,7 @@ import os
 from collections.abc import AsyncGenerator, MutableMapping
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -77,17 +77,41 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     job_scheduler.shutdown(wait=False)
 
 
+class _DocsUrls(NamedTuple):
+    openapi_url: str | None
+    docs_url: str | None
+    redoc_url: str | None
+    swagger_ui_oauth2_redirect_url: str | None
+
+
+def _docs_urls(*, enable_api_docs: bool) -> _DocsUrls:
+    """architecture-plan §6 "API docs in production" (Rev 3): disabled by default, opt-in
+    via `ENABLE_API_DOCS`. Split into its own function so the on/off decision is directly
+    unit-testable without constructing the real app.
+    """
+    if not enable_api_docs:
+        return _DocsUrls(openapi_url=None, docs_url=None, redoc_url=None, swagger_ui_oauth2_redirect_url=None)
+    return _DocsUrls(
+        openapi_url="/api/v1/openapi.json",
+        docs_url="/api/v1/docs",
+        redoc_url="/api/v1/redoc",
+        # Default is "/docs/oauth2-redirect", outside the /api/ prefix used above - which
+        # Stage 10's frontend/SPA bypass (see AuthGuardMiddleware._is_frontend_request)
+        # would otherwise treat as a public static path rather than a guarded API route.
+        swagger_ui_oauth2_redirect_url="/api/v1/docs/oauth2-redirect",
+    )
+
+
+_docs = _docs_urls(enable_api_docs=get_settings().enable_api_docs)
+
 app = FastAPI(
     title="Tessera",
     description="Self-hosted task scheduling that respects the real shape of your day.",
     version="0.1.0",
-    openapi_url="/api/v1/openapi.json",
-    docs_url="/api/v1/docs",
-    redoc_url="/api/v1/redoc",
-    # Default is "/docs/oauth2-redirect", outside the /api/ prefix used above - which
-    # Stage 10's frontend/SPA bypass (see AuthGuardMiddleware._is_frontend_request)
-    # would otherwise treat as a public static path rather than a guarded API route.
-    swagger_ui_oauth2_redirect_url="/api/v1/docs/oauth2-redirect",
+    openapi_url=_docs.openapi_url,
+    docs_url=_docs.docs_url,
+    redoc_url=_docs.redoc_url,
+    swagger_ui_oauth2_redirect_url=_docs.swagger_ui_oauth2_redirect_url,
     lifespan=lifespan,
 )
 
