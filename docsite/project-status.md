@@ -42,10 +42,10 @@ This project is built in sequential stages, each merged as its own PR. As of thi
 | 6 | Background jobs & reconciliation | Done |
 | 7 | Calendar sync | Done |
 | 8 | API hardening & backend E2E | Done |
-| 9 | Frontend | In progress |
-| 10 | Deployment & packaging | Not started |
+| 9 | Frontend | Done |
+| 10 | Deployment & packaging | Done |
 | 11 | Hardening & release readiness | Not started |
 
-In short: the backend - scheduling engine, data layer, auth, settings, task/notification domain, background jobs, calendar sync, and the full API contract - is functionally complete. The web frontend is under active development, so parts of this guide (particularly UI-flow descriptions) describe designed, not-yet-visually-verified behavior.
+In short: the backend - scheduling engine, data layer, auth, settings, task/notification domain, background jobs, calendar sync, and the full API contract - is functionally complete, and the web frontend is built and served from the same container. Remaining work is Stage 11's pre-release hardening pass (security review, coverage review, non-goals audit) before tagging a `v0.1.0-poc`.
 
 For the authoritative, continuously-updated stage-by-stage tracker (including per-stage implementation notes and what was deferred within each), see [`docs/implementation-plan.md`](https://github.com/EnthusiastDeveloper/Tessera/blob/main/docs/implementation-plan.md) in the repository - that file, not this page, is the source of truth for build progress.

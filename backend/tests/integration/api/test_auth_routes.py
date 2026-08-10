@@ -368,3 +368,53 @@ class TestAuthGuardCoverage:
                 assert response.status_code == 401, f"{method} {path} should require auth, got {response.status_code}"
                 checked += 1
         assert checked >= 4, "expected all four auth endpoints (plus docs/openapi) to be checked"
+
+
+class TestFrontendRequestsBypassTheGuard:
+    """Stage 10: static assets and SPA client routes are served publicly (the SPA enforces
+    auth itself via the still-fully-guarded API) - see `_is_frontend_request`. No built
+    frontend exists in this test environment (`app.main`'s mount is conditional on
+    `../static` existing), so these assert a real 404 from routing - the meaningful part
+    is that the guard let the request through to routing at all, rather than short-circuiting
+    with 401/403 the way an `/api/...` path would.
+    """
+
+    def test_root_is_not_blocked_by_the_setup_gate(self, app_client: TestClient) -> None:
+        assert setup_token_store.is_active is True
+        response = app_client.get("/")
+        assert response.status_code == 404
+        assert response.json().get("code") != "setup_required"
+
+    def test_an_unknown_client_route_is_not_blocked_by_the_auth_guard(self, app_client: TestClient) -> None:
+        _complete_setup(app_client)
+        response = app_client.get("/timeline")
+        assert response.status_code == 404
+        assert response.json().get("code") not in ("unauthenticated", "session_expired")
+
+    def test_api_paths_are_unaffected_by_the_frontend_bypass(self, app_client: TestClient) -> None:
+        _complete_setup(app_client)
+        response = app_client.get("/api/v1/auth/me")
+        assert response.status_code == 401
+        assert response.json()["code"] == "unauthenticated"
+
+
+class TestIsFrontendRequest:
+    """Direct unit coverage of the predicate - see `app.api.middleware._is_frontend_request`."""
+
+    def test_get_of_a_non_api_path_is_a_frontend_request(self) -> None:
+        from app.api.middleware import _is_frontend_request
+
+        assert _is_frontend_request("GET", "/timeline") is True
+        assert _is_frontend_request("GET", "/") is True
+        assert _is_frontend_request("HEAD", "/assets/app.js") is True
+
+    def test_health_and_api_paths_are_not_frontend_requests(self) -> None:
+        from app.api.middleware import _is_frontend_request
+
+        assert _is_frontend_request("GET", "/health") is False
+        assert _is_frontend_request("GET", "/api/v1/auth/me") is False
+
+    def test_non_get_verbs_are_not_frontend_requests(self) -> None:
+        from app.api.middleware import _is_frontend_request
+
+        assert _is_frontend_request("POST", "/timeline") is False

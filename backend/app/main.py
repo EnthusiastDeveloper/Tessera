@@ -2,10 +2,14 @@
 
 import logging
 import os
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, MutableMapping
 from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.errors import register_error_handlers
 from app.api.middleware import AuthGuardMiddleware
@@ -80,6 +84,10 @@ app = FastAPI(
     openapi_url="/api/v1/openapi.json",
     docs_url="/api/v1/docs",
     redoc_url="/api/v1/redoc",
+    # Default is "/docs/oauth2-redirect", outside the /api/ prefix used above - which
+    # Stage 10's frontend/SPA bypass (see AuthGuardMiddleware._is_frontend_request)
+    # would otherwise treat as a public static path rather than a guarded API route.
+    swagger_ui_oauth2_redirect_url="/api/v1/docs/oauth2-redirect",
     lifespan=lifespan,
 )
 
@@ -102,10 +110,30 @@ async def health_check() -> dict[str, str]:
     return {"status": "ok"}
 
 
-# Placeholder: in Stage 9, serve the frontend build here
-# frontend_path = os.path.join(os.path.dirname(__file__), "../../frontend/dist")
-# if os.path.exists(frontend_path):
-#     app.mount("/", StaticFiles(directory=frontend_path, html=True), name="frontend")
+class SPAStaticFiles(StaticFiles):
+    """Serves the built frontend; falls back to `index.html` for unknown paths so
+    React Router's client-side routes (e.g. a deep-linked `/timeline`) survive a hard
+    reload. Mounted last (architecture-plan §7 - same-origin), so any real `/api/...`
+    route above already claimed the request before this ever sees it; the `api/` guard
+    below is just belt-and-suspenders against a stale/removed endpoint falling through
+    to a misleading 200 instead of a real 404.
+    """
+
+    async def get_response(self, path: str, scope: MutableMapping[str, Any]) -> Any:
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code == 404 and not path.startswith("api/"):
+                return await super().get_response("index.html", scope)
+            raise
+
+
+# Populated by the Dockerfile's frontend-builder stage into ./static (architecture-plan
+# §7); absent in local backend-only dev, where the frontend runs via its own Vite dev
+# server instead - so the mount is conditional, not assumed.
+_frontend_dir = Path(__file__).resolve().parent.parent / "static"
+if _frontend_dir.is_dir():
+    app.mount("/", SPAStaticFiles(directory=_frontend_dir, html=True), name="frontend")
 
 
 if __name__ == "__main__":
