@@ -47,6 +47,12 @@ npm run lint
 make check
 ```
 
+**One-time: install the pre-commit hook** so `make check` runs automatically before every commit, catching a CI-only failure (formatting, lint, types) locally instead of after a push:
+
+```bash
+make install-hooks
+```
+
 ## Architecture
 
 **Three-layer backend:**

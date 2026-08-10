@@ -1,7 +1,7 @@
 .PHONY: check backend-check frontend-check \
         backend-lint backend-typecheck backend-imports backend-test \
         frontend-lint frontend-typecheck frontend-test frontend-build \
-        run
+        run install-hooks
 
 COMPOSE := $(shell command -v podman-compose 2>/dev/null || command -v docker-compose 2>/dev/null || echo "docker compose")
 PORT ?= 8000
@@ -10,6 +10,13 @@ PORT ?= 8000
 check: backend-check frontend-check
 	@echo ""
 	@echo "All checks passed."
+
+## One-time setup: install the pre-commit hook that runs `make check` before every
+## commit, so a CI-only failure (e.g. ruff format) never has to be caught by CI first.
+install-hooks:
+	cp githooks/pre-commit .git/hooks/pre-commit
+	chmod +x .git/hooks/pre-commit
+	@echo "Installed: .git/hooks/pre-commit now runs 'make check' before every commit."
 
 ## Build and start the full stack in a container, then open it in a browser.
 run:
