@@ -594,7 +594,7 @@ Tests: per settings section; one Playwright test for the OAuth connect flow agai
 - [x] Full regression green on a clean checkout.
 - [x] Security pass documented.
 - [x] Non-Goals/Backlog audit: zero scope creep found (or found and removed).
-- [ ] `v0.1.0-poc` tagged.
+- [x] `v0.1.0-poc` tagged.
 
 ---
 
@@ -610,7 +610,7 @@ Tests: per settings section; one Playwright test for the OAuth connect flow agai
 
 **Traceability spot-check.** Sampled docstrings citing design-doc/architecture-plan sections across `task_instances`, `task_templates`, `calendar_sync`, and `jobs` (`complete_instance`, `dismiss_instance`, `archive_template`, `sync_connection`'s retention purge, `run_dependency_at_risk_check`'s 3-day threshold) and verified each specific claim against the actual code: terminal-status gating, the `archived=true` soft-delete, the retention-purge call site, and the `timedelta(days=3)` constant all matched their docstrings exactly. No drift found.
 
-**Deliberately not done here:** `v0.1.0-poc` was not tagged as part of this write-up - tagging (and whether/when to push it) is a user decision, not an autonomous one, per this session's own risk-of-action judgment. See the Progress Tracker note for the current state of that checkbox.
+**Tagging note:** `v0.1.0-poc` was deliberately not tagged as part of this stage's own PR (#31) - tagging, and whether/when to push it, was treated as a user decision rather than an autonomous one. Tagged and pushed as a small follow-up once #31 merged, pointing at its merge commit.
 
 ---
 
