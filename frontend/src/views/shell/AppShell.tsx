@@ -1,5 +1,7 @@
-import { Link, NavLink, Outlet } from 'react-router-dom';
+import { useEffect } from 'react';
+import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthContext';
+import type { CalendarProvider } from '../../types/calendarConnection';
 
 const NAV_ITEMS = [
   { to: '/', label: 'Timeline', end: true },
@@ -10,6 +12,23 @@ const NAV_ITEMS = [
 
 export function AppShell(): JSX.Element {
   const { user, logout } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  // The OAuth callback (`backend/app/api/v1/routes/calendar_connections.py`) redirects
+  // a real top-level browser navigation back to the app root with `?calendar_connected=
+  // <provider>` - no frontend route consumed that query param until this stage built
+  // Settings. Hand it off to `/settings` (via router state, not a persisted query
+  // string) so `ExternalCalendarsSection` can show a one-time success banner, then drop
+  // the query param from the URL so a later refresh doesn't re-trigger it.
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const connectedProvider = params.get('calendar_connected') as CalendarProvider | null;
+    if (connectedProvider) {
+      navigate('/settings', { replace: true, state: { calendarConnected: connectedProvider } });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search]);
 
   return (
     <div>

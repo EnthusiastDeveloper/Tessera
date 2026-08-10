@@ -214,6 +214,77 @@ class TestLogoutAndMe:
         assert response.json()["code"] == "session_expired"
 
 
+class TestChangePassword:
+    def test_requires_authentication(self, app_client: TestClient) -> None:
+        _complete_setup(app_client)
+        response = app_client.post(
+            "/api/v1/auth/change-password", json={"current_password": VALID_PASSWORD, "new_password": "a-new-password-123"}
+        )
+        assert response.status_code == 401
+
+    def test_wrong_current_password_is_rejected(self, app_client: TestClient) -> None:
+        _complete_setup(app_client)
+        app_client.post("/api/v1/auth/login", json={"username": "admin", "password": VALID_PASSWORD})
+        response = app_client.post(
+            "/api/v1/auth/change-password", json={"current_password": "wrong", "new_password": "a-new-password-123"}
+        )
+        assert response.status_code == 401
+        assert response.json()["code"] == "invalid_credentials"
+
+    def test_new_password_too_short_is_rejected(self, app_client: TestClient) -> None:
+        _complete_setup(app_client)
+        app_client.post("/api/v1/auth/login", json={"username": "admin", "password": VALID_PASSWORD})
+        response = app_client.post(
+            "/api/v1/auth/change-password", json={"current_password": VALID_PASSWORD, "new_password": "short"}
+        )
+        assert response.status_code == 422
+        assert response.json()["code"] == "password_too_short"
+
+    def test_successful_change_sets_a_fresh_session_cookie_and_the_new_password_works(self, app_client: TestClient) -> None:
+        _complete_setup(app_client)
+        app_client.post("/api/v1/auth/login", json={"username": "admin", "password": VALID_PASSWORD})
+
+        response = app_client.post(
+            "/api/v1/auth/change-password", json={"current_password": VALID_PASSWORD, "new_password": "a-new-password-123"}
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["username"] == "admin"
+        set_cookie = response.headers.get("set-cookie")
+        assert set_cookie is not None
+        assert "tessera_session=" in set_cookie
+
+        # The caller's own device stays logged in - the client's cookie jar now holds
+        # the fresh session issued by the change, so /me still succeeds without a fresh
+        # login using the new password.
+        assert app_client.get("/api/v1/auth/me").status_code == 200
+
+        # The old password no longer works, the new one does.
+        old_password_login = app_client.post("/api/v1/auth/login", json={"username": "admin", "password": VALID_PASSWORD})
+        assert old_password_login.status_code == 401
+        new_password_login = app_client.post("/api/v1/auth/login", json={"username": "admin", "password": "a-new-password-123"})
+        assert new_password_login.status_code == 200
+
+    def test_other_sessions_are_revoked_by_a_password_change(self, app_client: TestClient) -> None:
+        """Same "simulate a second tab" technique as `test_validly_signed_cookie_for_a_
+        revoked_session_is_rejected` above: capture a still-valid, well-formed cookie
+        before the mutation, then restore it afterwards and prove it no longer works.
+        """
+        _complete_setup(app_client)
+        app_client.post("/api/v1/auth/login", json={"username": "admin", "password": VALID_PASSWORD})
+        other_tab_cookie = app_client.cookies.get("tessera_session")
+
+        app_client.post(
+            "/api/v1/auth/change-password", json={"current_password": VALID_PASSWORD, "new_password": "a-new-password-123"}
+        )
+        # `change_password` set a fresh cookie on the response above, which httpx's
+        # cookie jar already applied to `app_client` - restore the pre-change one to
+        # simulate the "other tab" that never saw the change.
+        app_client.cookies.set("tessera_session", other_tab_cookie)
+        response = app_client.get("/api/v1/auth/me")
+        assert response.status_code == 401
+        assert response.json()["code"] == "session_expired"
+
+
 def _iter_api_routes(routes: object) -> list[object]:
     """Flatten `app.routes` into plain routes with `.path`/`.methods`.
 

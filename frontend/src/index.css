@@ -118,6 +118,27 @@ input[type='password'] {
   margin-bottom: var(--space-4);
 }
 
+/* Same shape as .banner-error, `--color-success` instead - a page-level positive
+   confirmation (e.g. "password changed"), not a field error. No toast library for the
+   POC (DESIGN.md's "two feedback mechanisms is enough surface area"). */
+.banner-success {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-success);
+  color: var(--color-success);
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+/* Settings (§8.1 screen 6) - five independently-saved sections, one card each. */
+.settings-section {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: var(--space-6);
+  margin-bottom: var(--space-6);
+}
+
 .centered-screen {
   min-height: 100vh;
   display: flex;

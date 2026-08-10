@@ -161,6 +161,64 @@ class TestLogoutAndValidateSession:
         assert service.validate_session(db_session, session_id="does-not-exist") is None
 
 
+class TestChangePassword:
+    def _create_admin(self, db_session: Session, password: str = "correcthorsebatterystaple") -> User:
+        token = _issue_and_get_token()
+        return service.setup(db_session, token=token, password=password)
+
+    def test_wrong_current_password_is_rejected(self, db_session: Session) -> None:
+        user = self._create_admin(db_session)
+        with pytest.raises(service.AuthError) as exc_info:
+            service.change_password(db_session, user=user, current_password="wrong", new_password="a-new-password-123")
+        assert exc_info.value.code == "invalid_credentials"
+
+    def test_new_password_too_short_is_rejected(self, db_session: Session) -> None:
+        user = self._create_admin(db_session)
+        with pytest.raises(service.SetupError) as exc_info:
+            service.change_password(db_session, user=user, current_password="correcthorsebatterystaple", new_password="short")
+        assert exc_info.value.code == "password_too_short"
+
+    def test_rejected_attempts_do_not_change_the_password_hash(self, db_session: Session) -> None:
+        user = self._create_admin(db_session)
+        original_hash = user.password_hash
+        with pytest.raises(service.AuthError):
+            service.change_password(db_session, user=user, current_password="wrong", new_password="a-new-password-123")
+        assert UserRepository(db_session).get(user.id).password_hash == original_hash  # type: ignore[union-attr]
+
+    def test_successful_change_updates_the_password_hash(self, db_session: Session) -> None:
+        user = self._create_admin(db_session)
+        service.change_password(
+            db_session, user=user, current_password="correcthorsebatterystaple", new_password="a-new-password-123"
+        )
+        refreshed = UserRepository(db_session).get(user.id)
+        assert refreshed is not None
+        assert verify_password("a-new-password-123", refreshed.password_hash)
+
+    def test_successful_change_revokes_every_existing_session(self, db_session: Session) -> None:
+        user = self._create_admin(db_session)
+        _, session_a = service.login(db_session, username="admin", password="correcthorsebatterystaple", throttle_key="k1")
+        _, session_b = service.login(db_session, username="admin", password="correcthorsebatterystaple", throttle_key="k2")
+
+        service.change_password(
+            db_session, user=user, current_password="correcthorsebatterystaple", new_password="a-new-password-123"
+        )
+
+        assert SessionRepository(db_session).get(session_a.id) is None
+        assert SessionRepository(db_session).get(session_b.id) is None
+
+    def test_successful_change_issues_a_fresh_session_for_the_caller(self, db_session: Session) -> None:
+        user = self._create_admin(db_session)
+        _, calling_session = service.login(db_session, username="admin", password="correcthorsebatterystaple", throttle_key="k")
+
+        new_session = service.change_password(
+            db_session, user=user, current_password="correcthorsebatterystaple", new_password="a-new-password-123"
+        )
+
+        assert new_session.id != calling_session.id
+        assert SessionRepository(db_session).get(new_session.id) is not None
+        assert service.validate_session(db_session, session_id=new_session.id) is not None
+
+
 class TestResetAdminPassword:
     def test_no_op_when_value_is_empty(self, db_session: Session) -> None:
         service.apply_reset_admin_password_if_needed(db_session, reset_value=None)

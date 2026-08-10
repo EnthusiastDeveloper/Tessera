@@ -9,6 +9,7 @@ import { CreateTaskPage } from './views/tasks/CreateTaskPage';
 import { EditTaskPage } from './views/tasks/EditTaskPage';
 import { TaskDetailPage } from './views/tasks/TaskDetailPage';
 import { NotificationsPanel } from './views/notifications/NotificationsPanel';
+import { SettingsPage } from './views/settings/SettingsPage';
 import { TimelinePage } from './views/timeline/TimelinePage';
 
 function App(): JSX.Element {
@@ -49,10 +50,7 @@ function App(): JSX.Element {
               element={<ComingSoon title="Backlog" note="Not yet scheduled - see implementation-plan.md." />}
             />
             <Route path="notifications" element={<NotificationsPanel />} />
-            <Route
-              path="settings"
-              element={<ComingSoon title="Settings" note="Built in Stage 9f." />}
-            />
+            <Route path="settings" element={<SettingsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>

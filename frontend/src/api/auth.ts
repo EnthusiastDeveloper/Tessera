@@ -16,3 +16,13 @@ export function logout(): Promise<void> {
 export function me(): Promise<User> {
   return apiClient.get<User>('/auth/me');
 }
+
+/** `POST /auth/change-password` (design doc §3.6/§8.1 screen 6 "Account: change
+ * password", Stage 9f). Revokes every other session - the backend rotates a fresh
+ * session cookie onto this response so the caller's own device stays logged in
+ * (`app.auth.service.change_password`'s own docstring), matching `login()`'s
+ * rotate-on-success behavior. Nothing to do with the cookie here: `apiClient` already
+ * runs with `credentials: 'include'`, so the browser applies the `Set-Cookie` itself. */
+export function changePassword(currentPassword: string, newPassword: string): Promise<User> {
+  return apiClient.post<User>('/auth/change-password', { current_password: currentPassword, new_password: newPassword });
+}
