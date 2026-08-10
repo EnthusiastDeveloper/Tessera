@@ -15,12 +15,13 @@ const mockedUseAuth = vi.mocked(AuthContextModule.useAuth);
 
 function renderScreen(
   login: (username: string, password: string) => Promise<void>,
-  { justCompletedSetup = false }: { justCompletedSetup?: boolean } = {}
+  { justCompletedSetup = false, sessionExpired = false }: { justCompletedSetup?: boolean; sessionExpired?: boolean } = {}
 ): void {
   mockedUseAuth.mockReturnValue({
     status: 'unauthenticated',
     user: null,
     justCompletedSetup,
+    sessionExpired,
     completeSetup: vi.fn(),
     login,
     logout: vi.fn(),
@@ -83,5 +84,15 @@ describe('LoginScreen', () => {
   it('does not show the setup greeting on an ordinary visit', () => {
     renderScreen(vi.fn());
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it('explains a redirect caused by a mid-app session expiry', () => {
+    renderScreen(vi.fn(), { sessionExpired: true });
+    expect(screen.getByRole('status')).toHaveTextContent(/session expired/i);
+  });
+
+  it('prefers the setup greeting over the session-expired message if somehow both are true', () => {
+    renderScreen(vi.fn(), { justCompletedSetup: true, sessionExpired: true });
+    expect(screen.getByRole('status')).toHaveTextContent(/account created/i);
   });
 });

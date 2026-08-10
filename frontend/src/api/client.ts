@@ -27,6 +27,19 @@ interface ErrorEnvelope {
   details?: unknown;
 }
 
+type SessionExpiredHandler = () => void;
+
+let sessionExpiredHandler: SessionExpiredHandler | null = null;
+
+/** Registered once by `AuthProvider` (`src/auth/AuthContext.tsx`) - the one place this
+ * framework-agnostic module can announce "the session died mid-app" without importing
+ * React or creating a dependency cycle on AuthContext. `session_expired` is a distinct
+ * code (architecture-plan §3) specifically so every call site doesn't have to remember
+ * to check for it itself - this is the single place that does. */
+export function setSessionExpiredHandler(handler: SessionExpiredHandler | null): void {
+  sessionExpiredHandler = handler;
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(`${BASE_URL}${path}`, {
     ...init,
@@ -46,12 +59,11 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
   if (!response.ok) {
     const envelope = (body ?? {}) as ErrorEnvelope;
-    throw new ApiError(
-      response.status,
-      envelope.code ?? 'unknown_error',
-      envelope.message ?? 'Something went wrong.',
-      envelope.details
-    );
+    const code = envelope.code ?? 'unknown_error';
+    if (code === 'session_expired') {
+      sessionExpiredHandler?.();
+    }
+    throw new ApiError(response.status, code, envelope.message ?? 'Something went wrong.', envelope.details);
   }
 
   return body as T;

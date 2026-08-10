@@ -9,7 +9,7 @@ const ERROR_MESSAGES: Record<string, string> = {
 };
 
 export function LoginScreen(): JSX.Element {
-  const { login, justCompletedSetup } = useAuth();
+  const { login, justCompletedSetup, sessionExpired } = useAuth();
 
   const [username, setUsername] = useState('admin');
   const [password, setPassword] = useState('');
@@ -40,6 +40,11 @@ export function LoginScreen(): JSX.Element {
         {justCompletedSetup && (
           <p role="status" style={{ color: 'var(--color-success)' }}>
             Account created. Log in below.
+          </p>
+        )}
+        {sessionExpired && !justCompletedSetup && (
+          <p role="status" style={{ color: 'var(--color-warning)' }}>
+            Your session expired. Log in again.
           </p>
         )}
         {error && (

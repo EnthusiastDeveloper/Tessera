@@ -23,6 +23,7 @@ function renderScreen(completeSetup: (token: string, password: string) => Promis
     status: 'setup_required',
     user: null,
     justCompletedSetup: false,
+    sessionExpired: false,
     completeSetup,
     login: vi.fn(),
     logout: vi.fn(),

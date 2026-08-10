@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import * as authApi from '../api/auth';
-import { ApiError } from '../api/client';
+import { ApiError, setSessionExpiredHandler } from '../api/client';
 import type { User } from '../types/auth';
 
 /**
@@ -20,6 +20,11 @@ export interface AuthContextValue {
    * lets the login screen greet them, without relying on router-navigation state that
    * races against this same status transition (see `completeSetup`). */
   justCompletedSetup: boolean;
+  /** True after a `session_expired` response arrives mid-app (as opposed to the initial
+   * `GET /auth/me` simply finding no valid cookie) - lets the login screen explain why
+   * it suddenly appeared, instead of leaving the redirect unexplained. Cleared on the
+   * next successful login, mirroring `justCompletedSetup`. */
+  sessionExpired: boolean;
   completeSetup: (token: string, password: string) => Promise<void>;
   login: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -31,6 +36,7 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
   const [status, setStatus] = useState<AuthStatus>('loading');
   const [user, setUser] = useState<User | null>(null);
   const [justCompletedSetup, setJustCompletedSetup] = useState(false);
+  const [sessionExpired, setSessionExpired] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -54,6 +60,18 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
     };
   }, []);
 
+  useEffect(() => {
+    // The one registration point for `client.ts`'s module-level hook - every `PATCH`/
+    // `POST`/`GET`/`DELETE` call anywhere in the app funnels a `session_expired`
+    // response here, instead of each call site having to remember to check for it.
+    setSessionExpiredHandler(() => {
+      setUser(null);
+      setStatus('unauthenticated');
+      setSessionExpired(true);
+    });
+    return () => setSessionExpiredHandler(null);
+  }, []);
+
   const completeSetup = useCallback(async (token: string, password: string) => {
     // Setup only creates the account (backend/app/api/v1/routes/auth.py never sets a
     // session cookie there) - the user still logs in afterwards on the login screen.
@@ -69,6 +87,7 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
     setUser(loggedInUser);
     setStatus('authenticated');
     setJustCompletedSetup(false);
+    setSessionExpired(false);
   }, []);
 
   const logout = useCallback(async () => {
@@ -78,8 +97,8 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
   }, []);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ status, user, justCompletedSetup, completeSetup, login, logout }),
-    [status, user, justCompletedSetup, completeSetup, login, logout]
+    () => ({ status, user, justCompletedSetup, sessionExpired, completeSetup, login, logout }),
+    [status, user, justCompletedSetup, sessionExpired, completeSetup, login, logout]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
