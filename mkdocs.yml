@@ -49,6 +49,7 @@ nav:
   - Getting Started: installation.md
   - Capabilities: capabilities.md
   - Configuration: configuration.md
+  - Connecting an External Calendar: calendar-integration.md
   - Tasks & Events: tasks-and-events.md
   - Scheduling Algorithm: scheduling-algorithm.md
   - Notifications: notifications.md
