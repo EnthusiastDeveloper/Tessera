@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session
 from app.db.repositories import ExternalCalendarConnectionRepository, ExternalEventRepository, TaskInstanceRepository
 from app.db.schemas import ActiveHoursWindow as DomainActiveHoursWindow
 from app.db.schemas import DayName, TaskInstance, TaskTemplate, UserSettings
+from app.db.session import acquire_write_lock
 from app.scheduling_engine.calendar_rules import merge_active_hours
 from app.scheduling_engine.fixed_conflicts import check_fixed_conflict as engine_check_fixed_conflict
 from app.scheduling_engine.placement import schedule_pending_flexible_tasks
@@ -98,7 +99,11 @@ def gather_external_obstacles(db: Session) -> tuple[Obstacle, ...]:
 def gather_obstacles(db: Session, *, exclude_instance_id: str | None = None) -> tuple[Obstacle, ...]:
     """Every `scheduled`/`in_progress` instance, both types, plus every filtered external
     busy-block (§7) - the full §6.2 obstacle set.
+
+    Takes the database write lock first, so the set stays current until the caller's
+    placement or conflict decision commits - see `acquire_write_lock` (issue #24).
     """
+    acquire_write_lock(db)
     repo = TaskInstanceRepository(db)
     obstacles: list[Obstacle] = []
     for instance in repo.list_by_statuses(OBSTACLE_STATUSES):

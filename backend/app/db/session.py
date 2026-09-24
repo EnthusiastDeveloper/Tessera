@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from functools import lru_cache
 from typing import Any
 
-from sqlalchemy import Engine, create_engine, event
+from sqlalchemy import Engine, create_engine, event, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import get_settings
@@ -100,6 +100,21 @@ def get_jobs_engine() -> Engine:
 def get_session_factory() -> sessionmaker[Session]:
     """Process-wide session factory, bound to the configured `DATABASE_PATH`."""
     return sessionmaker(bind=get_engine(), autoflush=False, expire_on_commit=False)
+
+
+def acquire_write_lock(session: Session) -> None:
+    """Take SQLite's database write lock now, held until `session` commits or rolls back.
+
+    Used where a transaction reads state and then writes a decision based on it - §6.2
+    placement reading the obstacle set (GitHub issue #24). SQLite has no row locks
+    (`SELECT ... FOR UPDATE` is ignored), and Python's sqlite3 driver only opens a
+    transaction at the first write, so reads before that see whatever is committed at
+    that moment. Two concurrent placements could therefore read the same free slot and
+    both write it. A no-op `UPDATE` opens the write transaction up front: another
+    writer then waits (up to `busy_timeout`) until this one commits, and reads the
+    placement this one made. Single-user write volume makes serializing them cheap.
+    """
+    session.execute(text("UPDATE task_instances SET id = id WHERE 0 = 1"))
 
 
 @contextmanager
