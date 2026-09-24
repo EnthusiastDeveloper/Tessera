@@ -17,6 +17,7 @@ from app.calendar_sync.providers.base import (
     ProviderEvent,
     ProviderTokenSet,
     parse_token_response,
+    send_with_retry,
 )
 
 AUTHORIZE_URL = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
@@ -60,27 +61,33 @@ class OutlookCalendarProvider(CalendarProviderClient):
         return parse_token_response(response, provider_label="Microsoft")
 
     def refresh_access_token(self, *, refresh_token: str) -> ProviderTokenSet:
-        response = httpx.post(
-            TOKEN_URL,
-            data={
-                "refresh_token": refresh_token,
-                "client_id": self._client_id,
-                "client_secret": self._client_secret,
-                "grant_type": "refresh_token",
-                "scope": SCOPE,
-            },
+        response = send_with_retry(
+            lambda: httpx.post(
+                TOKEN_URL,
+                data={
+                    "refresh_token": refresh_token,
+                    "client_id": self._client_id,
+                    "client_secret": self._client_secret,
+                    "grant_type": "refresh_token",
+                    "scope": SCOPE,
+                },
+            ),
+            provider_label="Microsoft",
         )
         return parse_token_response(response, provider_label="Microsoft", fallback_refresh_token=refresh_token)
 
     def fetch_events(self, *, access_token: str, horizon_start: datetime, horizon_end: datetime) -> tuple[ProviderEvent, ...]:
-        response = httpx.get(
-            CALENDAR_VIEW_URL,
-            headers={"Authorization": f"Bearer {access_token}", "Prefer": 'outlook.timezone="UTC"'},
-            params={
-                "startDateTime": horizon_start.astimezone(UTC).isoformat(),
-                "endDateTime": horizon_end.astimezone(UTC).isoformat(),
-                "$top": "999",
-            },
+        response = send_with_retry(
+            lambda: httpx.get(
+                CALENDAR_VIEW_URL,
+                headers={"Authorization": f"Bearer {access_token}", "Prefer": 'outlook.timezone="UTC"'},
+                params={
+                    "startDateTime": horizon_start.astimezone(UTC).isoformat(),
+                    "endDateTime": horizon_end.astimezone(UTC).isoformat(),
+                    "$top": "999",
+                },
+            ),
+            provider_label="Microsoft Graph",
         )
         if response.is_error:
             raise ProviderError(f"Graph calendarView fetch failed: {response.status_code} {response.text}")

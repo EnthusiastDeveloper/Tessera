@@ -30,6 +30,7 @@ from sqlalchemy import Engine
 from app.db.session import session_scope
 from app.jobs import handlers
 from app.jobs.interface import JobScheduler, get_job_scheduler
+from app.jobs.transactional import TransactionalJobScheduler
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +94,9 @@ def _dispatch(job_key: str) -> None:
     """
     try:
         with session_scope() as db:
-            jobs = get_job_scheduler()
+            # Bound to this job's own transaction, same as a request's (issue #23): a
+            # handler that raises must not leave half its job-store changes applied.
+            jobs = TransactionalJobScheduler(get_job_scheduler(), db)
             parts = job_key.split(":")
             kind = parts[0]
             if kind == "reminder":

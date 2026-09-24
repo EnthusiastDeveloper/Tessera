@@ -18,13 +18,14 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
+from app.api.dependencies import get_request_job_scheduler
 from app.api.errors import AppError
 from app.calendar_sync import service
 from app.core.config import get_settings
 from app.db.base import utcnow
 from app.db.schemas import CalendarProvider, ExternalCalendarConnection
 from app.db.session import get_db
-from app.jobs.interface import JobScheduler, get_job_scheduler
+from app.jobs.interface import JobScheduler
 
 router = APIRouter(prefix="/api/v1/calendar-connections", tags=["calendar-connections"])
 
@@ -81,7 +82,7 @@ def callback_endpoint(
     state: str,
     request: Request,
     db: Session = Depends(get_db),
-    jobs: JobScheduler = Depends(get_job_scheduler),
+    jobs: JobScheduler = Depends(get_request_job_scheduler),
 ) -> RedirectResponse:
     app_base_url = _require_app_base_url()
     try:
@@ -106,7 +107,7 @@ def callback_endpoint(
 
 @router.delete("/{connection_id}", status_code=204)
 def disconnect_endpoint(
-    connection_id: str, db: Session = Depends(get_db), jobs: JobScheduler = Depends(get_job_scheduler)
+    connection_id: str, db: Session = Depends(get_db), jobs: JobScheduler = Depends(get_request_job_scheduler)
 ) -> None:
     try:
         service.disconnect(db, jobs, connection_id)

@@ -17,6 +17,7 @@ from app.calendar_sync.providers.base import (
     ProviderEvent,
     ProviderTokenSet,
     parse_token_response,
+    send_with_retry,
 )
 
 AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -56,27 +57,33 @@ class GoogleCalendarProvider(CalendarProviderClient):
         return parse_token_response(response, provider_label="Google")
 
     def refresh_access_token(self, *, refresh_token: str) -> ProviderTokenSet:
-        response = httpx.post(
-            TOKEN_URL,
-            data={
-                "refresh_token": refresh_token,
-                "client_id": self._client_id,
-                "client_secret": self._client_secret,
-                "grant_type": "refresh_token",
-            },
+        response = send_with_retry(
+            lambda: httpx.post(
+                TOKEN_URL,
+                data={
+                    "refresh_token": refresh_token,
+                    "client_id": self._client_id,
+                    "client_secret": self._client_secret,
+                    "grant_type": "refresh_token",
+                },
+            ),
+            provider_label="Google",
         )
         return parse_token_response(response, provider_label="Google", fallback_refresh_token=refresh_token)
 
     def fetch_events(self, *, access_token: str, horizon_start: datetime, horizon_end: datetime) -> tuple[ProviderEvent, ...]:
-        response = httpx.get(
-            EVENTS_URL,
-            headers={"Authorization": f"Bearer {access_token}"},
-            params={
-                "timeMin": horizon_start.astimezone(UTC).isoformat(),
-                "timeMax": horizon_end.astimezone(UTC).isoformat(),
-                "singleEvents": "true",  # expand recurring events into individual instances
-                "maxResults": "2500",
-            },
+        response = send_with_retry(
+            lambda: httpx.get(
+                EVENTS_URL,
+                headers={"Authorization": f"Bearer {access_token}"},
+                params={
+                    "timeMin": horizon_start.astimezone(UTC).isoformat(),
+                    "timeMax": horizon_end.astimezone(UTC).isoformat(),
+                    "singleEvents": "true",  # expand recurring events into individual instances
+                    "maxResults": "2500",
+                },
+            ),
+            provider_label="Google Calendar",
         )
         if response.is_error:
             raise ProviderError(f"Google Calendar events fetch failed: {response.status_code} {response.text}")

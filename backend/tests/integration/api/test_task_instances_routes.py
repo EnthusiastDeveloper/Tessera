@@ -5,9 +5,13 @@ this file only proves the wiring: auth guard, request/response shape, and error-
 
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.auth.setup_token import setup_token_store
+from app.jobs.interface import set_job_scheduler
+from app.task_instances import service as task_instances_service
+from tests.fixtures.jobs import RecordingJobScheduler
 
 VALID_PASSWORD = "correcthorsebatterystaple"
 
@@ -226,3 +230,35 @@ class TestDelete:
         instance = _create_recurring_fixed(app_client)
         response = app_client.delete(f"/api/v1/task-instances/{instance['id']}?scope=not-a-real-scope")
         assert response.status_code == 422
+
+
+class TestJobChangesFollowTheTransaction:
+    """Issue #23: job-store changes made mid-request must not survive a rollback."""
+
+    def test_a_complete_that_fails_partway_leaves_the_instances_jobs_in_place(
+        self, app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _login(app_client)
+        instance = _create_fixed(app_client)
+        recorder = RecordingJobScheduler()
+        set_job_scheduler(recorder)  # the app_client fixture restores a no-op scheduler afterwards
+
+        def _fail(*args: object, **kwargs: object) -> None:
+            raise RuntimeError("simulated failure after the job cancel")
+
+        monkeypatch.setattr(task_instances_service, "_unblock_dependents", _fail)
+        with pytest.raises(RuntimeError):
+            app_client.post(f"/api/v1/task-instances/{instance['id']}/complete")
+
+        assert recorder.cancelled_instances == [], "the cancel must be discarded with the rolled-back transaction"
+        listed = app_client.get("/api/v1/task-instances").json()
+        assert [row["status"] for row in listed if row["id"] == instance["id"]] == ["scheduled"]
+
+    def test_a_successful_complete_does_cancel_the_jobs(self, app_client: TestClient) -> None:
+        _login(app_client)
+        instance = _create_fixed(app_client)
+        recorder = RecordingJobScheduler()
+        set_job_scheduler(recorder)
+
+        assert app_client.post(f"/api/v1/task-instances/{instance['id']}/complete").status_code == 200
+        assert recorder.cancelled_instances == [instance["id"]]

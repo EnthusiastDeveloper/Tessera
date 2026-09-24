@@ -184,6 +184,23 @@ class TestEditThisOccurrence:
         assert edited.name == "Water all the plants"
         assert edited.priority == 4
 
+    def test_an_edit_that_leaves_no_slot_persists_the_instance_as_pending(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        # A 30-minute task can't fit before a deadline one minute away: the instance must
+        # actually leave `scheduled` in the database, not just in memory.
+        created = create_template(db_session, jobs, _flexible_draft(estimated_duration_minutes=30))
+        db_session.commit()
+        assert created.instance.status == "scheduled"
+
+        edit_this_occurrence(db_session, jobs, created.instance.id, patch={"deadline": utcnow() + timedelta(minutes=1)})
+        db_session.commit()
+
+        stored = TaskInstanceRepository(db_session).get(created.instance.id)
+        assert stored is not None
+        assert stored.status == "pending"
+        assert stored.scheduled_time is None
+
 
 class TestReschedule:
     def test_moves_a_fixed_instance_and_rewires_its_jobs(

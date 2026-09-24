@@ -10,7 +10,9 @@ provider (never a real one in CI)").
 
 from __future__ import annotations
 
+import time
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -94,4 +96,45 @@ def parse_token_response(
     )
 
 
-__all__ = ["CalendarProviderClient", "ProviderError", "ProviderEvent", "ProviderTokenSet", "parse_token_response"]
+#: Waits between attempts - three attempts in total. Short on purpose: this rides out a
+#: momentary blip, and anything longer is left to the next scheduled poll (GitHub issue #26).
+RETRY_DELAYS_SECONDS = (0.5, 1.5)
+#: Responses worth another attempt: rate limiting and upstream/gateway failures. Any other
+#: error (401, 400, ...) won't change on a retry.
+_RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
+#: Indirection so tests can skip the real waits.
+_sleep = time.sleep
+
+
+def send_with_retry(send: Callable[[], httpx.Response], *, provider_label: str) -> httpx.Response:
+    """Run `send` with a small bounded retry on transient failures - a network error or a
+    429/5xx response. Returns the last response (the caller still checks `is_error`); a
+    network error that outlasts every attempt becomes a `ProviderError`, so the service's
+    existing error handling covers it instead of a raw httpx exception escaping.
+
+    Only for idempotent calls. Exchanging an authorization code is not one: the code is
+    single-use, so a retry after an ambiguous failure can only fail.
+    """
+    attempts = (*RETRY_DELAYS_SECONDS, None)
+    for delay in attempts:
+        try:
+            response = send()
+        except httpx.TransportError as exc:
+            if delay is None:
+                raise ProviderError(f"{provider_label} request failed after {len(attempts)} attempts: {exc}") from exc
+        else:
+            if delay is None or response.status_code not in _RETRYABLE_STATUS_CODES:
+                return response
+        _sleep(delay)
+    raise AssertionError("unreachable: the final attempt always returns or raises")
+
+
+__all__ = [
+    "RETRY_DELAYS_SECONDS",
+    "CalendarProviderClient",
+    "ProviderError",
+    "ProviderEvent",
+    "ProviderTokenSet",
+    "parse_token_response",
+    "send_with_retry",
+]

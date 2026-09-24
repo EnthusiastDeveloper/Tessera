@@ -28,6 +28,7 @@ from app.db.session import get_jobs_engine, session_scope
 from app.jobs.interface import DEADLINE_ELAPSED_SWEEP_INTERVAL_MINUTES, DEADLINE_ELAPSED_SWEEP_JOB_KEY, set_job_scheduler
 from app.jobs.reconciliation import reconcile_on_startup
 from app.jobs.scheduler import APSchedulerJobScheduler
+from app.jobs.transactional import TransactionalJobScheduler
 from app.settings.service import default_timezone_from_env, get_or_create_default
 
 logger = logging.getLogger(__name__)
@@ -69,7 +70,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     job_scheduler.start()
 
     with session_scope() as db:
-        reconcile_on_startup(db, job_scheduler)
+        reconcile_on_startup(db, TransactionalJobScheduler(job_scheduler, db))
     job_scheduler.schedule_interval(job_key=DEADLINE_ELAPSED_SWEEP_JOB_KEY, minutes=DEADLINE_ELAPSED_SWEEP_INTERVAL_MINUTES)
 
     yield
