@@ -7,6 +7,7 @@ Framework-agnostic like every other service-layer module - no FastAPI imports he
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -14,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.calendar_sync import token_crypto
 from app.calendar_sync.oauth_state import generate_state, verify_state
-from app.calendar_sync.providers.base import CalendarProviderClient, ProviderError
+from app.calendar_sync.providers.base import CalendarProviderClient, ProviderError, ProviderTokenSet
 from app.calendar_sync.providers.registry import ProviderNotConfiguredError, get_provider_client
 from app.core.config import Settings
 from app.db.base import generate_id
@@ -41,6 +42,8 @@ from app.scheduling.orchestration import (
     resolve_cleared_sync_conflicts,
     return_to_pending,
 )
+
+logger = logging.getLogger(__name__)
 
 #: §7: "a rolling 90-day forward horizon" - the poll's fetch window.
 SYNC_HORIZON_DAYS = 90
@@ -207,6 +210,10 @@ def sync_connection(
     client = _require_provider_client(connection.provider, app_settings=app_settings)
     access_token = token_crypto.decrypt(token.encrypted_access_token, secret_key=app_settings.secret_key)
 
+    # Both provider calls happen before any database write. A write opens SQLite's
+    # write transaction and holds its lock until commit, so writing the refreshed token
+    # first would block every other request for the length of the event fetch.
+    refreshed: ProviderTokenSet | None = None
     if token.access_token_expires_at <= now:
         if token.encrypted_refresh_token is None:
             raise CalendarSyncError(
@@ -219,27 +226,23 @@ def sync_connection(
         except ProviderError as exc:
             raise CalendarSyncError("token_refresh_failed", str(exc)) from exc
         access_token = refreshed.access_token
-        token = token_repo.update(
-            token.model_copy(
-                update={
-                    "encrypted_access_token": token_crypto.encrypt(refreshed.access_token, secret_key=app_settings.secret_key),
-                    "encrypted_refresh_token": (
-                        token_crypto.encrypt(refreshed.refresh_token, secret_key=app_settings.secret_key)
-                        if refreshed.refresh_token is not None
-                        else token.encrypted_refresh_token
-                    ),
-                    "access_token_expires_at": refreshed.expires_at,
-                    "updated_at": now,
-                }
-            )
-        )
 
     horizon_start = now
     horizon_end = now + timedelta(days=SYNC_HORIZON_DAYS)
     try:
         provider_events = client.fetch_events(access_token=access_token, horizon_start=horizon_start, horizon_end=horizon_end)
     except ProviderError as exc:
-        raise CalendarSyncError("calendar_fetch_failed", str(exc)) from exc
+        if refreshed is None:
+            raise CalendarSyncError("calendar_fetch_failed", str(exc)) from exc
+        # Keep the refreshed token even though this poll failed: raising would roll it
+        # back, and a provider that rotates refresh tokens (Microsoft) may already have
+        # invalidated the old one. The connection stays unsynced until the next poll.
+        _store_refreshed_token(token_repo, token, refreshed, app_settings=app_settings, now=now)
+        logger.warning("Calendar fetch failed for connection %s; kept its refreshed token: %s", connection.id, exc)
+        return connection
+
+    if refreshed is not None:
+        _store_refreshed_token(token_repo, token, refreshed, app_settings=app_settings, now=now)
 
     event_repo = ExternalEventRepository(db)
     changed_events: list[ExternalEvent] = []
@@ -302,6 +305,25 @@ def _handle_collision(db: Session, jobs: JobScheduler, *, event: ExternalEvent, 
                 continue
             reverted = return_to_pending(db, jobs, instance, template=template, now=now)
             place_or_defer(db, jobs, instance=reverted, template=template, settings=settings, now=now)
+
+
+def _store_refreshed_token(
+    token_repo: OAuthTokenRepository, token: OAuthToken, refreshed: ProviderTokenSet, *, app_settings: Settings, now: datetime
+) -> OAuthToken:
+    return token_repo.update(
+        token.model_copy(
+            update={
+                "encrypted_access_token": token_crypto.encrypt(refreshed.access_token, secret_key=app_settings.secret_key),
+                "encrypted_refresh_token": (
+                    token_crypto.encrypt(refreshed.refresh_token, secret_key=app_settings.secret_key)
+                    if refreshed.refresh_token is not None
+                    else token.encrypted_refresh_token
+                ),
+                "access_token_expires_at": refreshed.expires_at,
+                "updated_at": now,
+            }
+        )
+    )
 
 
 def _require_provider_client(provider: CalendarProvider, *, app_settings: Settings) -> CalendarProviderClient:

@@ -5,17 +5,19 @@ auto-resolution (§3.9).
 
 from __future__ import annotations
 
-from datetime import timedelta
+import sqlite3
+from datetime import datetime, timedelta
+from pathlib import Path
 
 import pytest
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 import app.calendar_sync.service as calendar_sync_service
-from app.calendar_sync.providers.base import ProviderEvent
+from app.calendar_sync.providers.base import ProviderError, ProviderEvent
 from app.calendar_sync.service import CalendarSyncError, sync_connection
 from app.calendar_sync.token_crypto import encrypt
 from app.core.config import Settings
-from app.db.base import generate_id, utcnow
+from app.db.base import Base, generate_id, utcnow
 from app.db.repositories import (
     ExternalCalendarConnectionRepository,
     ExternalEventRepository,
@@ -25,6 +27,7 @@ from app.db.repositories import (
     TaskTemplateRepository,
 )
 from app.db.schemas import ExternalCalendarConnection, Recurrence, StatusHistoryEntry, TaskInstance, TaskTemplate, UserSettings
+from app.db.session import build_engine
 from tests.fixtures.calendar_providers import MockCalendarProvider
 from tests.fixtures.db_entities import make_external_calendar_connection, make_external_event, make_oauth_token
 from tests.fixtures.jobs import RecordingJobScheduler
@@ -691,3 +694,86 @@ class TestTokenLifecycle:
         with pytest.raises(CalendarSyncError) as exc_info:
             sync_connection(db_session, jobs, connection=connection, app_settings=_app_settings(), now=utcnow())
         assert exc_info.value.code == "not_found"
+
+
+def _persist_expired_connection(db: Session) -> tuple[ExternalCalendarConnection, str]:
+    token = OAuthTokenRepository(db).create(
+        make_oauth_token(
+            encrypted_access_token=encrypt("stale-access-token", secret_key=SECRET_KEY),
+            encrypted_refresh_token=encrypt("refresh-token", secret_key=SECRET_KEY),
+            access_token_expires_at=utcnow() - timedelta(minutes=1),
+        )
+    )
+    connection = ExternalCalendarConnectionRepository(db).create(
+        ExternalCalendarConnection(
+            id=generate_id(), provider="google", oauth_credentials_ref=token.id, refresh_interval_minutes=15, enabled=True
+        )
+    )
+    db.commit()
+    return connection, token.id
+
+
+class TestRefreshAndFetchOrdering:
+    def test_a_failed_fetch_after_a_refresh_keeps_the_refreshed_token(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        connection, token_id = _persist_expired_connection(db_session)
+        provider = MockCalendarProvider(access_token="fresh-access-token")
+        provider.raise_on_fetch = ProviderError("upstream 503")
+        _install_mock_provider(monkeypatch, provider)
+
+        result = sync_connection(db_session, jobs, connection=connection, app_settings=_app_settings(), now=utcnow())
+        db_session.commit()
+
+        stored = OAuthTokenRepository(db_session).get(token_id)
+        assert stored is not None
+        assert stored.access_token_expires_at > utcnow(), "a rotated refresh token must not be rolled back"
+        assert result.last_synced_at is None, "the poll still failed"
+
+    def test_a_failed_fetch_without_a_refresh_still_raises(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        connection = _persist_connection(db_session)
+        provider = MockCalendarProvider()
+        provider.raise_on_fetch = ProviderError("upstream 503")
+        _install_mock_provider(monkeypatch, provider)
+
+        with pytest.raises(CalendarSyncError) as exc_info:
+            sync_connection(db_session, jobs, connection=connection, app_settings=_app_settings(), now=utcnow())
+        assert exc_info.value.code == "calendar_fetch_failed"
+
+    def test_no_write_lock_is_held_while_events_are_fetched(
+        self, tmp_path: Path, jobs: RecordingJobScheduler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A real file database: the poll's session and a second connection must contend
+        # for SQLite's lock the way two requests would.
+        engine = build_engine(f"sqlite:///{tmp_path / 'poll.db'}")
+        Base.metadata.create_all(engine)
+        session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)()
+        connection, _ = _persist_expired_connection(session)
+        other_writer_blocked: list[bool] = []
+
+        class _ProbingProvider(MockCalendarProvider):
+            def fetch_events(
+                self, *, access_token: str, horizon_start: datetime, horizon_end: datetime
+            ) -> tuple[ProviderEvent, ...]:
+                probe = sqlite3.connect(tmp_path / "poll.db", timeout=0)
+                try:
+                    probe.execute("UPDATE external_calendar_connections SET enabled = enabled")
+                    probe.commit()
+                    other_writer_blocked.append(False)
+                except sqlite3.OperationalError:
+                    other_writer_blocked.append(True)
+                finally:
+                    probe.close()
+                return super().fetch_events(access_token=access_token, horizon_start=horizon_start, horizon_end=horizon_end)
+
+        _install_mock_provider(monkeypatch, _ProbingProvider(access_token="fresh-access-token"))
+        try:
+            sync_connection(session, jobs, connection=connection, app_settings=_app_settings(), now=utcnow())
+            session.commit()
+        finally:
+            session.close()
+            engine.dispose()
+
+        assert other_writer_blocked == [False]
