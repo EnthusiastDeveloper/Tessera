@@ -102,6 +102,11 @@ class TaskInstance(_Frozen):
     detached: bool = False
     scheduled_time: datetime | None = None
     deadline: datetime | None = None
+    # The occurrence's intended date from its recurrence rule (§9.1), fixed at generation.
+    # Unlike `scheduled_time`/`deadline` it never changes with a this-occurrence edit, so
+    # advancing the series from it can't be shifted by one occurrence's override. Also
+    # the completion anchor's earliest-start gate.
+    nominal_date: datetime | None = None
     status: TaskInstanceStatus
     status_history: tuple[StatusHistoryEntry, ...] = ()
     dependencies: tuple[str, ...] = ()  # TaskInstance ids this instance is waiting on

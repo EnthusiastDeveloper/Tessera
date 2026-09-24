@@ -74,6 +74,9 @@ class FlexibleTaskCandidate:
     task. By the time a task is a placement candidate, the `blocked` status gate
     (§6.1) already guarantees every dependency is `completed`, so this is always
     the real, populated completion timestamps - never a placeholder.
+
+    `not_before` is an extra earliest-start gate - §9.1's nominal date for a
+    completion-anchored occurrence, which "is not eligible for placement before it".
     """
 
     id: str
@@ -82,6 +85,7 @@ class FlexibleTaskCandidate:
     estimated_duration_minutes: int
     active_hours_override: ActiveHoursMap | None = None
     dependency_completed_at: Sequence[datetime] = ()
+    not_before: datetime | None = None
 
 
 @dataclass(frozen=True)

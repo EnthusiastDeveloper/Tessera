@@ -108,12 +108,20 @@ def _next_nominal_instant(template: TaskTemplate, *, predecessor: TaskInstance |
 def _predecessor_nominal_date(predecessor: TaskInstance, template: TaskTemplate, *, tz: ZoneInfo) -> datetime:
     """The predecessor's own nominal instant - never its overridden content fields.
 
-    Flexible: `deadline - deadline_offset_minutes` (design doc's own relationship for
-    the completion-anchor case, reused here as the general definition). Fixed: the date
-    part of `scheduled_time` combined with the template's *current* `fixed_time_of_day`
-    (never the predecessor's own `scheduled_time` hour/minute, which may itself be a
-    "this occurrence" override - see the module docstring).
+    Read from the stored `nominal_date`, which a this-occurrence edit never touches, so
+    one occurrence's custom deadline or reschedule can't shift the rest of the series.
+    Fixed instances keep only its date and take the template's *current*
+    `fixed_time_of_day`, so a this-and-future time change still applies going forward.
+
+    Rows without one (only possible if the migration's backfill skipped them) fall back
+    to the old derivation: flexible `deadline - deadline_offset_minutes`, fixed the date
+    of `scheduled_time`.
     """
+    if predecessor.nominal_date is not None:
+        nominal = predecessor.nominal_date.astimezone(tz)
+        if predecessor.type == "fixed":
+            return project_fixed_time(nominal.date(), template=template, tz=tz)
+        return nominal
     if predecessor.type == "flexible":
         if predecessor.deadline is None:
             raise ValueError(f"flexible predecessor {predecessor.id} has no deadline")

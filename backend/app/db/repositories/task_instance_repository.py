@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Any, cast
 
-from sqlalchemy import select
+from sqlalchemy import literal_column, select
 from sqlalchemy.orm import Session
 
 from app.db.models.task_instance import TaskInstanceORM, task_instance_dependencies
@@ -76,12 +76,13 @@ class TaskInstanceRepository:
 
     def list_by_template(self, template_id: str) -> tuple[TaskInstance, ...]:
         """Every instance generated from `template_id`, most recent first - "this and future"
-        propagation (§3.10) needs to find the currently-live one.
+        propagation (§3.10) needs to find the currently-live one. Insertion order (SQLite's
+        `rowid`) breaks a `generated_at` tie, so "most recent" is always well-defined.
         """
         stmt = (
             select(TaskInstanceORM)
             .where(TaskInstanceORM.template_id == template_id)
-            .order_by(TaskInstanceORM.generated_at.desc())
+            .order_by(TaskInstanceORM.generated_at.desc(), literal_column("task_instances.rowid").desc())
         )
         return tuple(_to_domain(orm) for orm in self._session.scalars(stmt))
 
@@ -140,6 +141,7 @@ def _to_orm_kwargs(instance: TaskInstance) -> dict[str, Any]:
         "detached": instance.detached,
         "scheduled_time": instance.scheduled_time,
         "deadline": instance.deadline,
+        "nominal_date": instance.nominal_date,
         "status": instance.status,
         "status_history": [_serialize_status_entry(entry) for entry in instance.status_history],
         "completed_at": instance.completed_at,
@@ -171,6 +173,7 @@ def _to_domain(orm: TaskInstanceORM) -> TaskInstance:
         detached=orm.detached,
         scheduled_time=orm.scheduled_time,
         deadline=orm.deadline,
+        nominal_date=orm.nominal_date,
         status=cast(TaskInstanceStatus, orm.status),
         status_history=tuple(_deserialize_status_entry(entry) for entry in orm.status_history),
         dependencies=tuple(dependency.id for dependency in orm.dependencies),

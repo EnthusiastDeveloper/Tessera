@@ -12,8 +12,9 @@ from sqlalchemy.orm import Session
 from app.db.base import generate_id
 from app.db.repositories import NotificationRepository, TaskInstanceRepository, TaskTemplateRepository
 from app.db.schemas import Notification, Recurrence, UserSettings
+from app.scheduling.generation import generate_next_instance
 from app.task_instances import service as task_instances_service
-from app.task_instances.service import edit_this_occurrence, reschedule
+from app.task_instances.service import complete, edit_this_occurrence, reschedule
 from app.task_templates import service as task_templates_service
 from app.task_templates.service import (
     TaskTemplateDraft,
@@ -504,3 +505,77 @@ class TestThisAndFutureEviction:
         assert instance.status == "pending"
         assert instance.scheduled_time is None
         assert instance.status_history[-1].status == "pending"
+
+
+@pytest.mark.usefixtures("pinned_now")
+class TestSeriesNominalDate:
+    """§9.1: the series advances from each occurrence's stored nominal date, so one
+    occurrence's this-occurrence override can't shift every later occurrence.
+    """
+
+    def test_rescheduling_one_fixed_occurrence_does_not_shift_the_series(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        daily = create_template(
+            db_session,
+            jobs,
+            _fixed_draft(fixed_time_of_day="09:00", recurrence=Recurrence(pattern="daily", interval=1, anchor="calendar")),
+        )
+        db_session.commit()
+        assert daily.instance.scheduled_time == ny(2026, 3, 3, 9, 0)
+
+        reschedule(db_session, jobs, daily.instance.id, new_scheduled_time=ny(2026, 3, 4, 9, 0))
+        db_session.commit()
+
+        moved = TaskInstanceRepository(db_session).get(daily.instance.id)
+        assert moved is not None
+        following = generate_next_instance(daily.template, predecessor=moved, now=_NOW, timezone=settings.timezone)
+        assert following.scheduled_time == ny(2026, 3, 4, 9, 0), "the day after Tuesday's slot, not after the moved one"
+
+    def test_a_custom_deadline_on_one_flexible_occurrence_does_not_shift_the_series(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        daily = create_template(
+            db_session,
+            jobs,
+            _flexible_draft(
+                estimated_duration_minutes=30,
+                deadline_offset_minutes=60 * 24,
+                recurrence=Recurrence(pattern="daily", interval=1, anchor="calendar"),
+            ),
+        )
+        db_session.commit()
+
+        edit_this_occurrence(db_session, jobs, daily.instance.id, patch={"deadline": ny(2026, 3, 6, 8, 0)})
+        db_session.commit()
+
+        edited = TaskInstanceRepository(db_session).get(daily.instance.id)
+        assert edited is not None
+        following = generate_next_instance(daily.template, predecessor=edited, now=_NOW, timezone=settings.timezone)
+        assert following.nominal_date == ny(2026, 3, 4, 8, 0)
+        assert following.deadline == ny(2026, 3, 5, 8, 0)
+
+    def test_a_completion_anchored_successor_is_not_placed_before_its_nominal_date(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        # Example O: complete it now, and the next one is due a month from now - not today.
+        filters = create_template(
+            db_session,
+            jobs,
+            _flexible_draft(
+                name="Replace HVAC filters",
+                estimated_duration_minutes=30,
+                deadline_offset_minutes=7200,
+                recurrence=Recurrence(pattern="monthly", interval=1, anchor="completion"),
+            ),
+        )
+        db_session.commit()
+        assert filters.instance.scheduled_time == ny(2026, 3, 2, 9, 0), "the first instance is placed as soon as it fits"
+
+        complete(db_session, jobs, filters.instance.id)
+        db_session.commit()
+
+        successor = TaskInstanceRepository(db_session).list_by_template(filters.template.id)[0]
+        assert successor.id != filters.instance.id
+        assert successor.nominal_date == ny(2026, 4, 2, 8, 0)
+        assert successor.scheduled_time == ny(2026, 4, 2, 9, 0)

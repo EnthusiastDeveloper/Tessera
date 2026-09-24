@@ -272,6 +272,7 @@ def _persist_instance(
             detached=False,
             scheduled_time=generated.scheduled_time,
             deadline=generated.deadline,
+            nominal_date=generated.nominal_date,
             status=instance_status,
             status_history=(StatusHistoryEntry(status=instance_status, at=now),),
             dependencies=dependencies,

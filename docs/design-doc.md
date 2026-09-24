@@ -206,6 +206,12 @@ interface TaskInstance {
 
   scheduled_time?: DateTime;        // set once placed on the timeline
   deadline?: DateTime;              // set at generation for flexible tasks
+  nominal_date?: DateTime;          // (added post-POC) this occurrence's date under its
+                                     // recurrence rule (9.1), set once at generation and
+                                     // never changed by a "this occurrence" edit. The
+                                     // series advances from it, so one occurrence's custom
+                                     // deadline or reschedule can't shift later ones; it is
+                                     // also the completion anchor's earliest-start gate.
 
   status: "pending" | "scheduled" | "in_progress" | "completed" | "blocked"
         | "missed" | "dismissed";   // "dismissed" added Rev 9 - see Section 4 and 3.8
@@ -841,7 +847,7 @@ The next instance is generated when the live instance reaches `completed`, and i
 
 - **At most one live instance at a time.**
 - **If it is never completed, no successor is generated, and the live instance simply stays outstanding.** This is the intended behaviour, not the dead-end described above: an unreplaced filter still needs replacing, and manufacturing a second copy of the same chore would be wrong. The distinction matters - for calendar-anchored work the occurrence is tied to a date that has passed, while for completion-anchored work the obligation is still live.
-- **The nominal date is an earliest-start gate**, not just a label: instance N+1 is not eligible for placement before it. Its `deadline` is `nominal_date + deadline_offset_minutes` (3.2) - `deadline_offset_minutes` is the window the user gives themselves to get it done, inside which the task may be freely rescheduled.
+- **The nominal date is an earliest-start gate**, not just a label: instance N+1 is not eligible for placement before it. The nominal date is stored on the instance (`nominal_date`, 3.3); a template's very first instance is not gated. Its `deadline` is `nominal_date + deadline_offset_minutes` (3.2) - `deadline_offset_minutes` is the window the user gives themselves to get it done, inside which the task may be freely rescheduled.
 - Valid on **flexible templates only** (3.2). On deletion with `this_occurrence` scope the successor anchors at `now + cadence` (3.8), since there is no `completed_at` to anchor against.
 
 **(Added Revision 7)** Generation always reads the template's *current* values at generation time, regardless of whether the just-completed prior instance was `detached` (3.10) - a one-off override never leaks into the next generated instance. `detached` is a property of an instance, not of the template.
