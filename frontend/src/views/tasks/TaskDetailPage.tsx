@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ApiError } from '../../api/client';
+import { ApiError, toApiError } from '../../api/client';
 import {
   completeInstance,
   dismissInstance,
@@ -120,7 +120,7 @@ export function TaskDetailPage(): JSX.Element {
       const updated = await action();
       applyUpdate(updated);
     } catch (err) {
-      setError(err instanceof ApiError ? err : new ApiError(0, 'network_error', 'Could not reach the server.'));
+      setError(toApiError(err));
     } finally {
       setSubmitting(false);
     }

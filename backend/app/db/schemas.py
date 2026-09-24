@@ -16,6 +16,9 @@ from pydantic import BaseModel, ConfigDict
 
 TaskType = Literal["fixed", "flexible"]
 Priority = Literal["low", "medium", "high", "critical"]
+#: §3.2: priority is a label on the wire and on templates, an integer (1-4) on instances.
+PRIORITY_TO_INT: dict[Priority, int] = {"low": 1, "medium": 2, "high": 3, "critical": 4}
+INT_TO_PRIORITY: dict[int, Priority] = {value: key for key, value in PRIORITY_TO_INT.items()}
 RecurrencePattern = Literal["one_time", "daily", "weekly", "monthly", "custom"]
 RecurrenceAnchor = Literal["calendar", "completion"]
 TaskInstanceStatus = Literal["pending", "scheduled", "in_progress", "completed", "blocked", "missed", "dismissed"]

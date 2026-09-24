@@ -13,6 +13,39 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm.exc import StaleDataError
 
+#: HTTP status for every machine-readable error code a service raises (architecture-plan
+#: §3). One table rather than one per route module: a code means the same thing, and
+#: gets the same status, wherever it comes from.
+ERROR_CODE_STATUS: dict[str, int] = {
+    # Generic
+    "not_found": 404,
+    "invalid_field": 422,
+    "scope_required": 422,
+    "conflict": 409,
+    # Task templates/instances (design doc §6.1, §6.5, §6.8, §3.2)
+    "creation_conflict": 409,
+    "cycle_detected": 409,
+    "infeasible_duration": 422,
+    "invalid_recurrence_anchor": 422,
+    # Settings (§3.7)
+    "invalid_timezone": 422,
+    "invalid_day_map": 422,
+    "settings_not_initialized": 500,
+    # Auth (§3.6, §14.2)
+    "already_configured": 410,
+    "invalid_setup_token": 401,
+    "password_too_short": 422,
+    "invalid_credentials": 401,
+    "too_many_attempts": 429,
+    # Calendar sync (§3.5, §7)
+    "app_base_url_not_configured": 400,
+    "invalid_oauth_state": 400,
+    "provider_not_configured": 400,
+    "oauth_exchange_failed": 502,
+    "token_refresh_failed": 502,
+    "calendar_fetch_failed": 502,
+}
+
 
 class AppError(Exception):
     """Raise from a route handler to produce the standard error envelope."""
@@ -23,6 +56,11 @@ class AppError(Exception):
         self.code = code
         self.message = message
         self.details = details
+
+    @classmethod
+    def for_code(cls, code: str, message: str, *, details: dict[str, Any] | None = None) -> AppError:
+        """An `AppError` whose HTTP status comes from `ERROR_CODE_STATUS`."""
+        return cls(ERROR_CODE_STATUS[code], code, message, details=details)
 
 
 def _envelope(status_code: int, code: str, message: str, **extra: object) -> JSONResponse:

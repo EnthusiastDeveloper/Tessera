@@ -28,14 +28,6 @@ from app.task_templates import service
 
 router = APIRouter(prefix="/api/v1/task-templates", tags=["task-templates"])
 
-_VALIDATION_ERROR_STATUS = {
-    "invalid_recurrence_anchor": 422,
-    "infeasible_duration": 422,
-    "creation_conflict": 409,
-    "cycle_detected": 409,
-    "not_found": 404,
-}
-
 
 class RecurrenceIn(BaseModel):
     pattern: Literal["one_time", "daily", "weekly", "monthly", "custom"]
@@ -129,7 +121,7 @@ def get_template_endpoint(template_id: str, db: Session = Depends(get_db)) -> Ta
     try:
         return service.get_template(db, template_id)
     except service.TemplateValidationError as exc:
-        raise AppError(_VALIDATION_ERROR_STATUS[exc.code], exc.code, str(exc)) from exc
+        raise AppError.for_code(exc.code, str(exc)) from exc
 
 
 @router.post("", status_code=201)
@@ -155,7 +147,7 @@ def create_template_endpoint(
     try:
         result = service.create_template(db, jobs, draft)
     except service.TemplateValidationError as exc:
-        raise AppError(_VALIDATION_ERROR_STATUS[exc.code], exc.code, str(exc)) from exc
+        raise AppError.for_code(exc.code, str(exc)) from exc
     return CreateTemplateResponse(template=result.template, instance=result.instance)
 
 
@@ -176,7 +168,7 @@ def patch_template_endpoint(
     try:
         return service.edit_template_this_and_future(db, jobs, template_id, patch=patch)
     except service.TemplateValidationError as exc:
-        raise AppError(_VALIDATION_ERROR_STATUS[exc.code], exc.code, str(exc)) from exc
+        raise AppError.for_code(exc.code, str(exc)) from exc
 
 
 @router.delete("/{template_id}")
@@ -190,5 +182,5 @@ def archive_template_endpoint(
     try:
         result = service.archive_template(db, jobs, template_id)
     except service.TemplateValidationError as exc:
-        raise AppError(_VALIDATION_ERROR_STATUS[exc.code], exc.code, str(exc)) from exc
+        raise AppError.for_code(exc.code, str(exc)) from exc
     return ArchiveResponse(template=result.template, incomplete_instance_ids=result.incomplete_instance_ids)

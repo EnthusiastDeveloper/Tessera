@@ -17,20 +17,6 @@ router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
 SESSION_COOKIE_NAME = "tessera_session"
 
-_SETUP_ERROR_STATUS = {
-    "already_configured": 410,
-    "invalid_setup_token": 401,
-    "password_too_short": 422,
-}
-_AUTH_ERROR_STATUS = {
-    "invalid_credentials": 401,
-    "too_many_attempts": 429,
-}
-_CHANGE_PASSWORD_ERROR_STATUS = {
-    "invalid_credentials": 401,
-    "password_too_short": 422,
-}
-
 
 class SetupRequest(BaseModel):
     token: str
@@ -77,7 +63,7 @@ def setup_endpoint(payload: SetupRequest, db: Session = Depends(get_db)) -> User
     try:
         user = service.setup(db, token=payload.token, password=payload.password)
     except service.SetupError as exc:
-        raise AppError(_SETUP_ERROR_STATUS[exc.code], exc.code, str(exc)) from exc
+        raise AppError.for_code(exc.code, str(exc)) from exc
     return _user_response(user)
 
 
@@ -88,7 +74,7 @@ def login_endpoint(payload: LoginRequest, request: Request, response: Response, 
     try:
         user, user_session = service.login(db, username=payload.username, password=payload.password, throttle_key=throttle_key)
     except service.AuthError as exc:
-        raise AppError(_AUTH_ERROR_STATUS[exc.code], exc.code, str(exc)) from exc
+        raise AppError.for_code(exc.code, str(exc)) from exc
     _set_session_cookie(response, user_session.id)
     return _user_response(user)
 
@@ -127,6 +113,6 @@ def change_password_endpoint(
             db, user=request.state.user, current_password=payload.current_password, new_password=payload.new_password
         )
     except (service.AuthError, service.SetupError) as exc:
-        raise AppError(_CHANGE_PASSWORD_ERROR_STATUS[exc.code], exc.code, str(exc)) from exc
+        raise AppError.for_code(exc.code, str(exc)) from exc
     _set_session_cookie(response, new_session.id)
     return _user_response(request.state.user)

@@ -24,4 +24,4 @@ def dismiss_notification_endpoint(notification_id: str, db: Session = Depends(ge
     try:
         return service.dismiss(db, notification_id)
     except service.NotificationNotFoundError as exc:
-        raise AppError(404, "not_found", str(exc)) from exc
+        raise AppError.for_code("not_found", str(exc)) from exc

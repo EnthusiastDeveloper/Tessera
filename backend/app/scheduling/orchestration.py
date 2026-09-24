@@ -16,13 +16,14 @@ adapter itself, not a layering violation - `app.scheduling` sits above `app.db` 
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import datetime, timedelta
 from typing import cast
 
 from sqlalchemy.orm import Session
 
 from app.db.base import generate_id
-from app.db.repositories import NotificationRepository, TaskInstanceRepository, TaskTemplateRepository
+from app.db.repositories import NotificationRepository, TaskInstanceRepository, TaskTemplateRepository, UserSettingsRepository
 from app.db.schemas import (
     Notification,
     NotificationType,
@@ -87,18 +88,18 @@ def place_or_defer(
                 }
             )
         )
-        _resolve_active(db, instance_id=instance.id, notification_type=UNSCHEDULABLE, now=now)
+        resolve_notifications(db, instance_id=instance.id, types=(UNSCHEDULABLE,), now=now)
         if placement.budget_overridden:
-            _create_notification(
+            create_notification(
                 db, type_=BUDGET_EXCEEDED, instance_id=instance.id, message=_budget_exceeded_message(template), now=now
             )
         jobs.cancel(job_key=deadline_elapsed_job_key(instance.id))
-        _schedule_reminder_and_overdue_jobs(jobs, updated, template)
+        schedule_reminder_and_overdue_jobs(jobs, updated, template.reminder_offsets_minutes)
         return updated
 
     # unschedulable - stays pending, but flag it if this is a newly-surfaced condition.
-    if not _has_active(db, instance_id=instance.id, notification_type=UNSCHEDULABLE):
-        _create_notification(
+    if not has_active_notification(db, instance_id=instance.id, notification_type=UNSCHEDULABLE):
+        create_notification(
             db,
             type_=UNSCHEDULABLE,
             instance_id=instance.id,
@@ -166,14 +167,14 @@ def generate_and_place_next_instance(
         assert instance.scheduled_time is not None
         end = instance.scheduled_time + timedelta(minutes=instance.estimated_duration_minutes)
         if has_fixed_conflict(db, start=instance.scheduled_time, end=end, exclude_instance_id=instance.id):
-            _create_notification(
+            create_notification(
                 db,
                 type_=CREATION_CONFLICT,
                 instance_id=instance.id,
                 message=f'"{instance.name}" was generated at a time that collides with an existing fixed task or external event.',
                 now=now,
             )
-        _schedule_reminder_and_overdue_jobs(jobs, instance, template)
+        schedule_reminder_and_overdue_jobs(jobs, instance, template.reminder_offsets_minutes)
         return instance
 
     return place_or_defer(db, jobs, instance=instance, template=template, settings=settings, now=now)
@@ -260,7 +261,7 @@ def _transition_to_missed(db: Session, jobs: JobScheduler, *, instance: TaskInst
             }
         )
     )
-    _create_notification(
+    create_notification(
         db,
         type_=DEADLINE_MISSED,
         instance_id=instance.id,
@@ -271,31 +272,95 @@ def _transition_to_missed(db: Session, jobs: JobScheduler, *, instance: TaskInst
     return updated
 
 
-def _schedule_reminder_and_overdue_jobs(jobs: JobScheduler, instance: TaskInstance, template: TaskTemplate) -> None:
+# --- Shared helpers ---------------------------------------------------------------
+# Used by `app.task_templates`, `app.task_instances`, `app.jobs` and
+# `app.calendar_sync`, which may not import each other (see the module docstring). Each
+# was previously copied into two to four of those modules.
+
+#: §3.3/§4: statuses an instance never leaves. `missed` is deliberately absent - it is
+#: resolvable (extend-deadline, complete, delete, §6.7).
+TERMINAL_STATUSES = frozenset({"completed", "dismissed"})
+
+
+def require_settings(db: Session) -> UserSettings:
+    """The singleton `UserSettings` row, created at app startup (Stage 4)."""
+    settings = UserSettingsRepository(db).get()
+    if settings is None:
+        raise RuntimeError("UserSettings row missing - expected to exist from app startup (Stage 4)")
+    return settings
+
+
+def all_dependencies_completed(db: Session, instance: TaskInstance) -> bool:
+    """§6.9: only `completed` satisfies a dependency - `missed`/`dismissed` do not (§4)."""
+    repo = TaskInstanceRepository(db)
+    return all((dep := repo.get(dep_id)) is not None and dep.status == "completed" for dep_id in instance.dependencies)
+
+
+def schedule_reminder_and_overdue_jobs(
+    jobs: JobScheduler, instance: TaskInstance, reminder_offsets: Iterable[int], *, dropped_offsets: Iterable[int] = ()
+) -> None:
+    """Points an instance's overdue job (§6.6) and one reminder job per offset (§3.4) at its
+    current `scheduled_time`. `schedule_at` replaces an existing job with the same key,
+    so this is also the reschedule path. Pass `dropped_offsets` for reminder offsets that
+    no longer apply: their jobs are cancelled, since `run_reminder` doesn't re-check
+    timing and a leftover job would send a reminder nobody asked for.
+    """
     if instance.scheduled_time is None:
         return
+    offsets = tuple(reminder_offsets)
+    for offset in set(dropped_offsets) - set(offsets):
+        jobs.cancel(job_key=reminder_job_key(instance.id, offset))
     jobs.schedule_at(job_key=overdue_job_key(instance.id), run_at=instance.scheduled_time)
-    for offset in template.reminder_offsets_minutes:
+    for offset in offsets:
         jobs.schedule_at(
             job_key=reminder_job_key(instance.id, offset), run_at=instance.scheduled_time - timedelta(minutes=offset)
         )
 
 
-def _has_active(db: Session, *, instance_id: str, notification_type: str) -> bool:
+def return_to_pending(
+    db: Session, jobs: JobScheduler, instance: TaskInstance, *, template: TaskTemplate, now: datetime
+) -> TaskInstance:
+    """Evicts a scheduled flexible instance back into the pending pool: persisted, with
+    `scheduled_time` cleared and its old slot's reminder/overdue jobs cancelled. The one
+    implementation behind every eviction path - §6.4 sync collision, §6.6 overdue revert,
+    and edits that invalidate a placement (§3.10).
+
+    Callers then hand the result to `place_or_defer`. That only writes on success or
+    `missed`, so persisting `pending` here is what keeps an instance that can't be
+    re-placed from staying `scheduled` in its stale slot.
+    """
+    jobs.cancel(job_key=overdue_job_key(instance.id))
+    for offset in template.reminder_offsets_minutes:
+        jobs.cancel(job_key=reminder_job_key(instance.id, offset))
+    return TaskInstanceRepository(db).update(
+        instance.model_copy(
+            update={
+                "status": _status("pending"),
+                "scheduled_time": None,
+                "status_history": (*instance.status_history, _status_entry("pending", now)),
+            }
+        )
+    )
+
+
+def has_active_notification(db: Session, *, instance_id: str, notification_type: str) -> bool:
+    """Whether the instance has a notification of this type that is neither resolved nor dismissed."""
     return any(
         n.type == notification_type and n.resolved_at is None and n.dismissed_at is None
         for n in NotificationRepository(db).list_for_instance(instance_id)
     )
 
 
-def _resolve_active(db: Session, *, instance_id: str, notification_type: str, now: datetime) -> None:
+def resolve_notifications(db: Session, *, instance_id: str, types: Iterable[str], now: datetime) -> None:
+    """§3.9 auto-resolution: mark the instance's unresolved notifications of these types resolved."""
+    wanted = frozenset(types)
     repo = NotificationRepository(db)
     for notification in repo.list_for_instance(instance_id):
-        if notification.type == notification_type and notification.resolved_at is None:
+        if notification.type in wanted and notification.resolved_at is None:
             repo.update(notification.model_copy(update={"resolved_at": now}))
 
 
-def _create_notification(db: Session, *, type_: str, instance_id: str, message: str, now: datetime) -> Notification:
+def create_notification(db: Session, *, type_: str, instance_id: str, message: str, now: datetime) -> Notification:
     return NotificationRepository(db).create(
         Notification(
             id=generate_id(),
@@ -325,9 +390,17 @@ __all__ = [
     "DEADLINE_MISSED",
     "SYNC_CONFLICT",
     "UNSCHEDULABLE",
+    "TERMINAL_STATUSES",
+    "all_dependencies_completed",
     "archive_template_and_cancel_jobs",
+    "create_notification",
     "generate_and_place_next_instance",
+    "has_active_notification",
     "place_or_defer",
+    "require_settings",
     "resolve_cleared_sync_conflicts",
+    "resolve_notifications",
+    "return_to_pending",
     "schedule_next_occurrence_boundary",
+    "schedule_reminder_and_overdue_jobs",
 ]

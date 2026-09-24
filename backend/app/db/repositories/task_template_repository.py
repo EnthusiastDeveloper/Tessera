@@ -8,20 +8,16 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models.task_template import TaskTemplateORM
+from app.db.repositories._active_hours import deserialize_active_hours, serialize_active_hours
 from app.db.schemas import (
-    ActiveHoursWindow,
-    DayName,
-    Priority,
+    INT_TO_PRIORITY,
+    PRIORITY_TO_INT,
     Recurrence,
     RecurrenceAnchor,
     RecurrencePattern,
     TaskTemplate,
     TaskType,
 )
-
-# Numeric priority mapping is internal-only, never exposed in the API (§3.2 notes).
-_PRIORITY_TO_INT: dict[Priority, int] = {"low": 1, "medium": 2, "high": 3, "critical": 4}
-_INT_TO_PRIORITY: dict[int, Priority] = {value: key for key, value in _PRIORITY_TO_INT.items()}
 
 
 class TaskTemplateRepository:
@@ -88,31 +84,15 @@ def _to_orm_kwargs(template: TaskTemplate) -> dict[str, Any]:
         "recurrence_anchor": template.recurrence.anchor,
         "fixed_time_of_day": template.fixed_time_of_day,
         "deadline_offset_minutes": template.deadline_offset_minutes,
-        "priority": _PRIORITY_TO_INT[template.priority],
+        "priority": PRIORITY_TO_INT[template.priority],
         "estimated_duration_minutes": template.estimated_duration_minutes,
         "reminder_offsets_minutes": list(template.reminder_offsets_minutes),
-        "active_hours_override": _serialize_active_hours(template.active_hours_override),
+        "active_hours_override": serialize_active_hours(template.active_hours_override),
         "archived": template.archived,
         "created_at": template.created_at,
         "updated_at": template.updated_at,
         "version": template.version,
     }
-
-
-def _serialize_active_hours(
-    override: dict[DayName, ActiveHoursWindow | None] | None,
-) -> dict[str, dict[str, str] | None] | None:
-    if override is None:
-        return None
-    return {day: (window.model_dump() if window is not None else None) for day, window in override.items()}
-
-
-def _deserialize_active_hours(
-    raw: dict[str, Any] | None,
-) -> dict[DayName, ActiveHoursWindow | None] | None:
-    if raw is None:
-        return None
-    return {cast(DayName, day): (ActiveHoursWindow(**window) if window is not None else None) for day, window in raw.items()}
 
 
 def _to_domain(orm: TaskTemplateORM) -> TaskTemplate:
@@ -131,10 +111,10 @@ def _to_domain(orm: TaskTemplateORM) -> TaskTemplate:
         ),
         fixed_time_of_day=orm.fixed_time_of_day,
         deadline_offset_minutes=orm.deadline_offset_minutes,
-        priority=_INT_TO_PRIORITY[orm.priority],
+        priority=INT_TO_PRIORITY[orm.priority],
         estimated_duration_minutes=orm.estimated_duration_minutes,
         reminder_offsets_minutes=tuple(orm.reminder_offsets_minutes),
-        active_hours_override=_deserialize_active_hours(orm.active_hours_override),
+        active_hours_override=deserialize_active_hours(orm.active_hours_override),
         archived=orm.archived,
         created_at=orm.created_at,
         updated_at=orm.updated_at,

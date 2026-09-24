@@ -14,25 +14,29 @@ from sqlalchemy.orm import Session
 
 from app.db.base import utcnow
 from app.db.repositories import (
-    NotificationRepository,
     TaskInstanceRepository,
     TaskTemplateRepository,
-    UserSettingsRepository,
 )
-from app.db.schemas import StatusHistoryEntry, TaskInstance, TaskTemplate, UserSettings
-from app.jobs.interface import JobScheduler, overdue_job_key, reminder_job_key
+from app.db.schemas import StatusHistoryEntry, TaskInstance, TaskTemplate
+from app.jobs.interface import JobScheduler
 from app.scheduling.adapter import build_active_hours_map, has_fixed_conflict
 from app.scheduling.orchestration import (
     DEADLINE_MISSED,
+    TERMINAL_STATUSES,
     UNSCHEDULABLE,
+    all_dependencies_completed,
     archive_template_and_cancel_jobs,
     generate_and_place_next_instance,
+    has_active_notification,
     place_or_defer,
+    require_settings,
     resolve_cleared_sync_conflicts,
+    resolve_notifications,
+    return_to_pending,
+    schedule_reminder_and_overdue_jobs,
 )
 from app.scheduling_engine.feasibility import validate_feasible_duration
 
-_TERMINAL_STATUSES = frozenset({"completed", "dismissed"})
 #: Fields a "this occurrence" edit may touch directly (§3.10). scheduled_time is
 #: deliberately excluded - retiming a fixed instance goes through `reschedule()`, which
 #: needs §6.5's conflict validation `PATCH` doesn't run.
@@ -85,16 +89,11 @@ def _list_backlog(db: Session) -> tuple[TaskInstance, ...]:
     repo = TaskInstanceRepository(db)
     blocked_or_missed = repo.list_by_statuses(("blocked", "missed"))
     pending_unschedulable = tuple(
-        instance for instance in repo.list_by_statuses(("pending",)) if _has_active(db, instance.id, UNSCHEDULABLE)
+        instance
+        for instance in repo.list_by_statuses(("pending",))
+        if has_active_notification(db, instance_id=instance.id, notification_type=UNSCHEDULABLE)
     )
     return blocked_or_missed + pending_unschedulable
-
-
-def _has_active(db: Session, instance_id: str, notification_type: str) -> bool:
-    return any(
-        n.type == notification_type and n.resolved_at is None and n.dismissed_at is None
-        for n in NotificationRepository(db).list_for_instance(instance_id)
-    )
 
 
 def edit_this_occurrence(
@@ -111,7 +110,7 @@ def edit_this_occurrence(
     """
     instance = _require_instance(db, instance_id)
     template = _require_template(db, instance.template_id)
-    settings = _require_settings(db)
+    settings = require_settings(db)
 
     unknown = set(patch) - set(_THIS_OCCURRENCE_FIELDS)
     if unknown:
@@ -146,32 +145,9 @@ def edit_this_occurrence(
     invalidates_placement = "estimated_duration_minutes" in patch or "deadline" in patch
     if updated.type == "flexible" and updated.status in ("pending", "scheduled") and invalidates_placement:
         if updated.status == "scheduled":
-            updated = _return_to_pending(db, jobs, updated, template=template, now=now)
+            updated = return_to_pending(db, jobs, updated, template=template, now=now)
         updated = place_or_defer(db, jobs, instance=updated, template=template, settings=settings, now=now)
     return updated
-
-
-def _return_to_pending(
-    db: Session, jobs: JobScheduler, instance: TaskInstance, *, template: TaskTemplate, now: datetime
-) -> TaskInstance:
-    """Evicts a scheduled flexible instance back into the pending pool before re-placing
-    it - persisted, with `scheduled_time` cleared and its old slot's reminder/overdue jobs
-    cancelled, the same shape as §6.4's sync eviction and §6.6's overdue revert.
-    `place_or_defer` only writes on success or `missed`, so without this an instance it
-    can't place would stay `scheduled` in its stale slot.
-    """
-    jobs.cancel(job_key=overdue_job_key(instance.id))
-    for offset in template.reminder_offsets_minutes:
-        jobs.cancel(job_key=reminder_job_key(instance.id, offset))
-    return TaskInstanceRepository(db).update(
-        instance.model_copy(
-            update={
-                "status": "pending",
-                "scheduled_time": None,
-                "status_history": (*instance.status_history, StatusHistoryEntry(status="pending", at=now)),
-            }
-        )
-    )
 
 
 def reschedule(db: Session, jobs: JobScheduler, instance_id: str, *, new_scheduled_time: datetime) -> TaskInstance:
@@ -190,12 +166,8 @@ def reschedule(db: Session, jobs: JobScheduler, instance_id: str, *, new_schedul
     updated = TaskInstanceRepository(db).update(
         instance.model_copy(update={"scheduled_time": new_scheduled_time, "detached": True})
     )
-    jobs.cancel(job_key=overdue_job_key(instance.id))
-    jobs.schedule_at(job_key=overdue_job_key(instance.id), run_at=new_scheduled_time)
     template = _require_template(db, instance.template_id)
-    for offset in template.reminder_offsets_minutes:
-        jobs.cancel(job_key=reminder_job_key(instance.id, offset))
-        jobs.schedule_at(job_key=reminder_job_key(instance.id, offset), run_at=new_scheduled_time - timedelta(minutes=offset))
+    schedule_reminder_and_overdue_jobs(jobs, updated, template.reminder_offsets_minutes)
     # §3.9: a manual reschedule that clears the collision resolves any sync_conflict this
     # instance was carrying, immediately rather than waiting for the next poll (Stage 7).
     resolve_cleared_sync_conflicts(db, now=now)
@@ -210,7 +182,7 @@ def complete(db: Session, jobs: JobScheduler, instance_id: str) -> TaskInstance:
     effects, not one").
     """
     instance = _require_instance(db, instance_id)
-    if instance.status in _TERMINAL_STATUSES:
+    if instance.status in TERMINAL_STATUSES:
         raise InstanceValidationError("invalid_field", f"Cannot complete a {instance.status} instance - it is terminal.")
     now = utcnow()
 
@@ -224,12 +196,12 @@ def complete(db: Session, jobs: JobScheduler, instance_id: str) -> TaskInstance:
         )
     )
     jobs.cancel_all_for_instance(instance_id=instance.id)
-    _resolve_notifications(db, instance_id=instance.id, types=(DEADLINE_MISSED,), now=now)
+    resolve_notifications(db, instance_id=instance.id, types=(DEADLINE_MISSED,), now=now)
     _unblock_dependents(db, jobs, completed_instance_id=instance.id, now=now)
 
     template = _require_template(db, instance.template_id)
     if template.recurrence.anchor == "completion" and not template.archived:
-        settings = _require_settings(db)
+        settings = require_settings(db)
         generate_and_place_next_instance(db, jobs, template=template, predecessor=updated, settings=settings, now=now)
 
     return updated
@@ -267,7 +239,7 @@ def dismiss(db: Session, jobs: JobScheduler, instance_id: str) -> TaskInstance:
     left `blocked` - `dismissed` does not satisfy a dependency (§4).
     """
     instance = _require_instance(db, instance_id)
-    if instance.status in _TERMINAL_STATUSES:
+    if instance.status in TERMINAL_STATUSES:
         raise InstanceValidationError("invalid_field", f"Cannot dismiss a {instance.status} instance - it is terminal.")
     now = utcnow()
 
@@ -280,7 +252,7 @@ def dismiss(db: Session, jobs: JobScheduler, instance_id: str) -> TaskInstance:
         )
     )
     jobs.cancel_all_for_instance(instance_id=instance.id)
-    _resolve_notifications(db, instance_id=instance.id, types=_DISMISS_RESOLVED_NOTIFICATION_TYPES, now=now)
+    resolve_notifications(db, instance_id=instance.id, types=_DISMISS_RESOLVED_NOTIFICATION_TYPES, now=now)
 
     template = _require_template(db, instance.template_id)
     if template.recurrence.anchor == "completion" and not template.archived:
@@ -289,7 +261,7 @@ def dismiss(db: Session, jobs: JobScheduler, instance_id: str) -> TaskInstance:
         # `now + cadence`. `predecessor=None` is exactly that: the same "advance the rule
         # from now" path `generate_next_instance` already uses for a template's very
         # first instance (see its module docstring's `_next_nominal_instant`).
-        settings = _require_settings(db)
+        settings = require_settings(db)
         generate_and_place_next_instance(db, jobs, template=template, predecessor=None, settings=settings, now=now)
 
     return updated
@@ -306,7 +278,7 @@ def extend_deadline(db: Session, jobs: JobScheduler, instance_id: str, *, new_de
 
     now = utcnow()
     template = _require_template(db, instance.template_id)
-    settings = _require_settings(db)
+    settings = require_settings(db)
 
     pending_instance = TaskInstanceRepository(db).update(
         instance.model_copy(
@@ -318,7 +290,7 @@ def extend_deadline(db: Session, jobs: JobScheduler, instance_id: str, *, new_de
             }
         )
     )
-    _resolve_notifications(db, instance_id=instance.id, types=(DEADLINE_MISSED,), now=now)
+    resolve_notifications(db, instance_id=instance.id, types=(DEADLINE_MISSED,), now=now)
     return place_or_defer(db, jobs, instance=pending_instance, template=template, settings=settings, now=now)
 
 
@@ -364,7 +336,7 @@ def delete_instance(db: Session, jobs: JobScheduler, instance_id: str, *, scope:
     elif is_recurring and scope == "this_occurrence" and not template.archived and template.recurrence.anchor == "completion":
         # See dismiss()'s identical §3.8 "Re-anchoring on this_occurrence" comment -
         # deleting isn't completing, so the successor anchors at `now + cadence`.
-        settings = _require_settings(db)
+        settings = require_settings(db)
         generate_and_place_next_instance(db, jobs, template=template, predecessor=None, settings=settings, now=now)
 
     return DeleteResult(deleted_instance_id=instance_id, unblocked_instance_ids=tuple(unblocked))
@@ -389,11 +361,11 @@ def promote_if_unblocked(db: Session, jobs: JobScheduler, instance: TaskInstance
     either normal trigger path, to catch a dependency that completed while the process
     that should have unblocked its dependent was down.
     """
-    if instance.status != "blocked" or not _all_dependencies_completed(db, instance):
+    if instance.status != "blocked" or not all_dependencies_completed(db, instance):
         return None
     repo = TaskInstanceRepository(db)
     template = _require_template(db, instance.template_id)
-    settings = _require_settings(db)
+    settings = require_settings(db)
     promoted = repo.update(
         instance.model_copy(
             update={
@@ -405,18 +377,6 @@ def promote_if_unblocked(db: Session, jobs: JobScheduler, instance: TaskInstance
     if promoted.type == "flexible":
         return place_or_defer(db, jobs, instance=promoted, template=template, settings=settings, now=now)
     return promoted
-
-
-def _all_dependencies_completed(db: Session, instance: TaskInstance) -> bool:
-    repo = TaskInstanceRepository(db)
-    return all((dep := repo.get(dep_id)) is not None and dep.status == "completed" for dep_id in instance.dependencies)
-
-
-def _resolve_notifications(db: Session, *, instance_id: str, types: tuple[str, ...], now: datetime) -> None:
-    repo = NotificationRepository(db)
-    for notification in repo.list_for_instance(instance_id):
-        if notification.type in types and notification.resolved_at is None:
-            repo.update(notification.model_copy(update={"resolved_at": now}))
 
 
 def _require_instance(db: Session, instance_id: str) -> TaskInstance:
@@ -431,13 +391,6 @@ def _require_template(db: Session, template_id: str) -> TaskTemplate:
     if template is None:
         raise RuntimeError(f"TaskTemplate {template_id} not found for an existing TaskInstance - data integrity bug")
     return template
-
-
-def _require_settings(db: Session) -> UserSettings:
-    settings = UserSettingsRepository(db).get()
-    if settings is None:
-        raise RuntimeError("UserSettings row missing - expected to exist from app startup (Stage 4)")
-    return settings
 
 
 __all__ = [

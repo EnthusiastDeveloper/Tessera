@@ -4,7 +4,7 @@ import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
 import type { EventClickArg } from '@fullcalendar/core';
-import { ApiError } from '../../api/client';
+import { ApiError, toApiError } from '../../api/client';
 import { getSettings } from '../../api/settings';
 import { listExternalEvents } from '../../api/externalEvents';
 import { listInstances } from '../../api/taskInstances';
@@ -56,7 +56,7 @@ export function TimelinePage(): JSX.Element {
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        setError(err instanceof ApiError ? err : new ApiError(500, 'unknown_error', 'Failed to load the Timeline.'));
+        setError(toApiError(err, new ApiError(500, 'unknown_error', 'Failed to load the Timeline.')));
         setState('error');
       });
     return () => {

@@ -15,12 +15,6 @@ from app.settings import service
 
 router = APIRouter(prefix="/api/v1/settings", tags=["settings"])
 
-_VALIDATION_ERROR_STATUS = {
-    "invalid_timezone": 422,
-    "invalid_day_map": 422,
-    "settings_not_initialized": 500,
-}
-
 
 class SettingsPatchRequest(BaseModel):
     """All fields optional - only keys actually present in the request body are applied.
@@ -57,4 +51,4 @@ def patch_settings_endpoint(payload: SettingsPatchRequest, db: Session = Depends
     try:
         return service.update_settings(db, patch=patch)
     except service.SettingsValidationError as exc:
-        raise AppError(_VALIDATION_ERROR_STATUS[exc.code], exc.code, str(exc)) from exc
+        raise AppError.for_code(exc.code, str(exc)) from exc

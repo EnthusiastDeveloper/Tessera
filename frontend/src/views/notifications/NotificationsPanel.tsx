@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ApiError } from '../../api/client';
+import { ApiError, toApiError } from '../../api/client';
 import { dismissNotification, listNotifications } from '../../api/notifications';
 import type { Notification, NotificationType } from '../../types/notification';
 
@@ -72,7 +72,7 @@ export function NotificationsPanel(): JSX.Element {
       })
       .catch((err: unknown) => {
         if (requestId !== latestRequest.current) return;
-        setError(err instanceof ApiError ? err : new ApiError(0, 'network_error', 'Could not reach the server.'));
+        setError(toApiError(err));
         setState('error');
       });
   }, []);
@@ -96,7 +96,7 @@ export function NotificationsPanel(): JSX.Element {
         prev.map((row) => (row.notification.id === id ? { notification: updated, outcome, dismissing: false } : row))
       );
     } catch (err) {
-      setError(err instanceof ApiError ? err : new ApiError(0, 'network_error', 'Could not reach the server.'));
+      setError(toApiError(err));
       setRows((prev) => prev.map((row) => (row.notification.id === id ? { ...row, dismissing: false } : row)));
     }
   };

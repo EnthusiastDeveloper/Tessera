@@ -29,15 +29,6 @@ from app.jobs.interface import JobScheduler
 
 router = APIRouter(prefix="/api/v1/calendar-connections", tags=["calendar-connections"])
 
-_ERROR_STATUS = {
-    "not_found": 404,
-    "invalid_oauth_state": 400,
-    "provider_not_configured": 400,
-    "oauth_exchange_failed": 502,
-    "token_refresh_failed": 502,
-    "calendar_fetch_failed": 502,
-}
-
 
 def _callback_redirect_uri(provider: CalendarProvider, *, app_base_url: str) -> str:
     return f"{app_base_url.rstrip('/')}/api/v1/calendar-connections/{provider}/callback"
@@ -46,7 +37,7 @@ def _callback_redirect_uri(provider: CalendarProvider, *, app_base_url: str) -> 
 def _require_app_base_url() -> str:
     app_base_url = get_settings().app_base_url
     if not app_base_url:
-        raise AppError(400, "app_base_url_not_configured", "APP_BASE_URL must be set to use calendar sync.")
+        raise AppError.for_code("app_base_url_not_configured", "APP_BASE_URL must be set to use calendar sync.")
     return app_base_url
 
 
@@ -71,7 +62,7 @@ def connect_endpoint(
             app_settings=get_settings(),
         )
     except service.CalendarSyncError as exc:
-        raise AppError(_ERROR_STATUS[exc.code], exc.code, str(exc)) from exc
+        raise AppError.for_code(exc.code, str(exc)) from exc
     return {"authorize_url": result.authorize_url}
 
 
@@ -98,7 +89,7 @@ def callback_endpoint(
             now=utcnow(),
         )
     except service.CalendarSyncError as exc:
-        raise AppError(_ERROR_STATUS[exc.code], exc.code, str(exc)) from exc
+        raise AppError.for_code(exc.code, str(exc)) from exc
     # No frontend route exists yet (Stage 9) - land back on the app root with a query
     # flag it can pick up once it does, rather than returning a bare JSON body to what is
     # a real browser top-level navigation.
@@ -112,4 +103,4 @@ def disconnect_endpoint(
     try:
         service.disconnect(db, jobs, connection_id)
     except service.CalendarSyncError as exc:
-        raise AppError(_ERROR_STATUS[exc.code], exc.code, str(exc)) from exc
+        raise AppError.for_code(exc.code, str(exc)) from exc

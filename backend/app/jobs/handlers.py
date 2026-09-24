@@ -16,36 +16,35 @@ moved on since they were scheduled, not RPCs with a guaranteed-current target.
 from __future__ import annotations
 
 from datetime import timedelta
-from typing import cast
 
 from sqlalchemy.orm import Session
 
 from app.calendar_sync import service as calendar_sync_service
 from app.core.config import get_settings
-from app.db.base import generate_id, utcnow
+from app.db.base import utcnow
 from app.db.repositories import (
     ExternalCalendarConnectionRepository,
-    NotificationRepository,
     TaskInstanceRepository,
     TaskTemplateRepository,
     UserSettingsRepository,
 )
-from app.db.schemas import Notification, NotificationType, StatusHistoryEntry, TaskInstance
+from app.db.schemas import TaskInstance
 from app.jobs.interface import JobScheduler
 from app.scheduling.adapter import attempt_placement
-from app.scheduling.orchestration import generate_and_place_next_instance, place_or_defer, schedule_next_occurrence_boundary
+from app.scheduling.orchestration import (
+    all_dependencies_completed,
+    create_notification,
+    generate_and_place_next_instance,
+    has_active_notification,
+    place_or_defer,
+    return_to_pending,
+    schedule_next_occurrence_boundary,
+)
 from app.scheduling_engine.deadlines import is_deadline_elapsed
 
 REMINDER = "reminder"
 OVERDUE = "overdue"
 DEPENDENCY_AT_RISK = "dependency_at_risk"
-
-#: §6.3's flat POC threshold - only worth a speculative placement pass once the deadline
-#: is this close. The one-off job is scheduled to fire exactly at this boundary already
-#: (deadline - 3 days), but the periodic sweep re-checks anything the one-off might have
-#: missed, so both paths re-apply the same threshold rather than assuming the job fired
-#: at the "right" time.
-DEPENDENCY_AT_RISK_THRESHOLD = timedelta(days=3)
 
 
 def run_reminder(db: Session, *, instance_id: str, offset_minutes: int) -> None:
@@ -55,7 +54,9 @@ def run_reminder(db: Session, *, instance_id: str, offset_minutes: int) -> None:
     instance = TaskInstanceRepository(db).get(instance_id)
     if instance is None or instance.status not in ("scheduled", "in_progress"):
         return
-    _create_notification(db, type_=REMINDER, instance_id=instance.id, message=f'Reminder: "{instance.name}" is coming up.')
+    create_notification(
+        db, type_=REMINDER, instance_id=instance.id, message=f'Reminder: "{instance.name}" is coming up.', now=utcnow()
+    )
 
 
 def run_overdue_check(db: Session, jobs: JobScheduler, *, instance_id: str) -> None:
@@ -74,18 +75,10 @@ def run_overdue_check(db: Session, jobs: JobScheduler, *, instance_id: str) -> N
         settings = UserSettingsRepository(db).get()
         if template is None or settings is None:
             return
-        reverted = TaskInstanceRepository(db).update(
-            instance.model_copy(
-                update={
-                    "status": "pending",
-                    "scheduled_time": None,
-                    "status_history": (*instance.status_history, StatusHistoryEntry(status="pending", at=now)),
-                }
-            )
-        )
+        reverted = return_to_pending(db, jobs, instance, template=template, now=now)
         place_or_defer(db, jobs, instance=reverted, template=template, settings=settings, now=now)
 
-    _create_notification(db, type_=OVERDUE, instance_id=instance.id, message=f'"{instance.name}" is overdue.')
+    create_notification(db, type_=OVERDUE, instance_id=instance.id, message=f'"{instance.name}" is overdue.', now=now)
 
 
 def run_deadline_elapsed_check(db: Session, jobs: JobScheduler, *, instance_id: str) -> None:
@@ -145,7 +138,7 @@ def run_dependency_at_risk_check(db: Session, *, instance_id: str) -> None:
         return
     if instance.type != "flexible" or instance.deadline is None or not instance.dependencies:
         return
-    if _all_dependencies_completed(db, instance):
+    if all_dependencies_completed(db, instance):
         return
 
     template = TaskTemplateRepository(db).get(instance.template_id)
@@ -161,12 +154,13 @@ def run_dependency_at_risk_check(db: Session, *, instance_id: str) -> None:
     else:
         at_risk = True  # no slot at all before the deadline - definitely at risk
 
-    if at_risk and not _has_active(db, instance_id=instance.id, notification_type=DEPENDENCY_AT_RISK):
-        _create_notification(
+    if at_risk and not has_active_notification(db, instance_id=instance.id, notification_type=DEPENDENCY_AT_RISK):
+        create_notification(
             db,
             type_=DEPENDENCY_AT_RISK,
             instance_id=instance.id,
             message=f'"{instance.name}" is at risk of missing its deadline - an incomplete dependency may not leave enough time.',
+            now=now,
         )
 
 
@@ -212,32 +206,7 @@ def run_calendar_poll(db: Session, jobs: JobScheduler, *, connection_id: str) ->
     calendar_sync_service.sync_connection(db, jobs, connection=connection, app_settings=get_settings(), now=utcnow())
 
 
-def _all_dependencies_completed(db: Session, instance: TaskInstance) -> bool:
-    repo = TaskInstanceRepository(db)
-    return all((dep := repo.get(dep_id)) is not None and dep.status == "completed" for dep_id in instance.dependencies)
-
-
-def _has_active(db: Session, *, instance_id: str, notification_type: str) -> bool:
-    return any(
-        n.type == notification_type and n.resolved_at is None and n.dismissed_at is None
-        for n in NotificationRepository(db).list_for_instance(instance_id)
-    )
-
-
-def _create_notification(db: Session, *, type_: str, instance_id: str, message: str) -> Notification:
-    return NotificationRepository(db).create(
-        Notification(
-            id=generate_id(),
-            type=cast(NotificationType, type_),
-            related_instance_id=instance_id,
-            message=message,
-            created_at=utcnow(),
-        )
-    )
-
-
 __all__ = [
-    "DEPENDENCY_AT_RISK_THRESHOLD",
     "run_calendar_poll",
     "run_deadline_elapsed_check",
     "run_deadline_elapsed_sweep",

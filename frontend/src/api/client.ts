@@ -21,6 +21,15 @@ export class ApiError extends Error {
   }
 }
 
+/** Normalises anything a failed request can throw into an `ApiError`: API errors pass
+ * through unchanged; anything else (a network failure, typically) becomes `fallback`. */
+export function toApiError(
+  err: unknown,
+  fallback: ApiError = new ApiError(0, 'network_error', 'Could not reach the server.')
+): ApiError {
+  return err instanceof ApiError ? err : fallback;
+}
+
 interface ErrorEnvelope {
   code?: string;
   message?: string;
@@ -63,7 +72,12 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     if (code === 'session_expired') {
       sessionExpiredHandler?.();
     }
-    throw new ApiError(response.status, code, envelope.message ?? 'Something went wrong.', envelope.details);
+    throw new ApiError(
+      response.status,
+      code,
+      envelope.message ?? 'Something went wrong.',
+      envelope.details
+    );
   }
 
   return body as T;

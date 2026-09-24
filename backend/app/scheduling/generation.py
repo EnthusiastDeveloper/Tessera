@@ -30,13 +30,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-from app.db.schemas import Priority, RecurrenceAnchor, TaskInstance, TaskTemplate, TaskType
-
-# Numeric priority mapping is internal-only (§3.2 notes) - duplicated from
-# app.db.repositories.task_template_repository's private copy rather than imported,
-# since app.scheduling must not depend on app.db.repositories internals and this is a
-# tiny, stable 4-entry constant, not real logic to keep in sync.
-_PRIORITY_TO_INT: dict[Priority, int] = {"low": 1, "medium": 2, "high": 3, "critical": 4}
+from app.db.schemas import PRIORITY_TO_INT, RecurrenceAnchor, TaskInstance, TaskTemplate, TaskType
 
 
 @dataclass(frozen=True)
@@ -83,7 +77,7 @@ def generate_next_instance(
         description=template.description,
         location=template.location,
         type=template.type,
-        priority=_PRIORITY_TO_INT[template.priority],
+        priority=PRIORITY_TO_INT[template.priority],
         estimated_duration_minutes=template.estimated_duration_minutes,
         scheduled_time=scheduled_time,
         deadline=deadline,
@@ -261,7 +255,7 @@ def project_virtual_occurrences(
                     template_id=template.id,
                     name=template.name,
                     type=template.type,
-                    priority=_PRIORITY_TO_INT[template.priority],
+                    priority=PRIORITY_TO_INT[template.priority],
                     estimated_duration_minutes=template.estimated_duration_minutes,
                     occurs_at=occurs_at,
                     anchor=template.recurrence.anchor,

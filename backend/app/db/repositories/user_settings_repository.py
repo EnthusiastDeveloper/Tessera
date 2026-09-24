@@ -13,7 +13,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models.user_settings import UserSettingsORM
-from app.db.schemas import ActiveHoursWindow, BlackoutDate, BudgetEnforcement, DayName, UserSettings
+from app.db.repositories._active_hours import deserialize_active_hours, serialize_active_hours
+from app.db.schemas import BlackoutDate, BudgetEnforcement, DayName, UserSettings
 
 
 class UserSettingsRepository:
@@ -48,7 +49,7 @@ def _to_orm_kwargs(settings: UserSettings) -> dict[str, Any]:
     return {
         "id": settings.id,
         "timezone": settings.timezone,
-        "active_hours": _serialize_active_hours(settings.active_hours),
+        "active_hours": serialize_active_hours(settings.active_hours),
         "blackout_dates": [blackout.model_dump(mode="json") for blackout in settings.blackout_dates],
         "daily_time_budget_minutes": dict(settings.daily_time_budget_minutes),
         "budget_enforcement": settings.budget_enforcement,
@@ -56,21 +57,11 @@ def _to_orm_kwargs(settings: UserSettings) -> dict[str, Any]:
     }
 
 
-def _serialize_active_hours(
-    active_hours: dict[DayName, ActiveHoursWindow | None],
-) -> dict[str, dict[str, str] | None]:
-    return {day: (window.model_dump() if window is not None else None) for day, window in active_hours.items()}
-
-
-def _deserialize_active_hours(raw: dict[str, Any]) -> dict[DayName, ActiveHoursWindow | None]:
-    return {cast(DayName, day): (ActiveHoursWindow(**window) if window is not None else None) for day, window in raw.items()}
-
-
 def _to_domain(orm: UserSettingsORM) -> UserSettings:
     return UserSettings(
         id=orm.id,
         timezone=orm.timezone,
-        active_hours=_deserialize_active_hours(orm.active_hours),
+        active_hours=deserialize_active_hours(orm.active_hours),
         blackout_dates=tuple(BlackoutDate(**blackout) for blackout in orm.blackout_dates),
         daily_time_budget_minutes={cast(DayName, day): budget for day, budget in orm.daily_time_budget_minutes.items()},
         budget_enforcement=cast(BudgetEnforcement, orm.budget_enforcement),
