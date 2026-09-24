@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.api.dependencies import DB_SESSION
 from app.api.errors import AppError
 from app.auth import service
 from app.auth.cookie_signing import sign
 from app.core.config import get_settings
 from app.db.schemas import User
-from app.db.session import get_db
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
@@ -56,7 +56,7 @@ def _set_session_cookie(response: Response, session_id: str) -> None:
 
 
 @router.post("/setup", status_code=201)
-def setup_endpoint(payload: SetupRequest, db: Session = Depends(get_db)) -> UserResponse:
+def setup_endpoint(payload: SetupRequest, db: Session = DB_SESSION) -> UserResponse:
     """Public only while zero `User` rows exist (§3.6) - `410 Gone` afterwards, enforced
     inside `service.setup`, not by the auth guard (this route is always allowlisted).
     """
@@ -68,7 +68,7 @@ def setup_endpoint(payload: SetupRequest, db: Session = Depends(get_db)) -> User
 
 
 @router.post("/login")
-def login_endpoint(payload: LoginRequest, request: Request, response: Response, db: Session = Depends(get_db)) -> UserResponse:
+def login_endpoint(payload: LoginRequest, request: Request, response: Response, db: Session = DB_SESSION) -> UserResponse:
     client_host = request.client.host if request.client else "unknown"
     throttle_key = f"{client_host}:{payload.username}"
     try:
@@ -80,7 +80,7 @@ def login_endpoint(payload: LoginRequest, request: Request, response: Response, 
 
 
 @router.post("/logout", status_code=204)
-def logout_endpoint(request: Request, response: Response, db: Session = Depends(get_db)) -> None:
+def logout_endpoint(request: Request, response: Response, db: Session = DB_SESSION) -> None:
     """Not in the public allowlist - reaching this handler already implies a valid session.
     Returns 204 regardless of the delete's outcome (§14.2) - logout is idempotent.
     """
@@ -98,7 +98,7 @@ def me_endpoint(request: Request) -> UserResponse:
 
 @router.post("/change-password")
 def change_password_endpoint(
-    payload: ChangePasswordRequest, request: Request, response: Response, db: Session = Depends(get_db)
+    payload: ChangePasswordRequest, request: Request, response: Response, db: Session = DB_SESSION
 ) -> UserResponse:
     """Not in the public allowlist - reaching this handler already implies a valid
     session (§8.1 screen 6 "Account: change password"). §3.6/§14.2's session policy is

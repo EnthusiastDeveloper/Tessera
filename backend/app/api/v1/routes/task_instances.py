@@ -9,10 +9,9 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.api.dependencies import get_request_job_scheduler
+from app.api.dependencies import DB_SESSION, get_request_job_scheduler
 from app.api.errors import AppError
 from app.db.schemas import TaskInstance, TaskInstanceStatus, TaskType
-from app.db.session import get_db
 from app.jobs.interface import JobScheduler
 from app.task_instances import service
 
@@ -65,7 +64,7 @@ def list_instances_endpoint(
     priority: int | None = None,
     type: TaskType | None = None,
     view: Literal["backlog"] | None = None,
-    db: Session = Depends(get_db),
+    db: Session = DB_SESSION,
 ) -> list[TaskInstance]:
     """architecture-plan §3: `status`/`priority`/`type` filters, plus `?view=backlog`
     (design doc §8.1) - a filter on this same collection, not its own resource.
@@ -77,7 +76,7 @@ def list_instances_endpoint(
 def patch_instance_endpoint(
     instance_id: str,
     payload: PatchInstanceRequest,
-    db: Session = Depends(get_db),
+    db: Session = DB_SESSION,
     jobs: JobScheduler = Depends(get_request_job_scheduler),
 ) -> TaskInstance:
     patch: dict[str, Any] = {field: getattr(payload, field) for field in payload.model_fields_set if field != "expected"}
@@ -94,7 +93,7 @@ def patch_instance_endpoint(
 def reschedule_endpoint(
     instance_id: str,
     payload: RescheduleRequest,
-    db: Session = Depends(get_db),
+    db: Session = DB_SESSION,
     jobs: JobScheduler = Depends(get_request_job_scheduler),
 ) -> TaskInstance:
     try:
@@ -105,7 +104,7 @@ def reschedule_endpoint(
 
 @router.post("/{instance_id}/complete")
 def complete_endpoint(
-    instance_id: str, db: Session = Depends(get_db), jobs: JobScheduler = Depends(get_request_job_scheduler)
+    instance_id: str, db: Session = DB_SESSION, jobs: JobScheduler = Depends(get_request_job_scheduler)
 ) -> TaskInstance:
     try:
         return service.complete(db, jobs, instance_id)
@@ -117,7 +116,7 @@ def complete_endpoint(
 def extend_deadline_endpoint(
     instance_id: str,
     payload: ExtendDeadlineRequest,
-    db: Session = Depends(get_db),
+    db: Session = DB_SESSION,
     jobs: JobScheduler = Depends(get_request_job_scheduler),
 ) -> TaskInstance:
     try:
@@ -127,7 +126,7 @@ def extend_deadline_endpoint(
 
 
 @router.post("/{instance_id}/start")
-def start_endpoint(instance_id: str, db: Session = Depends(get_db)) -> TaskInstance:
+def start_endpoint(instance_id: str, db: Session = DB_SESSION) -> TaskInstance:
     """§4 state diagram: `scheduled` -> `in_progress`. No `jobs` dependency - this
     transition has no job side effects (see `service.start_progress`'s docstring).
     """
@@ -139,7 +138,7 @@ def start_endpoint(instance_id: str, db: Session = Depends(get_db)) -> TaskInsta
 
 @router.post("/{instance_id}/dismiss")
 def dismiss_endpoint(
-    instance_id: str, db: Session = Depends(get_db), jobs: JobScheduler = Depends(get_request_job_scheduler)
+    instance_id: str, db: Session = DB_SESSION, jobs: JobScheduler = Depends(get_request_job_scheduler)
 ) -> TaskInstance:
     try:
         return service.dismiss(db, jobs, instance_id)
@@ -151,7 +150,7 @@ def dismiss_endpoint(
 def delete_instance_endpoint(
     instance_id: str,
     scope: service.DeleteScope | None = None,
-    db: Session = Depends(get_db),
+    db: Session = DB_SESSION,
     jobs: JobScheduler = Depends(get_request_job_scheduler),
 ) -> DeleteResponse:
     try:

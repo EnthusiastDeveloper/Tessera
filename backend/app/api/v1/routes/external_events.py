@@ -14,18 +14,18 @@ not nested under `/task-templates` despite the same one-to-many relationship sha
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 from sqlalchemy.orm import Session
 
+from app.api.dependencies import DB_SESSION
 from app.calendar_sync import service
 from app.db.schemas import ExternalEvent
-from app.db.session import get_db
 
 router = APIRouter(prefix="/api/v1/external-events", tags=["external-events"])
 
 
 @router.get("")
-def list_external_events_endpoint(db: Session = Depends(get_db)) -> list[ExternalEvent]:
+def list_external_events_endpoint(db: Session = DB_SESSION) -> list[ExternalEvent]:
     """No query params - the cache already self-limits to a 90-day-forward/30-day-past
     rolling window per §3.12 retention, so there is no unbounded-result concern to filter
     away.
