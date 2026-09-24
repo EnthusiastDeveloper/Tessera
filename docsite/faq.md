@@ -38,6 +38,9 @@ Check the Notifications panel and the Backlog view. If it has an active `unsched
 **I edited a recurring task but the change didn't show up on later occurrences (or vice versa).**
 Check whether the instance you edited is marked `detached`. A "this occurrence" edit (or a manual fixed-task reschedule) detaches that single instance from the template permanently - future template-wide edits skip it entirely. See [Tasks & Events](tasks-and-events.md#detach-and-edit-scope).
 
+**I completed a recurring task and the next one was scheduled weeks away.**
+If the task is `completion`-anchored, that's expected: the next occurrence is due one cadence after you finished, and it isn't scheduled before then. See [Tasks & Events](tasks-and-events.md#anchoring-calendar-vs-completion).
+
 **Why didn't Tessera just move an earlier task to make room for a new one?**
 It never does - placements are never moved by a later scheduling pass, on purpose. See [Scheduling Algorithm](scheduling-algorithm.md#incremental-fit-not-a-reflow).
 

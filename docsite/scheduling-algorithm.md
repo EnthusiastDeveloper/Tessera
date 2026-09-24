@@ -24,7 +24,7 @@ When looking for a free slot, the algorithm treats all of the following as occup
 
 For each pending flexible task, in order of deadline (soonest first), then priority:
 
-**Pass 1 - respect the daily budget.** Search for the first slot, on or after the task's earliest possible start (now, or the moment its last dependency completed), before its deadline, inside that day's effective active-hours window, that doesn't push the day's committed flexible-task minutes over `daily_time_budget_minutes` for that day of week.
+**Pass 1 - respect the daily budget.** Search for the first slot, on or after the task's earliest possible start (the latest of: now, the moment its last dependency completed, and - for a `completion`-anchored occurrence after the first - the date it's due), before its deadline, inside that day's effective active-hours window, that doesn't push the day's committed flexible-task minutes over `daily_time_budget_minutes` for that day of week.
 
 **Pass 2 - only if Pass 1 finds nothing, and only in `soft` budget-enforcement mode.** Ignore the budget and look at every day between now and the deadline that has a *physically* free slot of sufficient length (active hours and blackout dates still apply - only the budget is relaxed). Among those days, pick the one that:
 
