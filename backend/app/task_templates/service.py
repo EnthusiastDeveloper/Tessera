@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import cast
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
@@ -28,6 +29,7 @@ from app.db.schemas import (
 from app.jobs.interface import (
     JobScheduler,
     dependency_at_risk_job_key,
+    occurrence_boundary_job_key,
     overdue_job_key,
     reminder_job_key,
 )
@@ -36,9 +38,15 @@ from app.scheduling.generation import (
     GeneratedInstanceFields,
     VirtualOccurrence,
     generate_next_instance,
+    project_fixed_time,
     project_virtual_occurrences,
 )
-from app.scheduling.orchestration import archive_template_and_cancel_jobs, place_or_defer, schedule_next_occurrence_boundary
+from app.scheduling.orchestration import (
+    archive_template_and_cancel_jobs,
+    place_or_defer,
+    resolve_cleared_sync_conflicts,
+    schedule_next_occurrence_boundary,
+)
 from app.scheduling_engine.dependencies import cycle_check
 from app.scheduling_engine.feasibility import validate_feasible_duration
 
@@ -281,14 +289,21 @@ def _persist_instance(
     )
 
 
-#: Fields "this and future" propagates onto a non-detached live instance - the same
-#: content set §3.10 lists for the "this occurrence" edit scope. Deliberately not
-#: including fixed_time_of_day -> scheduled_time re-projection or deadline_offset_minutes
-#: -> deadline recomputation here: neither is exercised by any of Stage 5's required
-#: tests, and both need real conflict/re-placement handling to do properly rather than
-#: half-implementing silently. Documented gap, not an oversight - Stage 6/8 can pick it
-#: up alongside the completion-triggered generation call they already own.
+#: Fields "this and future" copies verbatim onto a non-detached live instance - the same
+#: content set §3.10 lists for the "this occurrence" edit scope. The two template fields
+#: that map onto an instance field only *indirectly* - `fixed_time_of_day` ->
+#: `scheduled_time` and `deadline_offset_minutes` -> `deadline` - are derived separately,
+#: see `_retimed_scheduled_time`/`_recomputed_deadline`.
 _PROPAGATABLE_FIELDS = ("name", "description", "location", "priority", "estimated_duration_minutes")
+
+#: Fixed statuses whose `scheduled_time` a `fixed_time_of_day` change re-projects.
+#: `in_progress` is deliberately excluded: the occurrence is already underway, so moving
+#: its start time would rewrite what already happened rather than plan what's next.
+_RETIMABLE_FIXED_STATUSES = frozenset({"scheduled", "blocked"})
+#: Flexible statuses whose `deadline` a `deadline_offset_minutes` change recomputes.
+#: `missed` is deliberately excluded: §6.7 makes leaving `missed` a user-driven action
+#: (extend-deadline, complete or delete), never a side effect of a template-wide edit.
+_REDEADLINABLE_FLEXIBLE_STATUSES = frozenset({"pending", "scheduled", "blocked", "in_progress"})
 
 _TERMINAL_STATUSES = frozenset({"completed", "dismissed"})
 
@@ -329,6 +344,13 @@ def edit_template_this_and_future(db: Session, jobs: JobScheduler, template_id: 
     """§3.10 "this and future": writes the template, then - unless the currently-live
     instance is already `detached` - propagates matching fields to it in the same
     transaction, re-entering §6.2 if the propagation invalidates its placement.
+
+    A `fixed_time_of_day` change re-projects the live fixed instance's `scheduled_time`
+    onto the same local date (§14.1 wall-clock semantics). That is a retime, so §6.5's
+    hard block applies: a collision rejects the whole edit with `creation_conflict`
+    before anything is written or any job is touched. A `deadline_offset_minutes` change
+    moves the live flexible instance's `deadline` by the same delta, keeping its nominal
+    date fixed (§9.1: `deadline = nominal_date + deadline_offset_minutes`).
     """
     repo = TaskTemplateRepository(db)
     current = repo.get(template_id)
@@ -349,11 +371,35 @@ def edit_template_this_and_future(db: Session, jobs: JobScheduler, template_id: 
                 "estimated_duration_minutes does not fit any day's effective active-hours window.",
             )
 
+    live = _find_live_instance(db, template_id)
+    propagate_to = live if live is not None and not live.detached else None
+    retimed_at = (
+        _retimed_scheduled_time(propagate_to, previous=current, template=prospective, settings=settings)
+        if propagate_to is not None
+        else None
+    )
+    if propagate_to is not None and retimed_at is not None and propagate_to.status == "scheduled":
+        end = retimed_at + timedelta(minutes=prospective.estimated_duration_minutes)
+        if has_fixed_conflict(db, start=retimed_at, end=end, exclude_instance_id=propagate_to.id):
+            raise TemplateValidationError(
+                "creation_conflict", "The new fixed time collides with an existing fixed task or external event."
+            )
+
     new_template = repo.update(prospective)
 
-    live = _find_live_instance(db, template_id)
-    if live is not None and not live.detached:
-        _propagate_to_instance(db, jobs, instance=live, template=new_template, settings=settings, patch=patch)
+    if propagate_to is not None:
+        _propagate_to_instance(
+            db,
+            jobs,
+            instance=propagate_to,
+            previous=current,
+            template=new_template,
+            settings=settings,
+            patch=patch,
+            retimed_at=retimed_at,
+        )
+
+    _rewire_occurrence_boundary(db, jobs, previous=current, template=new_template, settings=settings)
 
     return new_template
 
@@ -371,28 +417,152 @@ def _propagate_to_instance(
     jobs: JobScheduler,
     *,
     instance: TaskInstance,
+    previous: TaskTemplate,
     template: TaskTemplate,
     settings: UserSettings,
     patch: dict[str, object],
+    retimed_at: datetime | None,
 ) -> TaskInstance:
-    instance_updates: dict[str, object] = {}
-    for field in _PROPAGATABLE_FIELDS:
-        if field in patch:
-            instance_updates[field] = getattr(template, field)
+    """Applies a "this and future" edit to the non-detached live instance and re-wires
+    every job the change affects (architecture-plan §4.1: the DB write and its job side
+    effects live in one method). `retimed_at` is precomputed by the caller, which has
+    already run §6.5's conflict check on it.
+    """
+    now = utcnow()
+    instance_updates: dict[str, object] = {field: getattr(template, field) for field in _PROPAGATABLE_FIELDS if field in patch}
+    if retimed_at is not None:
+        instance_updates["scheduled_time"] = retimed_at
+    new_deadline = _recomputed_deadline(instance, previous=previous, template=template)
+    if new_deadline is not None:
+        instance_updates["deadline"] = new_deadline
 
-    updated = TaskInstanceRepository(db).update(instance.model_copy(update=instance_updates)) if instance_updates else instance
+    repo = TaskInstanceRepository(db)
+    updated = repo.update(instance.model_copy(update=instance_updates)) if instance_updates else instance
 
-    invalidates_placement = "estimated_duration_minutes" in patch or "active_hours_override" in patch
-    if template.type == "flexible" and updated.status in ("pending", "scheduled") and invalidates_placement:
-        updated = place_or_defer(
-            db,
-            jobs,
-            instance=updated.model_copy(update={"status": "pending"}),
-            template=template,
-            settings=settings,
-            now=utcnow(),
+    reminders_changed = previous.reminder_offsets_minutes != template.reminder_offsets_minutes
+    if updated.status == "scheduled" and (retimed_at is not None or reminders_changed):
+        _rewire_reminder_and_overdue_jobs(jobs, updated, previous=previous, template=template)
+    if retimed_at is not None and updated.status == "scheduled":
+        # §3.9: moving clear of an external event resolves its sync_conflict right away,
+        # the same as a manual reschedule does.
+        resolve_cleared_sync_conflicts(db, now=now)
+    if new_deadline is not None and updated.status == "blocked":
+        jobs.schedule_at(job_key=dependency_at_risk_job_key(updated.id), run_at=new_deadline - _DEPENDENCY_AT_RISK_THRESHOLD)
+
+    if template.type != "flexible" or updated.status not in ("pending", "scheduled"):
+        return updated
+
+    placement_invalidated = "estimated_duration_minutes" in patch or "active_hours_override" in patch
+    if new_deadline is not None:
+        # A pending instance gets a fresh attempt against its new window (a later deadline
+        # may now fit, an elapsed one goes to `missed` via §6.7's gate). A scheduled one is
+        # only moved if its slot no longer ends by the new deadline - placement is an
+        # incremental fit (§6.2), so a still-valid slot is never disturbed.
+        placement_invalidated = placement_invalidated or updated.status == "pending" or not _fits_before(updated, new_deadline)
+    if not placement_invalidated:
+        return updated
+
+    if updated.status == "scheduled":
+        updated = _return_to_pending(db, jobs, updated, template=template, now=now)
+    return place_or_defer(db, jobs, instance=updated, template=template, settings=settings, now=now)
+
+
+def _retimed_scheduled_time(
+    instance: TaskInstance, *, previous: TaskTemplate, template: TaskTemplate, settings: UserSettings
+) -> datetime | None:
+    """§14.1: the new wall-clock `fixed_time_of_day` on the instance's own local date, or
+    `None` when nothing needs to move. The result may already be in the past (an earlier
+    time on today's date); §6.6's overdue job then fires immediately, as it would for any
+    other past-due fixed instance.
+    """
+    if instance.type != "fixed" or instance.status not in _RETIMABLE_FIXED_STATUSES or instance.scheduled_time is None:
+        return None
+    if template.fixed_time_of_day is None or template.fixed_time_of_day == previous.fixed_time_of_day:
+        return None
+    tz = ZoneInfo(settings.timezone)
+    retimed = project_fixed_time(instance.scheduled_time.astimezone(tz).date(), template=template, tz=tz)
+    return None if retimed == instance.scheduled_time else retimed
+
+
+def _recomputed_deadline(instance: TaskInstance, *, previous: TaskTemplate, template: TaskTemplate) -> datetime | None:
+    """§9.1: `deadline = nominal_date + deadline_offset_minutes`, so an offset change moves
+    the deadline by exactly the delta and leaves the nominal date where it was. `None`
+    when nothing needs to move.
+    """
+    if instance.type != "flexible" or instance.status not in _REDEADLINABLE_FLEXIBLE_STATUSES or instance.deadline is None:
+        return None
+    delta = (template.deadline_offset_minutes or 0) - (previous.deadline_offset_minutes or 0)
+    if delta == 0:
+        return None
+    return instance.deadline + timedelta(minutes=delta)
+
+
+def _fits_before(instance: TaskInstance, deadline: datetime) -> bool:
+    if instance.scheduled_time is None:
+        return False
+    return instance.scheduled_time + timedelta(minutes=instance.estimated_duration_minutes) <= deadline
+
+
+def _return_to_pending(
+    db: Session, jobs: JobScheduler, instance: TaskInstance, *, template: TaskTemplate, now: datetime
+) -> TaskInstance:
+    """Evicts a scheduled flexible instance back into the pending pool - persisted, with
+    `scheduled_time` cleared and its old slot's reminder/overdue jobs cancelled, the same
+    shape as §6.4's sync eviction and §6.6's overdue revert. `place_or_defer` then either
+    places it again or leaves it `pending` with an `unschedulable` notification.
+    """
+    jobs.cancel(job_key=overdue_job_key(instance.id))
+    for offset in template.reminder_offsets_minutes:
+        jobs.cancel(job_key=reminder_job_key(instance.id, offset))
+    return TaskInstanceRepository(db).update(
+        instance.model_copy(
+            update={
+                "status": "pending",
+                "scheduled_time": None,
+                "status_history": (*instance.status_history, StatusHistoryEntry(status="pending", at=now)),
+            }
         )
-    return updated
+    )
+
+
+def _rewire_reminder_and_overdue_jobs(
+    jobs: JobScheduler, instance: TaskInstance, *, previous: TaskTemplate, template: TaskTemplate
+) -> None:
+    """Re-points a scheduled instance's reminder and overdue jobs at its current
+    `scheduled_time` and the template's current reminder offsets. Offsets the edit
+    dropped are cancelled explicitly: `run_reminder` doesn't re-check timing, so a
+    leftover job would fire a reminder nobody asked for.
+    """
+    assert instance.scheduled_time is not None
+    for offset in set(previous.reminder_offsets_minutes) - set(template.reminder_offsets_minutes):
+        jobs.cancel(job_key=reminder_job_key(instance.id, offset))
+    jobs.schedule_at(job_key=overdue_job_key(instance.id), run_at=instance.scheduled_time)
+    for offset in template.reminder_offsets_minutes:
+        jobs.schedule_at(
+            job_key=reminder_job_key(instance.id, offset), run_at=instance.scheduled_time - timedelta(minutes=offset)
+        )
+
+
+def _rewire_occurrence_boundary(
+    db: Session, jobs: JobScheduler, *, previous: TaskTemplate, template: TaskTemplate, settings: UserSettings
+) -> None:
+    """architecture-plan §4: a calendar-anchored template's next-occurrence job fires at
+    the next nominal instant, which depends on `fixed_time_of_day` and `recurrence`. When
+    either changes, re-point the job at the new instant (or cancel it if the template is
+    no longer calendar-anchored and recurring), so the next instance is generated when
+    the new rule says rather than when the old one did.
+    """
+    if template.fixed_time_of_day == previous.fixed_time_of_day and template.recurrence == previous.recurrence:
+        return
+    if template.recurrence.pattern == "one_time" or template.recurrence.anchor != "calendar":
+        jobs.cancel(job_key=occurrence_boundary_job_key(template.id))
+        return
+    # The most recent instance in any status - the boundary job outlives a completed or
+    # dismissed predecessor, which is exactly when there is no live instance to read.
+    instances = TaskInstanceRepository(db).list_by_template(template.id)  # most-recent-first
+    if not instances:
+        return
+    schedule_next_occurrence_boundary(db, jobs, template=template, latest_instance=instances[0], settings=settings, now=utcnow())
 
 
 def _ensure_no_cycle(db: Session, *, dependency_ids: tuple[str, ...], dependent_id: str = "__new__") -> None:
