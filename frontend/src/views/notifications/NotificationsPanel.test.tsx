@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -134,5 +135,34 @@ describe('NotificationsPanel', () => {
 
     expect(await screen.findByText('No active notifications.')).toBeInTheDocument();
     expect(mockedNotifications.listNotifications).toHaveBeenCalledTimes(2);
+  });
+
+  it('ignores a stale response that resolves after a newer one', async () => {
+    // StrictMode mounts, unmounts and remounts, so the list is fetched twice. Let the
+    // first (stale) request resolve last - its data must not overwrite the newer one.
+    let resolveStale: (value: Notification[]) => void = () => undefined;
+    const stale = new Promise<Notification[]>((resolve) => {
+      resolveStale = resolve;
+    });
+    const fresh: Notification = { ...BASE_NOTIFICATION, id: 'notification-fresh', message: 'Fresh notification.' };
+    mockedNotifications.listNotifications.mockReturnValueOnce(stale).mockResolvedValueOnce([fresh]);
+
+    render(
+      <StrictMode>
+        <MemoryRouter initialEntries={['/notifications']}>
+          <Routes>
+            <Route path="/notifications" element={<NotificationsPanel />} />
+          </Routes>
+        </MemoryRouter>
+      </StrictMode>
+    );
+    expect(await screen.findByText('Fresh notification.')).toBeInTheDocument();
+
+    resolveStale([{ ...BASE_NOTIFICATION, message: 'Stale notification.' }]);
+    await stale;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(screen.getByText('Fresh notification.')).toBeInTheDocument();
+    expect(screen.queryByText('Stale notification.')).not.toBeInTheDocument();
   });
 });

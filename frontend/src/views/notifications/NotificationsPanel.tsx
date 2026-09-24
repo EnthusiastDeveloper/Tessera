@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ApiError } from '../../api/client';
 import { dismissNotification, listNotifications } from '../../api/notifications';
@@ -54,15 +54,24 @@ export function NotificationsPanel(): JSX.Element {
   const [rows, setRows] = useState<Row[]>([]);
   const [error, setError] = useState<ApiError | null>(null);
 
+  // Only the most recent load may apply its response - the same guard as the `cancelled`
+  // flag other pages use, generalised because `load` also runs on demand (Refresh), not
+  // just from the mount effect. Unmounting bumps the counter so an in-flight response
+  // is dropped too.
+  const latestRequest = useRef(0);
+
   const load = useCallback(() => {
+    const requestId = ++latestRequest.current;
     setState('loading');
     setError(null);
     listNotifications()
       .then((notifications) => {
+        if (requestId !== latestRequest.current) return;
         setRows(notifications.map((notification) => ({ notification, outcome: 'active', dismissing: false })));
         setState('ready');
       })
       .catch((err: unknown) => {
+        if (requestId !== latestRequest.current) return;
         setError(err instanceof ApiError ? err : new ApiError(0, 'network_error', 'Could not reach the server.'));
         setState('error');
       });
@@ -70,6 +79,9 @@ export function NotificationsPanel(): JSX.Element {
 
   useEffect(() => {
     load();
+    return () => {
+      latestRequest.current += 1;
+    };
   }, [load]);
 
   const handleDismiss = async (id: string): Promise<void> => {
