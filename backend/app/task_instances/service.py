@@ -145,10 +145,33 @@ def edit_this_occurrence(
 
     invalidates_placement = "estimated_duration_minutes" in patch or "deadline" in patch
     if updated.type == "flexible" and updated.status in ("pending", "scheduled") and invalidates_placement:
-        updated = place_or_defer(
-            db, jobs, instance=updated.model_copy(update={"status": "pending"}), template=template, settings=settings, now=now
-        )
+        if updated.status == "scheduled":
+            updated = _return_to_pending(db, jobs, updated, template=template, now=now)
+        updated = place_or_defer(db, jobs, instance=updated, template=template, settings=settings, now=now)
     return updated
+
+
+def _return_to_pending(
+    db: Session, jobs: JobScheduler, instance: TaskInstance, *, template: TaskTemplate, now: datetime
+) -> TaskInstance:
+    """Evicts a scheduled flexible instance back into the pending pool before re-placing
+    it - persisted, with `scheduled_time` cleared and its old slot's reminder/overdue jobs
+    cancelled, the same shape as §6.4's sync eviction and §6.6's overdue revert.
+    `place_or_defer` only writes on success or `missed`, so without this an instance it
+    can't place would stay `scheduled` in its stale slot.
+    """
+    jobs.cancel(job_key=overdue_job_key(instance.id))
+    for offset in template.reminder_offsets_minutes:
+        jobs.cancel(job_key=reminder_job_key(instance.id, offset))
+    return TaskInstanceRepository(db).update(
+        instance.model_copy(
+            update={
+                "status": "pending",
+                "scheduled_time": None,
+                "status_history": (*instance.status_history, StatusHistoryEntry(status="pending", at=now)),
+            }
+        )
+    )
 
 
 def reschedule(db: Session, jobs: JobScheduler, instance_id: str, *, new_scheduled_time: datetime) -> TaskInstance:
