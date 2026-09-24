@@ -5,14 +5,32 @@ correctness (tests/integration/), this only asserts job-store state.
 
 from __future__ import annotations
 
+from datetime import UTC, time, timedelta
+from zoneinfo import ZoneInfo
+
+import pytest
 from sqlalchemy.orm import Session
 
 from app.db.repositories import TaskInstanceRepository
 from app.db.schemas import Recurrence, UserSettings
-from app.jobs.interface import dependency_at_risk_job_key, occurrence_boundary_job_key
+from app.jobs.interface import (
+    deadline_elapsed_job_key,
+    dependency_at_risk_job_key,
+    occurrence_boundary_job_key,
+    overdue_job_key,
+    reminder_job_key,
+)
 from app.task_instances.service import complete, delete_instance, dismiss, start_progress
-from app.task_templates.service import TaskTemplateDraft, archive_template, create_template
+from app.task_templates import service as task_templates_service
+from app.task_templates.service import (
+    TaskTemplateDraft,
+    TemplateValidationError,
+    archive_template,
+    create_template,
+    edit_template_this_and_future,
+)
 from tests.fixtures.jobs import RecordingJobScheduler
+from tests.fixtures.scheduling import ny
 
 
 def _flexible_draft(**overrides: object) -> TaskTemplateDraft:
@@ -208,3 +226,131 @@ class TestDeleteThisAndFuture:
         db_session.commit()
 
         assert occurrence_boundary_job_key(created.template.id) in jobs.cancelled
+
+
+#: Mon 2026-03-02 08:00 New York - see tests/integration/task_templates/test_service.py.
+_NOW = ny(2026, 3, 2, 8, 0)
+
+
+@pytest.fixture
+def pinned_now(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(task_templates_service, "utcnow", lambda: _NOW)
+
+
+@pytest.mark.usefixtures("pinned_now")
+class TestEditThisAndFuture:
+    def test_retiming_re_points_overdue_and_reminder_jobs_at_the_new_time(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        sync = create_template(db_session, jobs, _fixed_draft(reminder_offsets_minutes=(15,)))
+        db_session.commit()
+        jobs.scheduled.clear()
+
+        edit_template_this_and_future(db_session, jobs, sync.template.id, patch={"fixed_time_of_day": "11:00"})
+        db_session.commit()
+
+        assert (overdue_job_key(sync.instance.id), ny(2026, 3, 2, 11, 0)) in jobs.scheduled
+        assert (reminder_job_key(sync.instance.id, 15), ny(2026, 3, 2, 10, 45)) in jobs.scheduled
+
+    def test_a_rejected_retime_touches_no_jobs(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        create_template(db_session, jobs, _fixed_draft(name="Standup", fixed_time_of_day="09:00"))
+        sync = create_template(db_session, jobs, _fixed_draft(fixed_time_of_day="11:00"))
+        db_session.commit()
+        jobs.scheduled.clear()
+
+        with pytest.raises(TemplateValidationError):
+            edit_template_this_and_future(db_session, jobs, sync.template.id, patch={"fixed_time_of_day": "09:30"})
+
+        assert jobs.scheduled == []
+        assert jobs.cancelled == []
+
+    def test_dropped_reminder_offsets_are_cancelled(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        sync = create_template(db_session, jobs, _fixed_draft(reminder_offsets_minutes=(60, 15)))
+        db_session.commit()
+        jobs.scheduled.clear()
+
+        edit_template_this_and_future(db_session, jobs, sync.template.id, patch={"reminder_offsets_minutes": (15, 5)})
+        db_session.commit()
+
+        assert reminder_job_key(sync.instance.id, 60) in jobs.cancelled
+        assert {reminder_job_key(sync.instance.id, 15), reminder_job_key(sync.instance.id, 5)} <= jobs.scheduled_keys()
+
+    def test_a_time_change_re_points_the_occurrence_boundary_job(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        daily = create_template(
+            db_session, jobs, _fixed_draft(recurrence=Recurrence(pattern="daily", interval=1, anchor="calendar"))
+        )
+        db_session.commit()
+        jobs.scheduled.clear()
+
+        edit_template_this_and_future(db_session, jobs, daily.template.id, patch={"fixed_time_of_day": "10:15"})
+        db_session.commit()
+
+        boundary = [run_at for key, run_at in jobs.scheduled if key == occurrence_boundary_job_key(daily.template.id)]
+        assert len(boundary) == 1
+        assert boundary[0].astimezone(ZoneInfo("America/New_York")).time() == time(10, 15)
+
+    def test_evicting_a_scheduled_instance_cancels_its_old_slots_jobs(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        chore = create_template(db_session, jobs, _flexible_draft(reminder_offsets_minutes=(10,)))
+        db_session.commit()
+        assert chore.instance.status == "scheduled"
+
+        # Deadline 08:30 - no slot left, so the instance stays pending after eviction.
+        edit_template_this_and_future(db_session, jobs, chore.template.id, patch={"deadline_offset_minutes": 30})
+        db_session.commit()
+
+        assert overdue_job_key(chore.instance.id) in jobs.cancelled
+        assert reminder_job_key(chore.instance.id, 10) in jobs.cancelled
+        assert (deadline_elapsed_job_key(chore.instance.id), ny(2026, 3, 2, 8, 30)) in jobs.scheduled
+
+    def test_a_blocked_instances_dependency_at_risk_job_follows_its_new_deadline(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        prep = create_template(db_session, jobs, _flexible_draft(name="Prepare car"))
+        inspection = create_template(db_session, jobs, _flexible_draft(name="Inspection", dependencies=(prep.instance.id,)))
+        db_session.commit()
+        jobs.scheduled.clear()
+
+        edit_template_this_and_future(db_session, jobs, inspection.template.id, patch={"deadline_offset_minutes": 60 * 24 * 10})
+        db_session.commit()
+
+        new_deadline = _NOW.astimezone(UTC) + timedelta(days=10)
+        assert (dependency_at_risk_job_key(inspection.instance.id), new_deadline - timedelta(days=3)) in jobs.scheduled
+
+    def test_the_boundary_job_is_re_pointed_even_with_no_live_instance(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        daily = create_template(
+            db_session, jobs, _fixed_draft(recurrence=Recurrence(pattern="daily", interval=1, anchor="calendar"))
+        )
+        db_session.commit()
+        dismiss(db_session, jobs, daily.instance.id)
+        db_session.commit()
+        jobs.scheduled.clear()
+
+        edit_template_this_and_future(db_session, jobs, daily.template.id, patch={"fixed_time_of_day": "10:15"})
+        db_session.commit()
+
+        assert occurrence_boundary_job_key(daily.template.id) in jobs.scheduled_keys()
+
+    def test_switching_to_one_time_cancels_the_boundary_job(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        daily = create_template(
+            db_session, jobs, _fixed_draft(recurrence=Recurrence(pattern="daily", interval=1, anchor="calendar"))
+        )
+        db_session.commit()
+
+        edit_template_this_and_future(
+            db_session, jobs, daily.template.id, patch={"recurrence": Recurrence(pattern="one_time", anchor="calendar")}
+        )
+        db_session.commit()
+
+        assert occurrence_boundary_job_key(daily.template.id) in jobs.cancelled

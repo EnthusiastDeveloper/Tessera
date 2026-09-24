@@ -92,6 +92,22 @@ class TestPatchTemplate:
         assert response.status_code == 200, response.text
         assert response.json()["name"] == "Renamed"
 
+    def test_a_colliding_fixed_time_maps_to_409_creation_conflict(self, app_client: TestClient) -> None:
+        _login(app_client)
+        fixed = {"type": "fixed", "estimated_duration_minutes": 60, "deadline_offset_minutes": None}
+        app_client.post("/api/v1/task-templates", json=_flexible_payload(name="Dinner", fixed_time_of_day="18:00", **fixed))
+        call = app_client.post(
+            "/api/v1/task-templates", json=_flexible_payload(name="Call", fixed_time_of_day="20:00", **fixed)
+        ).json()
+
+        response = app_client.patch(
+            f"/api/v1/task-templates/{call['template']['id']}?scope=this_and_future", json={"fixed_time_of_day": "18:30"}
+        )
+        assert response.status_code == 409, response.text
+        assert response.json()["code"] == "creation_conflict"
+        # Rolled back as a whole: the template never took the new time either.
+        assert app_client.get(f"/api/v1/task-templates/{call['template']['id']}").json()["fixed_time_of_day"] == "20:00"
+
 
 class TestArchiveTemplate:
     def test_soft_deletes(self, app_client: TestClient) -> None:

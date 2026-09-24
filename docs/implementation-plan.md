@@ -95,6 +95,14 @@ A stage is **DONE** only when all of the following hold:
 
 *(Keep this table honestly current - it's the recovery point if work pauses and resumes later, or hands off to an LLM agent.)*
 
+### Post-POC follow-ups
+
+Items deferred by a stage above and picked up after `v0.1.0-poc`, oldest deferral first.
+
+| Item | Deferred by | Status | Branch | Notes |
+|---|---|---|---|---|
+| This-and-future propagation of `fixed_time_of_day` and `deadline_offset_minutes` (design doc §3.10, §6.5, §6.7, §9.1, §14.1) | Stage 5 | **Done** | `claude/next-feature-implementation-0a5dpf` | `edit_template_this_and_future` now re-projects a non-detached live fixed instance's `scheduled_time` onto its own local date (statuses `scheduled`/`blocked`; `in_progress` is left alone because it is already underway). A collision is §6.5's hard block: `409 creation_conflict`, checked before the template write or any job call, so the whole edit is rejected. An offset change moves a non-detached flexible instance's `deadline` by the same delta, keeping its nominal date (§9.1). A still-valid slot is kept (incremental fit, §6.2); an invalidated one is evicted and re-placed; an elapsed deadline goes to `missed` through §6.7's gate. `missed` instances are skipped because §6.7 makes leaving `missed` user-driven. Both fields trigger on an actual value change, not on key presence, because the edit form resends every field on each save. Job wiring (architecture-plan §4.1): overdue/reminder jobs follow a retime, dropped reminder offsets are cancelled (`run_reminder` doesn't re-check timing), a blocked instance's dependency-at-risk job follows its new deadline, and a calendar-anchored template's occurrence-boundary job follows a `fixed_time_of_day`/`recurrence` change. **Latent bug fixed along the way:** a scheduled flexible instance that a this-and-future duration edit made unplaceable stayed `scheduled` in the database with its stale slot. `place_or_defer` only persists on success or `missed`, and this path never persisted the move to `pending`. It now evicts the instance the same way §6.4/§6.6 do. 20 new tests (service, job-wiring, route). |
+
 ---
 
 ## 6. Implementation Stages
@@ -295,7 +303,7 @@ A stage is **DONE** only when all of the following hold:
 **Explicitly deferred to a later stage (not silently missing):**
 - `POST /task-instances/{id}/dismiss` ("skip this occurrence", §3.8) - not built this stage. A completion-anchored template's dismiss-must-generate-successor rule (§3.9) depends on the completion-triggered generation call, which architecture doc §9.1 assigns to Stage 6.
 - `DELETE /task-instances/{id}?scope=this_occurrence|this_and_future` - only unscoped delete exists (§3.8's simple case). The `this_and_future` deletion scope needs template-level state Stage 5 doesn't otherwise touch; revisit alongside Stage 6's generation wiring.
-- This-and-future propagation (`edit_template_this_and_future`) updates the live instance's `name`/`description`/`location`/`priority`/`estimated_duration_minutes` only. `fixed_time_of_day` re-projection and `deadline_offset_minutes` deadline recomputation are **not** propagated - neither is exercised by a Stage 5 required test, and both need real conflict/re-placement handling to do properly rather than half-implement silently.
+- This-and-future propagation (`edit_template_this_and_future`) updates the live instance's `name`/`description`/`location`/`priority`/`estimated_duration_minutes` only. `fixed_time_of_day` re-projection and `deadline_offset_minutes` deadline recomputation are **not** propagated - neither is exercised by a Stage 5 required test, and both need real conflict/re-placement handling to do properly rather than half-implement silently. **Resolved post-POC** - see "Post-POC follow-ups" below.
 - `creation_conflict` is a synchronous rejection at creation/reschedule time only (Example A) - it is never persisted as a `Notification` row, matching the design doc's "no TaskTemplate and no TaskInstance are created" outcome.
 
 **Out of scope:** anything touching real APScheduler, any periodic/background trigger, calendar sync.
