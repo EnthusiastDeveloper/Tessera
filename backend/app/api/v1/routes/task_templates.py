@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.api.dependencies import get_request_job_scheduler
 from app.api.errors import AppError
 from app.db.base import utcnow
 from app.db.schemas import (
@@ -22,7 +23,7 @@ from app.db.schemas import (
     TaskType,
 )
 from app.db.session import get_db
-from app.jobs.interface import JobScheduler, get_job_scheduler
+from app.jobs.interface import JobScheduler
 from app.task_templates import service
 
 router = APIRouter(prefix="/api/v1/task-templates", tags=["task-templates"])
@@ -135,7 +136,7 @@ def get_template_endpoint(template_id: str, db: Session = Depends(get_db)) -> Ta
 def create_template_endpoint(
     payload: CreateTemplateRequest,
     db: Session = Depends(get_db),
-    jobs: JobScheduler = Depends(get_job_scheduler),
+    jobs: JobScheduler = Depends(get_request_job_scheduler),
 ) -> CreateTemplateResponse:
     draft = service.TaskTemplateDraft(
         name=payload.name,
@@ -164,7 +165,7 @@ def patch_template_endpoint(
     payload: PatchTemplateRequest,
     scope: Literal["this_and_future"] = Query(...),
     db: Session = Depends(get_db),
-    jobs: JobScheduler = Depends(get_job_scheduler),
+    jobs: JobScheduler = Depends(get_request_job_scheduler),
 ) -> TaskTemplate:
     # Deliberately not payload.model_dump() - see the identical note in
     # app.api.v1.routes.settings.patch_settings_endpoint: it would flatten nested models
@@ -180,7 +181,7 @@ def patch_template_endpoint(
 
 @router.delete("/{template_id}")
 def archive_template_endpoint(
-    template_id: str, db: Session = Depends(get_db), jobs: JobScheduler = Depends(get_job_scheduler)
+    template_id: str, db: Session = Depends(get_db), jobs: JobScheduler = Depends(get_request_job_scheduler)
 ) -> ArchiveResponse:
     """§3.8: soft-delete. Returns the incomplete instances left behind so the frontend's
     confirmation dialog (§3.8's "must show a confirmation dialog explaining the

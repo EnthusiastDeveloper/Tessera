@@ -9,10 +9,11 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.api.dependencies import get_request_job_scheduler
 from app.api.errors import AppError
 from app.db.schemas import TaskInstance, TaskInstanceStatus, TaskType
 from app.db.session import get_db
-from app.jobs.interface import JobScheduler, get_job_scheduler
+from app.jobs.interface import JobScheduler
 from app.task_instances import service
 
 router = APIRouter(prefix="/api/v1/task-instances", tags=["task-instances"])
@@ -86,7 +87,7 @@ def patch_instance_endpoint(
     instance_id: str,
     payload: PatchInstanceRequest,
     db: Session = Depends(get_db),
-    jobs: JobScheduler = Depends(get_job_scheduler),
+    jobs: JobScheduler = Depends(get_request_job_scheduler),
 ) -> TaskInstance:
     patch: dict[str, Any] = {field: getattr(payload, field) for field in payload.model_fields_set if field != "expected"}
     expected: dict[str, Any] | None = None
@@ -103,7 +104,7 @@ def reschedule_endpoint(
     instance_id: str,
     payload: RescheduleRequest,
     db: Session = Depends(get_db),
-    jobs: JobScheduler = Depends(get_job_scheduler),
+    jobs: JobScheduler = Depends(get_request_job_scheduler),
 ) -> TaskInstance:
     try:
         return service.reschedule(db, jobs, instance_id, new_scheduled_time=payload.scheduled_time)
@@ -113,7 +114,7 @@ def reschedule_endpoint(
 
 @router.post("/{instance_id}/complete")
 def complete_endpoint(
-    instance_id: str, db: Session = Depends(get_db), jobs: JobScheduler = Depends(get_job_scheduler)
+    instance_id: str, db: Session = Depends(get_db), jobs: JobScheduler = Depends(get_request_job_scheduler)
 ) -> TaskInstance:
     try:
         return service.complete(db, jobs, instance_id)
@@ -126,7 +127,7 @@ def extend_deadline_endpoint(
     instance_id: str,
     payload: ExtendDeadlineRequest,
     db: Session = Depends(get_db),
-    jobs: JobScheduler = Depends(get_job_scheduler),
+    jobs: JobScheduler = Depends(get_request_job_scheduler),
 ) -> TaskInstance:
     try:
         return service.extend_deadline(db, jobs, instance_id, new_deadline=payload.deadline)
@@ -147,7 +148,7 @@ def start_endpoint(instance_id: str, db: Session = Depends(get_db)) -> TaskInsta
 
 @router.post("/{instance_id}/dismiss")
 def dismiss_endpoint(
-    instance_id: str, db: Session = Depends(get_db), jobs: JobScheduler = Depends(get_job_scheduler)
+    instance_id: str, db: Session = Depends(get_db), jobs: JobScheduler = Depends(get_request_job_scheduler)
 ) -> TaskInstance:
     try:
         return service.dismiss(db, jobs, instance_id)
@@ -160,7 +161,7 @@ def delete_instance_endpoint(
     instance_id: str,
     scope: service.DeleteScope | None = None,
     db: Session = Depends(get_db),
-    jobs: JobScheduler = Depends(get_job_scheduler),
+    jobs: JobScheduler = Depends(get_request_job_scheduler),
 ) -> DeleteResponse:
     try:
         result = service.delete_instance(db, jobs, instance_id, scope=scope)

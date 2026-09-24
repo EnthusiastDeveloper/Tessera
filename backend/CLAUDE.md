@@ -39,4 +39,6 @@ APScheduler with persistent SQLite job store - **jobs are event-driven, not peri
 
 **Critical:** Every mutation path that affects a task (`create`, `edit`, `reschedule`, `complete`, `delete`, `extend_deadline`) **must co-locate the DB write and job side-effect in one service method** (architecture-plan 4.1) - never in the route handler. This is what prevents orphaned or missing jobs.
 
+Job calls are **commit-bound**: routes (`get_request_job_scheduler`), fired jobs (`_dispatch`) and startup reconciliation all hand services a `TransactionalJobScheduler` (`app/jobs/transactional.py`), which buffers calls and replays them only after the DB transaction commits. A rollback discards them. Keep calling the scheduler from inside the service method as usual; don't reorder calls to "commit first".
+
 **Startup reconciliation (architecture-plan 4.2):** On app start, before serving traffic, reconcile the job store against `TaskInstance` rows - recreate any missing jobs, cancel any orphaned ones. This guards against crashes mid-batch leaving them out of sync.
