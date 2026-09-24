@@ -4,12 +4,13 @@ See design doc §7 (`is_all_day`/`is_transparent` filter inputs).
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, datetime
 
 import httpx
 import pytest
 
-from app.calendar_sync.providers import google, outlook
+from app.calendar_sync.providers import base, google, outlook
 from app.calendar_sync.providers.base import ProviderError, parse_token_response
 
 
@@ -141,3 +142,72 @@ class TestOutlookEventParsing:
             }
         )
         assert event.title == "(untitled)"
+
+
+class TestSendWithRetry:
+    """Issue #26: a transient provider failure is retried a couple of times before the
+    poll gives up and waits for its next interval.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _no_real_waits(self, monkeypatch: pytest.MonkeyPatch) -> list[float]:
+        waits: list[float] = []
+        monkeypatch.setattr(base, "_sleep", waits.append)
+        return waits
+
+    @staticmethod
+    def _responses(*items: httpx.Response | Exception) -> tuple[list[int], Callable[[], httpx.Response]]:
+        calls: list[int] = []
+        queue = list(items)
+
+        def send() -> httpx.Response:
+            calls.append(1)
+            item = queue.pop(0)
+            if isinstance(item, Exception):
+                raise item
+            return item
+
+        return calls, send
+
+    def test_a_success_is_returned_without_retrying(self) -> None:
+        calls, send = self._responses(httpx.Response(200))
+        assert base.send_with_retry(send, provider_label="Test").status_code == 200
+        assert len(calls) == 1
+
+    def test_a_transient_5xx_is_retried_until_it_succeeds(self, _no_real_waits: list[float]) -> None:
+        calls, send = self._responses(httpx.Response(503), httpx.Response(200))
+        assert base.send_with_retry(send, provider_label="Test").status_code == 200
+        assert len(calls) == 2
+        assert _no_real_waits == [base.RETRY_DELAYS_SECONDS[0]]
+
+    def test_a_network_error_is_retried(self) -> None:
+        calls, send = self._responses(httpx.ConnectError("boom"), httpx.Response(200))
+        assert base.send_with_retry(send, provider_label="Test").status_code == 200
+        assert len(calls) == 2
+
+    def test_a_non_transient_error_is_not_retried(self) -> None:
+        calls, send = self._responses(httpx.Response(401))
+        assert base.send_with_retry(send, provider_label="Test").status_code == 401
+        assert len(calls) == 1
+
+    def test_gives_up_after_three_attempts_and_returns_the_last_response(self) -> None:
+        calls, send = self._responses(httpx.Response(503), httpx.Response(502), httpx.Response(500))
+        assert base.send_with_retry(send, provider_label="Test").status_code == 500
+        assert len(calls) == 3
+
+    def test_a_persistent_network_error_becomes_a_provider_error(self) -> None:
+        calls, send = self._responses(httpx.ConnectError("a"), httpx.ConnectError("b"), httpx.ConnectError("c"))
+        with pytest.raises(ProviderError):
+            base.send_with_retry(send, provider_label="Test")
+        assert len(calls) == 3
+
+    def test_fetch_events_retries_through_the_real_client(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        responses = [httpx.Response(503), httpx.Response(200, json={"items": []})]
+        monkeypatch.setattr(httpx, "get", lambda *args, **kwargs: responses.pop(0))
+        client = google.GoogleCalendarProvider(client_id="id", client_secret="secret")
+
+        events = client.fetch_events(
+            access_token="token", horizon_start=datetime(2026, 3, 1, tzinfo=UTC), horizon_end=datetime(2026, 6, 1, tzinfo=UTC)
+        )
+        assert events == ()
+        assert responses == []
