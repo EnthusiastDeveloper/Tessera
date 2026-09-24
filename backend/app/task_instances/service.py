@@ -26,6 +26,7 @@ from app.scheduling.orchestration import (
     UNSCHEDULABLE,
     all_dependencies_completed,
     archive_template_and_cancel_jobs,
+    fixed_slot_change_conflicts,
     generate_and_place_next_instance,
     has_active_notification,
     place_or_defer,
@@ -101,7 +102,8 @@ def edit_this_occurrence(
 ) -> TaskInstance:
     """§3.10 "this occurrence": touches only the live instance, sets `detached=True`. A
     duration change is checked against §6.8 the same way a template-level one is; a
-    duration or deadline change on a non-terminal flexible instance re-enters §6.2.
+    duration or deadline change on a non-terminal flexible instance re-enters §6.2. A
+    longer duration on a fixed instance is held to §6.5's hard block, like a retime.
 
     `expected` is architecture-plan §5.1's expected-values PATCH: for each field the
     caller names, reject with `conflict` if the current row disagrees - fields the
@@ -138,6 +140,13 @@ def edit_this_occurrence(
             raise InstanceValidationError(
                 "infeasible_duration", "estimated_duration_minutes does not fit any day's effective active-hours window."
             )
+
+    if "estimated_duration_minutes" in patch and fixed_slot_change_conflicts(
+        db, instance, start=instance.scheduled_time or utcnow(), duration_minutes=cast(int, patch["estimated_duration_minutes"])
+    ):
+        raise InstanceValidationError(
+            "creation_conflict", "The longer duration collides with an existing fixed task or external event."
+        )
 
     now = utcnow()
     updated = TaskInstanceRepository(db).update(instance.model_copy(update={**patch, "detached": True}))

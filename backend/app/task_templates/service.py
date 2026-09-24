@@ -43,6 +43,7 @@ from app.scheduling.generation import (
 from app.scheduling.orchestration import (
     TERMINAL_STATUSES,
     archive_template_and_cancel_jobs,
+    fixed_slot_change_conflicts,
     place_or_defer,
     require_settings,
     resolve_cleared_sync_conflicts,
@@ -369,12 +370,17 @@ def edit_template_this_and_future(db: Session, jobs: JobScheduler, template_id: 
         if propagate_to is not None
         else None
     )
-    if propagate_to is not None and retimed_at is not None and propagate_to.status == "scheduled":
-        end = retimed_at + timedelta(minutes=prospective.estimated_duration_minutes)
-        if has_fixed_conflict(db, start=retimed_at, end=end, exclude_instance_id=propagate_to.id):
-            raise TemplateValidationError(
-                "creation_conflict", "The new fixed time collides with an existing fixed task or external event."
-            )
+    if propagate_to is not None and fixed_slot_change_conflicts(
+        db,
+        propagate_to,
+        start=retimed_at or propagate_to.scheduled_time or utcnow(),
+        duration_minutes=prospective.estimated_duration_minutes
+        if "estimated_duration_minutes" in patch
+        else propagate_to.estimated_duration_minutes,
+    ):
+        raise TemplateValidationError(
+            "creation_conflict", "The new fixed time or duration collides with an existing fixed task or external event."
+        )
 
     new_template = repo.update(prospective)
 

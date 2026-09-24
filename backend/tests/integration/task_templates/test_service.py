@@ -379,6 +379,19 @@ class TestThisAndFutureFixedTimeOfDay:
         assert resolved is not None
         assert resolved.resolved_at is not None
 
+    def test_a_duration_that_grows_into_the_next_fixed_task_rejects_the_edit(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        dinner = create_template(db_session, jobs, _fixed_draft(name="Dinner", fixed_time_of_day="18:00"))
+        create_template(db_session, jobs, _fixed_draft(name="Call", fixed_time_of_day="19:30"))
+        db_session.commit()
+
+        with pytest.raises(TemplateValidationError) as exc_info:
+            edit_template_this_and_future(db_session, jobs, dinner.template.id, patch={"estimated_duration_minutes": 120})
+        assert exc_info.value.code == "creation_conflict"
+        template = TaskTemplateRepository(db_session).get(dinner.template.id)
+        assert template is not None and template.estimated_duration_minutes == 60
+
 
 @pytest.mark.usefixtures("pinned_now")
 class TestThisAndFutureDeadlineOffset:

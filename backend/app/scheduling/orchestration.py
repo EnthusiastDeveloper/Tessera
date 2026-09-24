@@ -40,7 +40,7 @@ from app.jobs.interface import (
     overdue_job_key,
     reminder_job_key,
 )
-from app.scheduling.adapter import attempt_placement, gather_external_obstacles, has_fixed_conflict
+from app.scheduling.adapter import OBSTACLE_STATUSES, attempt_placement, gather_external_obstacles, has_fixed_conflict
 from app.scheduling.generation import generate_next_instance
 from app.scheduling_engine.deadlines import is_deadline_elapsed
 
@@ -343,6 +343,19 @@ def return_to_pending(
     )
 
 
+def fixed_slot_change_conflicts(db: Session, instance: TaskInstance, *, start: datetime, duration_minutes: int) -> bool:
+    """§6.5 for an edit to a fixed instance that is on the timeline (`scheduled` or
+    `in_progress`): would its new slot - a new start, a longer duration, or both - collide
+    with another fixed instance or an external busy-block? An edit that neither moves the
+    start nor lengthens the slot can't create a new overlap, so it is never rejected here.
+    """
+    if instance.type != "fixed" or instance.status not in OBSTACLE_STATUSES or instance.scheduled_time is None:
+        return False
+    if start == instance.scheduled_time and duration_minutes <= instance.estimated_duration_minutes:
+        return False
+    return has_fixed_conflict(db, start=start, end=start + timedelta(minutes=duration_minutes), exclude_instance_id=instance.id)
+
+
 def has_active_notification(db: Session, *, instance_id: str, notification_type: str) -> bool:
     """Whether the instance has a notification of this type that is neither resolved nor dismissed."""
     return any(
@@ -394,6 +407,7 @@ __all__ = [
     "all_dependencies_completed",
     "archive_template_and_cancel_jobs",
     "create_notification",
+    "fixed_slot_change_conflicts",
     "generate_and_place_next_instance",
     "has_active_notification",
     "place_or_defer",
