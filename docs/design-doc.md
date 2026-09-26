@@ -1,6 +1,8 @@
 # Tessera - Design Document (POC)
-### Revision 9
+### Revision 10
 
+> **Revision 10 settles four scheduling questions** - when a series starts, what "this and future" reaches, who moves a flexible task whose slot is taken, and what happens to a fixed task still waiting on a prerequisite (Section 11 items 10-13). Everything below about Revision 9 still stands.
+>
 > **Revision 9 resolves the second implementation-readiness review.** `docs/implementation-readiness-review-2.md` (IRR-2) is the findings register and the reasoning trail behind the changes below; this document is authoritative for *what the system does*, IRR-2 for *why it says so*. Every IRR-2 finding gating Stages 1, 2 and 3 has been drafted in here, and Section 11 has no open items. Findings gating Stage 5 and later (H2, H5, H6, H7, H9–H14, and the remaining Medium items) are **not yet resolved** and remain open against this revision - IRR-2 Section 6 lists which gates which stage.
 
 ## 0. How to use this document
@@ -27,6 +29,7 @@ Full diffs are in git; IRR-2 (`docs/implementation-readiness-review-2.md`) holds
 | 7 | **Reversed Revision 6's refusal of instance-level overrides.** Added 3.10 (Edit Scope & Propagation) and the `detached` flag, modelled on Google Calendar's edit-scope prompt. Also formalised fixed-task "reschedule" as a "this occurrence" edit |
 | 8 | Closed the last five `[UNCONFIRMED]` items, all confirmed as specified. Markup only, no behaviour change |
 | 9 | Resolved eighteen findings from the second readiness review (IRR-2) - see below |
+| 10 | Recurring-series rules: every occurrence has its own date, a template takes an explicit start date, flexible occurrences are never placed before their date, and "this and future" reaches every open occurrence from the edited one onward. A scheduled flexible task gives way to a fixed one instead of blocking it; a waiting fixed task holds its slot and goes overdue normally - see below |
 
 **Revision 9 changelog.** Eighteen IRR-2 findings, following stakeholder decisions taken 2026-08-05 to 2026-08-07. Revision 8's "locked" status meant "no unilateral edits"; it did not mean "verified correct". IRR-2 records what each finding was and why it mattered; this lists only what the specification now says.
 
@@ -58,6 +61,24 @@ Full diffs are in git; IRR-2 (`docs/implementation-readiness-review-2.md`) holds
 
 *Status:* **Section 11 has no open items at Revision 9.** IRR-2 findings gating Stage 5 and later remain open against this revision and are tracked there.
 
+**Revision 10 changelog.** Stakeholder decisions taken 2026-09-25 and 2026-09-26 (Section 11 items 10-13).
+
+*Occurrence dates (3.2, 3.3, 9.1):*
+- **Every occurrence has its own date** (`nominal_date`, 3.3), fixed when it is generated. The series advances from it; nothing is derived from where an occurrence ended up.
+- **A template takes an explicit start date** (`start_date`, 3.2), required at creation along with the other parameters. The first occurrence is placed from it, not from "now".
+- **A flexible occurrence is never placed before its date**, the first included. The window to its deadline is `deadline_offset_minutes` for every occurrence.
+
+*"This and future" (3.10, 8.1):*
+- **Reaches the edited occurrence and every open occurrence dated after it**, plus the ones not generated yet. Earlier and terminal occurrences are never changed. The old rule touched only the single newest instance, which was wrong once calendar-anchored series could have several open at once (Revision 9).
+- **Occurrences edited on their own are skipped by default**, and the edit dialog names them. A checkbox applies the edit to them too, and they rejoin the series.
+- The edited occurrence itself always takes the edit and rejoins the series, even if it was edited on its own before.
+
+*Fixed tasks waiting on a dependency (4, 6.5, 6.6, 6.9):*
+- **A waiting (`blocked`) fixed task holds its slot**, is overdue like any fixed task when its time passes, and becomes `scheduled` - never `pending` - when its prerequisite completes (Section 11 item 13, IRR-2 H11).
+
+*Moving flexible tasks (6.5, 8.1):*
+- **Tessera moves flexible work itself; there is no manual move for a flexible task.** A fixed task no longer conflicts with a scheduled flexible one - the flexible task gives way and is placed again, or flagged `unschedulable`.
+
 ---
 
 ## 1. Product Summary
@@ -78,7 +99,7 @@ Core POC value proposition: **the user lists what needs doing and how urgent/fle
 | Authentication | Password login; password reset via one-time container env var | Full account-recovery flows, SSO |
 | External calendar | Read-only, polling | Write access, webhooks |
 | Rescheduling on conflict | Fixed: manual resolution. Flexible: auto | Priority-based bumping of other tasks |
-| Recurring-task edit scope *(added Rev 7)* | Two-way scope prompt on edit - "this occurrence" (instance override, 3.10) or "this and future" (template edit, propagates to the current live instance unless it's already detached) | Per-field diff/merge UI; explicit "re-sync to template" action for a detached instance |
+| Recurring-task edit scope *(added Rev 7, amended Rev 10)* | Two-way scope prompt on edit - "this occurrence" (instance override, 3.10) or "this and future" (the edited occurrence and every open occurrence after it, skipping individually edited ones unless the user ticks "include these", 3.10) | Per-field diff/merge UI; a "re-sync to series" action on a single detached occurrence |
 | Recurring-task deletion scope *(added Rev 9)* | Same two-way scope prompt on delete - "this occurrence" (series continues) or "this and future" (template archived), 3.8 | - |
 | Recurrence anchoring *(added Rev 9)* | Per-template `anchor`: `calendar` (rigid) or `completion` (`completed_at` + cadence, flexible templates only), 3.2/9.1 | Anchor switching mid-series with re-derivation of the existing live instance |
 | Dependency visibility *(added Rev 9)* | Dependents are not placed until their prerequisites complete; a **Backlog view** (8.1) makes blocked, unschedulable and missed work visible, with bidirectional dependency navigation | Placing dependents against a prerequisite's *scheduled* time so whole chains appear on the Timeline (12.22) |
@@ -100,7 +121,7 @@ Core POC value proposition: **the user lists what needs doing and how urgent/fle
 
 Every completable, schedulable unit is a `TaskInstance`. A `TaskTemplate` always exists behind it - for a one-time task, the template has `recurrence: one_time` and generates exactly one instance immediately upon creation. For a recurring task, the template generates instances over time.
 
-**(Amended Revision 7)** Editing a task now has two distinct scopes: **"this occurrence"** (an instance-level override touching only the live `TaskInstance` - see 3.3, 3.10) and **"this and future occurrences"** (a template edit - see 3.10 for exactly how and when it propagates to the currently-live instance). The Revision 6 framing - "edit a task always means edit its template" - is no longer accurate as a blanket statement; **3.10 is now the binding rule** and supersedes it.
+**(Amended Revision 7)** Editing a task now has two distinct scopes: **"this occurrence"** (an instance-level override touching only the edited `TaskInstance` - see 3.3, 3.10) and **"this and future occurrences"** (the template plus the edited and later open instances - see 3.10 for exactly which). The Revision 6 framing - "edit a task always means edit its template" - is no longer accurate as a blanket statement; **3.10 is now the binding rule** and supersedes it.
 
 This was a deliberate simplicity decision through Revision 6, not an oversight, and was reconsidered - not casually - in response to a concrete recurring case (Section 11, item 7) that the template-only model handled poorly. See 3.10 for the resolution and Section 11 item 7 for the reasoning trail.
 
@@ -131,6 +152,13 @@ interface TaskTemplate {
                                      // VALID ONLY when type == "flexible" - see notes and 9.1.
                                      // Ignored when pattern == "one_time".
   };
+
+  start_date: string;               // (added Rev 10) local calendar date, "YYYY-MM-DD", in
+                                     // the user's timezone. REQUIRED at creation, for both
+                                     // types and every pattern. The first occurrence is
+                                     // derived from it (9.1), never from the moment of
+                                     // creation. Not earlier than today; read once, when the
+                                     // first instance is generated - see notes.
 
   // --- Fixed-type scheduling ---
   fixed_time_of_day?: string;       // e.g. "18:00" - a WALL-CLOCK local time, not a UTC
@@ -175,7 +203,8 @@ Notes:
 - Numeric priority mapping (internal, not exposed in UI): `low=1, medium=2, high=3, critical=4`.
 - `active_hours_override` exists for two conceptually different reasons that share one mechanism: (a) the user's personal flexibility about a specific chore ("filters can wait till late"), or (b) a genuine external constraint (a business's real opening hours). POC ships the mechanism; a proper business-hours registry with task tagging is Backlog item - see scope table.
 - **(Added Revision 6)** `estimated_duration_minutes` is checked at save time against every day-of-week's applicable active-hours window (override if set, else global) - see 6.8. A duration that cannot physically fit any single day is rejected at creation, not silently left to fail scheduling forever.
-- **(Added Revision 7)** A template edit only reaches a currently-live `TaskInstance` if that instance is not `detached` (3.3, 3.10). A `detached` instance keeps its own values until it completes; the template's new values apply starting with the *next* generated instance (9.1) regardless.
+- **(Added Revision 7, amended Revision 10)** A "this and future" edit reaches every open instance from the edited one onward, except those that are `detached` - unless the user opts in to overriding them (3.10). The template's new values apply to every instance generated afterwards (9.1) regardless.
+- **(Added Revision 10) `start_date` is what the user means by "starts on".** It is asked for in the creation form alongside every other parameter, never defaulted silently. For a `flexible` template it is the first occurrence's date, so the first instance is not placed before it (9.1); together with `deadline_offset_minutes` it fixes the first occurrence's window. For a `fixed` template it is the date from which the rule produces the first occurrence. A `start_date` earlier than today in the user's timezone is rejected with `invalid_start_date`. It is a creation-time input: once the series exists, its dates come from its occurrences (`nominal_date`, 3.3), so later edits to `start_date` are not offered.
 - **`recurrence.anchor` is a type constraint, not a preference.** `anchor: "completion"` requires `type: "flexible"`, and a save that violates this is **rejected** with an `invalid_recurrence_anchor` validation error. The reason is structural rather than stylistic: completion-anchoring only means anything if the resulting occurrence can be *pushed* within a window, and that window is `deadline_offset_minutes` - a field flexible instances have and fixed instances do not (3.3 sets `deadline` for flexible tasks only; a fixed instance carries `scheduled_time` and has nothing to slide against). A fixed task must happen at its defined date and time, so there is nothing for a completion date to re-anchor. A recurring commitment that genuinely should shift with completion - "service the car six months after the last service" - is modelled as a flexible template whose `deadline_offset_minutes` expresses how far it may slip.
 - **All durations are integer minutes.** Minutes are the storage and wire format **only** - the UI must never ask the user to compute them, and must never display a raw minute count. See 8.1a for the required input control and 14.1 for the elapsed-versus-calendar consequence.
 - **`active_hours_override` merges, and its `null` matches 3.7's.** One rule, no exceptions: **per-day `null` always excludes that day**, an **absent** override inherits the global map entirely, and a **partial** override applies per day rather than replacing the map. The API contract must therefore distinguish an absent key from a present-but-`null` key: `{"monday": null}` excludes Monday, `{}` inherits it.
@@ -200,18 +229,19 @@ interface TaskInstance {
 
   detached: boolean;                // (added Revision 7, see 3.10) - true once this occurrence
                                      // has been individually edited or manually rescheduled.
-                                     // A detached instance no longer receives template
-                                     // propagation (3.10) of any kind - its fields are its
-                                     // own until it reaches "completed". Default false.
+                                     // A detached instance is skipped by "this and future"
+                                     // edits unless the user explicitly opts in (Rev 10,
+                                     // 3.10), which clears the flag. Default false.
 
   scheduled_time?: DateTime;        // set once placed on the timeline
   deadline?: DateTime;              // set at generation for flexible tasks
-  nominal_date?: DateTime;          // (added post-POC) this occurrence's date under its
-                                     // recurrence rule (9.1), set once at generation and
-                                     // never changed by a "this occurrence" edit. The
-                                     // series advances from it, so one occurrence's custom
-                                     // deadline or reschedule can't shift later ones; it is
-                                     // also the completion anchor's earliest-start gate.
+  nominal_date: DateTime;           // (added Rev 10) this occurrence's own date (9.1), set
+                                     // once at generation and never changed by any edit.
+                                     // The series advances from it, so one occurrence's
+                                     // custom deadline or reschedule can't shift later
+                                     // ones. For flexible instances it is also the
+                                     // earliest-start gate (6.2) and the base of `deadline`;
+                                     // it orders a series for "this and future" (3.10).
 
   status: "pending" | "scheduled" | "in_progress" | "completed" | "blocked"
         | "missed" | "dismissed";   // "dismissed" added Rev 9 - see Section 4 and 3.8
@@ -413,26 +443,32 @@ If the condition a `Notification` was raised for clears on its own before the us
 
 `budget_exceeded` remains the one exception (5): it records something that already happened, not an ongoing condition, so it is dismissed like a normal informational notice rather than auto-resolved.
 
-### 3.10 Edit Scope & Propagation (added Revision 7)
+### 3.10 Edit Scope & Propagation (added Revision 7, rewritten Revision 10)
 
-This section defines what "editing a task" does, resolving the Revision 6 gap where 3.1, 8.1, and Section 11 item 7 all cited a "3.6" that never actually contained this content - Section 3.6 is, and remains, the `User` schema. It also formally resolves Section 11 item 7 (reversing the Revision 6 non-decision).
+Editing a recurring task first asks for a **scope**, modelled on Google Calendar's recurring-event prompt. There are two scopes. GCal's third, "all events", is deliberately absent: an edit never reaches back to occurrences before the one being edited, and terminal ones (`completed`, `dismissed`) are immutable anyway (3.3).
 
-**Reference model, and why it's two-way here, not three-way.** The requested behavior is deliberately modeled on Google Calendar's recurring-event edit prompt. GCal offers three scopes ("this event" / "this and following events" / "all events") because a recurring series there is a set of events that mostly already exist as persisted rows. This app's generation model (9.1) is different: only **one real instance exists at a time**, generated fresh once its predecessor reaches `completed`. There is no persisted "following" series to fan an edit out across, and Timeline previews of upcoming occurrences (9.2) are explicitly virtual and non-editable. So the three-way GCal choice collapses to two here:
+**(Rewritten Revision 10.)** Revision 7 wrote this section for a model where only one real instance exists at a time, so "this and future" meant "the template plus the one live instance". Revision 9's calendar anchoring (9.1) made several open instances of one series possible at once, and that rule then reached only the newest of them, silently leaving the rest - possibly including the very occurrence the user was editing - on old values. The rule below is stated in terms of what the user sees, not of templates and instances.
 
-| Scope | What it touches | What it does NOT touch |
+| Scope | What it changes | What it never changes |
 |---|---|---|
-| **"This occurrence"** | The live `TaskInstance` directly - any of `name`, `description`, `location`, `priority`, `estimated_duration_minutes`, `deadline` (flexible only), or `scheduled_time` (fixed only, i.e. a manual reschedule, 6.6). Sets `detached = true`. | The `TaskTemplate`. Future-generated instances (9.1) are unaffected and will reflect the template's values, not this override. |
-| **"This and future occurrences"** | The `TaskTemplate` (as in Revision 6), **plus** the currently-live instance's corresponding fields, applied immediately - *unless that instance is already `detached`* (see below). | Already-`completed` instances - terminal and immutable per 3.3, unreachable by any propagation. |
+| **"This occurrence"** | The edited instance only - any of `name`, `description`, `location`, `priority`, `estimated_duration_minutes`, `deadline` (flexible only), or `scheduled_time` (fixed only, i.e. a manual reschedule, 6.6). Sets `detached = true`. | Every other occurrence, generated or not. |
+| **"This and future occurrences"** | The edited occurrence, **every open occurrence of the same series dated after it**, and every occurrence not generated yet (via the `TaskTemplate`, 9.1). Occurrences edited on their own (`detached`) after the edited one are skipped **unless the user opts in** - see below. | Occurrences dated before the edited one. Terminal (`completed`, `dismissed`) occurrences, whatever their date. |
 
-There is deliberately no third "all occurrences, including past" scope: "past" means `completed`, and 3.3 already makes `completed` instances immutable. Nothing new is needed there.
+**What "dated after" and "open" mean.** Occurrences are ordered by `nominal_date` (3.3) - never by `scheduled_time` or `deadline`, which a "this occurrence" edit can move. "Open" is any non-terminal status: `pending`, `scheduled`, `in_progress`, `blocked`, `missed`. A completion-anchored series has at most one open occurrence (9.1), so for it the rule reduces to that one plus the template.
 
-**Detach is sticky and total, not per-field.** Once an instance is `detached` (via any "this occurrence" edit, or a manual fixed-task reschedule, 6.6), it is skipped **entirely** by all subsequent "this and future" template propagation - not just the field(s) originally overridden - until it reaches `completed`, at which point it's immutable history and propagation is moot anyway. This mirrors GCal's actual behavior (a customized single event keeps its customization even after later series-wide edits) and avoids a harder problem this POC doesn't need: field-by-field merge logic between an instance's overrides and a template's new values. Full detach is simpler, matches user expectation, and is an explicit tradeoff - a finer-grained per-field merge is a possible future direction, not currently backlogged since it hasn't actually been requested.
+**The edited occurrence always takes the edit.** The user chose to edit it as part of the series, so it is updated even if it was `detached`, and its `detached` flag is cleared: it rejoins the series.
 
-**What "applied immediately" means for the non-detached case.** If the live instance is *not* detached, a "this and future" template edit updates its copied fields to match the new template values in the same operation - it does not wait for the next generation cycle (9.1). If the field(s) changed affect scheduling validity (e.g. `estimated_duration_minutes` grew past the remaining time before `deadline`, or past the day's effective active-hours window or budget), the instance re-enters the normal `pending` scheduling pool and is re-evaluated by 6.2 exactly as any other edit-triggered re-placement would be - this is not a new mechanism, just an added entry point into 6.2 (see 6.2's updated "runs whenever" clause).
+**Occurrences edited on their own are skipped by default.** A later `detached` occurrence keeps all its values, not just the ones originally overridden - a change the user made on purpose is not silently undone by a broader edit. This is the same whole-instance rule as Revision 7; there is still no per-field merge.
+
+**Opting in overrides them.** Because skipping departs from what "this and all future" literally says, the edit dialog must say when it will happen (8.1) and offer a checkbox to apply the edit to those occurrences too. With the box ticked, every open occurrence from the edited one onward takes the edited fields with no exceptions, and each one's `detached` flag is cleared, so later series edits reach it as well. Values the edit did not touch keep what the occurrence already had. Earlier and terminal occurrences are still never changed.
+
+**One edit, one transaction.** The template and every reached occurrence are written together. If any reached occurrence fails validation - a fixed occurrence retimed or lengthened into a collision (6.5, `creation_conflict`), or a duration that can no longer fit any day (6.8, `infeasible_duration`) - the whole edit is rejected and the error names the occurrence. Nothing is partially applied.
+
+**What changes on each reached occurrence.** Its copied fields take the new values in the same operation; nothing waits for the next generation cycle (9.1). If the change invalidates a flexible occurrence's placement (e.g. `estimated_duration_minutes` grew past the time left before `deadline`, or past the day's effective active-hours window or budget), that occurrence re-enters the `pending` pool and is re-evaluated by 6.2 like any other edit-triggered re-placement - an added entry point into 6.2, not a new mechanism (see 6.2's "runs whenever" clause). The series' dates do not move: `nominal_date` is never edited (3.3).
 
 **Interaction with 6.8 (feasibility validation).** A "this occurrence" override that changes `estimated_duration_minutes` is checked against 6.8 the same way template-level duration changes are - an override that could never fit any day's active-hours window is rejected at save time with the same `infeasible_duration` error, not silently accepted and left to fail scheduling forever.
 
-**UI implication (see also 8.1).** The task edit form must prompt for scope ("this occurrence" vs. "this and future") whenever the task being edited is (a) recurring and (b) not a one-time (`recurrence: one_time`) template - a one-time task has no "future occurrences" to distinguish, so no prompt is needed; the edit simply applies to that instance and template alike, as in Revision 6. The task detail view should visibly indicate when an instance is `detached`, so the user understands why it didn't pick up a later template-wide edit.
+**UI implication (see also 8.1).** The edit form prompts for scope whenever the task is recurring; a `one_time` template has no future occurrences, so the edit applies without a prompt. When "this and future" would skip occurrences edited on their own, the form says so before saving and offers the override checkbox. The task detail view visibly indicates when an instance is `detached`, so the user understands why a series edit did not reach it.
 
 Deletion uses the same two-way scope prompt - see 3.8.
 
@@ -521,7 +557,7 @@ Rules:
 - A `TaskInstance` with unfulfilled dependencies starts life as `blocked`, not `pending`.
 - Only `pending` instances are eligible for the scheduling algorithm.
 - `fixed` instances go straight to `scheduled` at creation if hard-block validation (6.5) passes - they never enter the algorithm, since their time is user-specified.
-- A `fixed` instance can also start `blocked` if it has unfulfilled dependencies; once unblocked it becomes `scheduled` directly.
+- A `fixed` instance can also start `blocked` if it has unfulfilled dependencies; once unblocked it becomes `scheduled` directly (6.9). **(Rev 10)** While blocked it keeps its `scheduled_time` and holds that slot (6.5), and if the time passes first it is overdue like any fixed instance (6.6).
 - **(Added Revision 6)** `completed` is reachable directly from `pending`, `blocked`, or `scheduled` - not only via `in_progress` - see 3.3.
 - **(Added Revision 6)** `missed` is reachable from `pending` or `blocked` (flexible instances only) when the deadline elapses before the instance is scheduled or completed. See 6.7 for the full trigger logic and resolution paths. **[CONFIRMED - Revision 7, Section 11 item 6 - no change from the Revision 6 design.]**
 - **(Added Revision 7)** `detached` (3.3/3.10) is orthogonal to `status` - it does not add, remove, or gate any transition in this diagram. An instance can be `detached` in any non-terminal status.
@@ -559,7 +595,7 @@ All types support auto-resolution per 3.9, **except `budget_exceeded`**: it reco
 
 ### 6.2 Core placement algorithm
 
-Runs whenever: a new flexible instance enters `pending`, an external sync or overdue event invalidates a scheduled flexible instance (returns it to `pending`), a dependency completes/is removed and unblocks a downstream instance (6.9), or **(added Revision 7)** a non-`detached` flexible instance's `estimated_duration_minutes`/`deadline` changes via a "this and future" template propagation (3.10) in a way that invalidates its current placement.
+Runs whenever: a new flexible instance enters `pending`, an external sync, a fixed task taking its slot (6.5, added Revision 10) or an overdue event invalidates a scheduled flexible instance (returns it to `pending`), a dependency completes/is removed and unblocks a downstream instance (6.9), or **(added Revision 7, amended Revision 10)** a flexible instance reached by a "this and future" edit (3.10) has its `estimated_duration_minutes`/`deadline` changed in a way that invalidates its current placement.
 
 **Placement is an incremental fit, not a reflow (added Revision 9).** A pass places only the new or changed candidate into the gaps left by everything already committed. **Existing placements are never moved by a later pass**, so adding a task never silently reshuffles what is already on the timeline. The notes below record the consequence, which is deliberate and accepted.
 
@@ -575,7 +611,8 @@ function schedule_pending_flexible_tasks():
         earliest_start = max(
             now(),
             max(dep.completed_at for dep in task.dependencies)
-                if task.dependencies else now()
+                if task.dependencies else now(),
+            task.nominal_date      # (Rev 10) never before the occurrence's own date (9.1)
         )
         # (Fixed Revision 6) Uses dep.completed_at, not dep.scheduled_time + duration.
         # A candidate only reaches "pending" once ALL its dependencies are "completed"
@@ -693,12 +730,16 @@ On each poll:
 
 - On creating/retiming a `fixed` instance, validate against all other `scheduled` fixed instances and all known external busy-blocks (filtered per Section 7).
 - **Hard block on creation** if overlap found. No save-with-override in POC (Backlog 12.8).
+- **(Added Revision 10) A fixed instance holds its slot while it waits.** A `blocked` fixed instance keeps the `scheduled_time` the user gave it and is treated as a commitment from creation: it is validated here like any other fixed instance, it conflicts with a later fixed instance at the same time, a scheduled flexible instance gives way to it (below), and 6.4 raises a `sync_conflict` if an external event lands on it. An unfinished prerequisite does not move an appointment.
+- **(Added Revision 10) A scheduled flexible instance is not a conflict - it gives way.** Only commitments block a fixed task: other fixed instances, external busy-blocks, and a flexible instance the user has already started (`in_progress`). When a fixed instance lands on a slot a `scheduled` flexible instance occupies - created, rescheduled, lengthened, retimed by a "this and future" edit (3.10), or generated at an occurrence boundary (9.1) - that flexible instance is moved in the same transaction, exactly as 6.4 moves one displaced by an external event: back to `pending`, the 6.7 gate first, then 6.2 places it again between its earliest start (its own date or now, whichever is later) and its deadline. If nothing fits, it stays `pending` with an `unschedulable` Notification (5).
 
 ### 6.6 Overdue-task handling
 
 Periodic check for instances where `scheduled_time` has passed and `status` is not `completed`:
 - **Flexible:** clear `scheduled_time`, set `status = "pending"` (re-enters 6.2 on next pass, subject to the 6.7 deadline-elapsed gate first), create an informational `overdue` Notification so the move isn't silent.
 - **Fixed:** status unchanged, create an `overdue` Notification whose action menu offers **"reschedule"** (opens edit, subject to 6.5 validation for the new time), **"mark complete"** - covering the case where the user simply forgot to check it off - and **(Rev 9) "skip this occurrence"**, transitioning the instance to `dismissed` (3.8), for the case where it genuinely did not happen and is not going to.
+
+**(Added Revision 10) A fixed instance whose time passes while it is still `blocked` is overdue like any other.** It receives the same `overdue` Notification and action menu, and the message names the unfinished prerequisite(s). Its status stays `blocked` until the user acts or the prerequisite completes (6.9); it is not skipped automatically, because Tessera cannot know whether the appointment went ahead. Its reminders fire as for any fixed instance, since it holds its time (6.5). Revision 9 left this undefined (IRR-2 H11): the instance sat in the Backlog with a time in the past and no notice.
 
 **(Added Revision 7)** "Reschedule" on a fixed instance is formally a "this occurrence" edit (3.10) of `scheduled_time` - it sets `detached = true` on that instance. Practical consequence: after a manual reschedule, that instance is excluded from the timezone-change re-projection in 14.1 (the user's manually-chosen time is treated as deliberate and is not silently re-projected against a later timezone-setting change), and it will not be overwritten if the template's `fixed_time_of_day` is later edited with "this and future" scope.
 
@@ -762,6 +803,8 @@ Dependents are not placed while any dependency is incomplete (6.1). When the **l
 3. If 6.2 finds no slot before the deadline, the instance stays `pending` with an `unschedulable` Notification, exactly as for any other flexible task.
 4. If the deadline has **already elapsed** while the instance sat blocked, the 6.7 gate applies first and the instance goes to `missed` instead.
 
+**A fixed instance is not placed - it already has its time (added Revision 10).** When its last dependency completes, it transitions `blocked` → `scheduled` at its own `scheduled_time`, never `pending`: nothing would ever move a fixed instance out of `pending`. Because it held its slot while it waited (6.5), this cannot collide with anything. If its time has already passed, it is `scheduled` and overdue at once - the `overdue` Notification 6.6 raised when the time passed stays open, or is raised now if it was not.
+
 Point 4 is a real path, not a corner case: **a deadline is a fixed point in time and its clock keeps running while an instance waits in the Backlog.** A dependent can therefore reach `missed` without ever having been schedulable, because its prerequisite ran late. The user recovers through 6.7's existing extend-deadline path, and 6.3's speculative scan is what warns them before it happens. Deadlines are never paused or rebased on unblock.
 
 ---
@@ -789,8 +832,9 @@ WebUI only (Backlog 12.2 for IM bot).
 0. **First-run setup screen (added Rev 9)** - shown only while zero `User` rows exist (3.6). Takes the **setup token** printed in the container log, and sets the admin password (minimum 12 characters, confirmed twice). The screen must say where to find the token. Unreachable once an account exists; every other screen redirects here until one does.
 1. **Login screen** - username/password (see 3.6, 14.2).
 2. **Timeline / Task list view** - calendar-style view of `scheduled` instances, **plus display-only virtual/"ghost" projections of upcoming recurring occurrences (9.2, added Revision 6)**, external busy-blocks overlaid read-only and visually distinguished (post-filtering per Section 7), blackout dates visibly marked.
-3. **Task creation/edit form** - for a new task, or when editing a one-time (`recurrence: one_time`) template, edits the `TaskTemplate` directly as in Revision 6. **(Rev 7)** For an existing recurring task, first prompts for edit scope - **"this occurrence"** vs. **"this and future occurrences"** (3.10) - before applying the edit; includes the optional active-hours override (3.2); surfaces the archival/deletion warning (3.8); surfaces the feasibility validation error on save if applicable (6.8, added Revision 6).
-4. **Task detail view** - single `TaskInstance`: status, status history, dependencies (with current status), a visible **`detached` indicator** when applicable (3.10, added Rev 7), actions: mark complete (from any non-terminal status, 3.3), mark in-progress, **skip this occurrence (Rev 9 - transitions to `dismissed`, 3.8; the primary action on a stale recurring occurrence)**, reschedule (for `sync_conflict`/`overdue` fixed tasks - a "this occurrence" edit per 3.10/6.6), extend deadline (for `missed` flexible tasks, 6.7 - also a "this occurrence" edit per 3.10).
+3. **Task creation/edit form** - for a new task, or when editing a one-time (`recurrence: one_time`) template, edits the `TaskTemplate` directly as in Revision 6. **(Rev 10)** Creation asks for the **start date** (`start_date`, 3.2) with the other parameters, and for a flexible task presents `deadline_offset_minutes` as how long each occurrence may take to get done, counted from its date. **(Rev 7)** For an existing recurring task, first prompts for edit scope - **"this occurrence"** vs. **"this and future occurrences"** (3.10) - before applying the edit; includes the optional active-hours override (3.2); surfaces the archival/deletion warning (3.8); surfaces the feasibility validation error on save if applicable (6.8, added Revision 6).
+   - **(Rev 10) Skipped occurrences are announced, not discovered.** When "this and future" would skip later occurrences that were edited on their own (3.10), the form says so before saving and names them - e.g. "2 upcoming occurrences have their own changes and won't be updated: Wed 1 Oct, Fri 3 Oct". Next to that message it offers an unticked checkbox, **"Apply to all upcoming occurrences, including these"**. Ticked, the edit reaches every open occurrence from the edited one onward with no exceptions; past occurrences are still never changed. When nothing would be skipped, neither the message nor the checkbox is shown.
+4. **Task detail view** - single `TaskInstance`. **(Rev 10)** There is deliberately no "move" or "reschedule" action for a **flexible** instance: Tessera moves flexible work itself whenever its slot is taken (6.4, 6.5), and the user shapes placement through the task's window - its date and deadline - and duration. Fields: status, status history, dependencies (with current status), a visible **`detached` indicator** when applicable (3.10, added Rev 7), actions: mark complete (from any non-terminal status, 3.3), mark in-progress, **skip this occurrence (Rev 9 - transitions to `dismissed`, 3.8; the primary action on a stale recurring occurrence)**, reschedule (for `sync_conflict`/`overdue` fixed tasks - a "this occurrence" edit per 3.10/6.6), extend deadline (for `missed` flexible tasks, 6.7 - also a "this occurrence" edit per 3.10).
 5. **Notifications panel** - undismissed/unresolved `Notification` rows; auto-resolved ones show the "already resolved" state if opened (3.9).
 5a. **Backlog view (added Rev 9)** - everything that needs the user's attention and has no place on the Timeline: instances in `blocked`, `unschedulable` *(i.e. `pending` with an active `unschedulable` notification)*, and `missed`. This is a **filtered view over `TaskInstance`, not a separate entity** - a backlog item is an ordinary instance, and nothing is moved or copied when it enters or leaves the view. Making it an entity would put one task in two places with a migration between them, which is exactly the silent-desynchronisation failure the architecture is built to avoid.
    - The dependency relation is navigable **in both directions**: from a backlog item, see and edit what is blocking it; from any task, see what is waiting on it. This is what 3.3's join-table storage exists for.
@@ -833,6 +877,25 @@ Instances are generated **one at a time**, never as a pre-generated rolling wind
 
 **(Rewritten Revision 9.)** Generation depends on the template's `recurrence.anchor` (3.2), and the two modes fail differently **on purpose**. Generation must never be gated solely on a `completed` transition: a `missed` instance, a fixed instance whose time passed un-ticked, a deleted instance, or one blocked on a dependency that never completed would each leave the template unable to generate again, silently and with no error - a user who forgot to tick off one Monday stand-up would lose every future Monday stand-up.
 
+#### Every occurrence has its own date (added Revision 10)
+
+Each instance carries a `nominal_date` (3.3): the date this occurrence belongs to. It is set when the instance is generated and never edited afterwards. Every other date derives from it - the next occurrence's date, a flexible instance's `deadline` (`nominal_date + deadline_offset_minutes`), and a fixed instance's `scheduled_time` (`nominal_date`'s calendar date at `fixed_time_of_day`, 14.1). Nothing is derived from where an occurrence ended up: a "this occurrence" reschedule or custom deadline moves that occurrence only.
+
+**A flexible occurrence is never placed before its `nominal_date`** (6.2's earliest start), the first occurrence included. `deadline_offset_minutes` is therefore the same window for every occurrence: how long the user gives themselves to get it done, counted from its date.
+
+#### The first occurrence (added Revision 10)
+
+The first instance is generated when the template is created, from its `start_date` (3.2) - never from the moment of creation.
+
+| Template | First occurrence's `nominal_date` |
+|---|---|
+| `one_time`, either type | the start of `start_date`, local time |
+| `anchor: "calendar"`, flexible | the start of the first date on or after `start_date` that the recurrence rule produces |
+| `anchor: "calendar"`, fixed | the first date on or after `start_date` that the rule produces **and** whose `fixed_time_of_day` has not yet passed; the instance is at that time |
+| `anchor: "completion"` (flexible only) | the start of `start_date`, local time - the cadence only matters from the first completion onward |
+
+"The start of" a date is 00:00 in the user's timezone, so a flexible occurrence dated Monday with a 3-day window is due at the end of Wednesday.
+
 #### `anchor: "calendar"` - rigid commitments
 
 The next instance is generated when its **occurrence boundary arrives**, regardless of the predecessor's state. Weekly team syncs, birthdays, a concert.
@@ -847,7 +910,7 @@ The next instance is generated when the live instance reaches `completed`, and i
 
 - **At most one live instance at a time.**
 - **If it is never completed, no successor is generated, and the live instance simply stays outstanding.** This is the intended behaviour, not the dead-end described above: an unreplaced filter still needs replacing, and manufacturing a second copy of the same chore would be wrong. The distinction matters - for calendar-anchored work the occurrence is tied to a date that has passed, while for completion-anchored work the obligation is still live.
-- **The nominal date is an earliest-start gate**, not just a label: instance N+1 is not eligible for placement before it. The nominal date is stored on the instance (`nominal_date`, 3.3); a template's very first instance is not gated. Its `deadline` is `nominal_date + deadline_offset_minutes` (3.2) - `deadline_offset_minutes` is the window the user gives themselves to get it done, inside which the task may be freely rescheduled.
+- **The nominal date is an earliest-start gate**, not just a label: an instance is not eligible for placement before it - the first one, dated `start_date`, included (Revision 10; Revision 9 exempted the first instance). Its `deadline` is `nominal_date + deadline_offset_minutes` (3.2) - `deadline_offset_minutes` is the window the user gives themselves to get it done, inside which the task may be freely rescheduled.
 - Valid on **flexible templates only** (3.2). On deletion with `this_occurrence` scope the successor anchors at `now + cadence` (3.8), since there is no `completed_at` to anchor against.
 
 **(Added Revision 7)** Generation always reads the template's *current* values at generation time, regardless of whether the just-completed prior instance was `detached` (3.10) - a one-off override never leaks into the next generated instance. `detached` is a property of an instance, not of the template.
@@ -889,6 +952,8 @@ All examples use timezone `America/New_York` and the 15-minute grid (6.2). Times
 | User action | Create `fixed` template "Team sync", `fixed_time_of_day: "18:00"`, `estimated_duration_minutes: 60`, first occurrence Mon 2026-03-02 |
 
 **Expected:** save rejected with error code `creation_conflict`. No `TaskTemplate` and no `TaskInstance` are created. The user must pick another time or switch the task to `flexible`.
+
+**Flexible variant, added Revision 10.** Had the 18:00–19:00 slot been occupied not by "Date night" but by a `scheduled` flexible "Water plants" (30 minutes, `deadline` Wed 2026-03-04 21:00), the save **succeeds**: "Team sync" is created at 18:00, and in the same transaction "Water plants" returns to `pending` and is placed again by 6.2 - at 19:00 if Monday's window still has room, otherwise on a later day before its deadline, otherwise `unschedulable` (6.5).
 
 **Example B - Flexible placement, merged active-hours override and grid alignment (3.2, 6.2).**
 
@@ -998,7 +1063,29 @@ Candidate: a `flexible` task, `estimated_duration_minutes: 60`, placed via Pass 
 
 **Example L - "This occurrence" edit (3.10, added Rev 7).** A recurring "Pay Utility Bills" template normally generates a 10-minute `flexible` instance. This month's bill requires a call to dispute a charge. The user opens this month's instance and edits it with **"this occurrence"** scope, changing `estimated_duration_minutes` to 45. This sets `detached = true` on that instance only; the `TaskTemplate` is untouched. The instance re-enters 6.2 with the new duration. Next month, the normal 9.1 generation cycle produces a fresh instance from the (unchanged) template - 10 minutes, `detached = false` - with no trace of this month's override.
 
-**Example M - "This and future" edit hits a detached instance (3.10, added Rev 7).** Continuing Example L: before this month's (detached, 45-minute) instance completes, the user separately decides all future bill-pay tasks should be budgeted at 15 minutes, and edits the template with **"this and future occurrences"** scope. Because the current live instance is already `detached`, it is skipped entirely - it stays at 45 minutes, unaffected. The template's `estimated_duration_minutes` is updated to 15; the *next* generated instance (after this one completes) will be 15 minutes, not 45 and not the old 10.
+**Example M - "This and future" with several open occurrences (3.10, added Rev 7, rewritten Rev 10).**
+
+| Given | |
+|---|---|
+| Template | "Water plants", `flexible`, `recurrence: {pattern: daily, anchor: "calendar"}`, `estimated_duration_minutes: 20`, `deadline_offset_minutes: 4320` (3 days) |
+| Open occurrences | Mon 2026-03-02, Tue 2026-03-03, Wed 2026-03-04 (by `nominal_date`), all `pending` or `scheduled` |
+| Earlier "this occurrence" edit | Wednesday's occurrence was moved to the evening on its own, so it is `detached` |
+| User action | opens **Tuesday's** occurrence, changes `estimated_duration_minutes` to 30, scope **"this and future occurrences"** |
+
+**Expected, box unticked (the default):**
+
+| Occurrence | Result |
+|---|---|
+| Mon 2026-03-02 | 20 min - dated before the edited one, never touched |
+| Tue 2026-03-03 | 30 min - the edited occurrence always takes the edit |
+| Wed 2026-03-04 | 20 min, still in the evening - edited on its own, so skipped |
+| Thu 2026-03-05 onward | 30 min - generated from the updated template |
+
+Before saving, the form says "1 upcoming occurrence has its own changes and won't be updated: Wed 4 Mar" and shows the unticked checkbox (8.1).
+
+**Expected, box ticked:** as above, except Wednesday also becomes 30 minutes and its `detached` flag is cleared. It stays in the evening - the edit changed only the duration - and later series edits reach it. Monday is still untouched.
+
+Had the user edited from **Monday's** occurrence instead, Monday and Tuesday would both have become 30 minutes and Wednesday would have been skipped or included on the same terms. Had the edit been rejected for any occurrence (e.g. `infeasible_duration`, 6.8), none of them - and not the template - would have changed.
 
 **Example N - Dependency chain, unblock and auto-schedule (6.1, 6.9, 8.1 - added Rev 9).**
 
@@ -1014,6 +1101,18 @@ Candidate: a `flexible` task, `estimated_duration_minutes: 60`, placed via Pass 
 2. **On completion.** The user marks Task 1 `completed` at Wed 2026-03-04 19:30. In **the same service method and transaction** (6.9), Task 2 transitions `blocked` → `pending` and is placed by 6.2 at the first grid point at or after `now` inside an active-hours window with room for 90 minutes - here **Wed 2026-03-04 19:30** (already a grid point, and 19:30 + 90min = 21:00, exactly filling the window). Task 2 leaves the Backlog and appears on the Timeline.
 3. **The late-dependency path.** Had Task 1 instead been completed on Wed 2026-03-11, after Task 2's deadline had already passed, Task 2 would have reached `missed` while sitting in the Backlog - the 6.7 gate applies before placement, because **a deadline is a fixed point in time and its clock keeps running while an instance waits** (6.9). The user recovers by extending the deadline (6.7); 6.3's speculative scan is what should have warned them beforehand.
 
+**Example N2 - A fixed task waiting on a flexible one (4, 6.5, 6.6, 6.9 - added Rev 10).**
+
+| Given | |
+|---|---|
+| Task 1 | "Buy battery", `flexible`, `estimated_duration_minutes: 30`, `deadline` Fri 2026-03-06 21:00 |
+| Task 2 | "Replace car battery", `fixed`, Sat 2026-03-07 10:00–11:00, `dependencies: [Task 1]` |
+
+**Expected:**
+1. **At creation.** Task 2 is `blocked` with `scheduled_time` Sat 10:00 and holds that slot: creating another fixed task at Sat 10:30 is rejected with `creation_conflict`, and no flexible task is placed across it. Its reminders and overdue check are wired as for any fixed task.
+2. **Task 1 completed Thu 2026-03-05.** Task 2 becomes `scheduled` at Sat 10:00, unchanged.
+3. **Task 1 still open at Sat 10:00.** The overdue check fires: Task 2 stays `blocked` and gets an `overdue` Notification naming "Buy battery", with reschedule / mark complete / skip. If "Buy battery" is then completed on Sat 12:00, Task 2 becomes `scheduled` - still overdue, the notice still open - until the user reschedules, completes or skips it.
+
 **Example O - Completion-anchored recurrence (3.2, 9.1 - added Rev 9).**
 
 | Given | |
@@ -1026,6 +1125,8 @@ Candidate: a `flexible` task, `estimated_duration_minutes: 60`, placed via Pass 
 - nominal date **Tue 2026-04-07 14:20** (`completed_at` + one calendar month, computed in `America/New_York`),
 - `deadline` **Sun 2026-04-12 14:20** (`nominal + 7200 minutes`),
 - and an earliest-start gate at the nominal date, so 6.2 will not place it before 2026-04-07.
+
+**The first occurrence is gated the same way (Rev 10).** Had the user created this template on Fri 2026-02-20 with `start_date` 2026-03-01, the first instance would have had nominal date **Sun 2026-03-01 00:00** and `deadline` **Fri 2026-03-06 00:00**, and 6.2 would not have placed it before 2026-03-01 even with free time on the 20th.
 
 Had `anchor` been `"calendar"`, N+1 would instead have landed on **Wed 2026-04-01** regardless of when N was completed. That difference is the entire point of the field: a filter replaced on the 7th is due again a month after the 7th, not a month after a date the user already missed.
 
@@ -1048,11 +1149,11 @@ This is the case that makes 9.1's occurrence-boundary rule necessary: gating gen
 
 ## 11. Open Questions Requiring Stakeholder Sign-off
 
-**Status as of Revision 9: no open items.** See the closing note below for why that is not the same as "the document is fully verified".
+**Status as of Revision 10: no open items.** See the closing note below for why that is not the same as "the document is fully verified".
 
 Items 1–7 were raised by the first readiness review and resolved in Revisions 7 and 8; their outcomes are stated in the body of this document rather than restated here, and the full text is in git history. One is worth naming, because it was a **reversal** and a future reader is otherwise liable to reinstate the original position:
 
-- **Item 7, instance-level field overrides.** Revision 6 declined these as contradicting 3.1's "everything is a template" simplicity decision. Revision 7 **reversed that**, on stakeholder direction, modelled on Google Calendar's edit-scope prompt and adapted to this app's one-instance-at-a-time model (which collapses GCal's three scopes to two). Section 3.10 is the binding rule and `TaskInstance` carries a `detached` flag; Worked Examples L and M cover both paths. Revision 9 extended the same two-way scope to deletion (3.8).
+- **Item 7, instance-level field overrides.** Revision 6 declined these as contradicting 3.1's "everything is a template" simplicity decision. Revision 7 **reversed that**, on stakeholder direction, modelled on Google Calendar's edit-scope prompt with two scopes rather than three. Section 3.10 is the binding rule and `TaskInstance` carries a `detached` flag; Worked Examples L and M cover both paths. Revision 9 extended the same two-way scope to deletion (3.8), and Revision 10 widened "this and future" to every open occurrence from the edited one onward (item 11).
 
 Revision 9 resolved eighteen findings from a second review (IRR-2). Two of them were raised here as `[UNCONFIRMED]` rather than decided unilaterally, and both were subsequently settled - items 8 and 9 below.
 
@@ -1060,7 +1161,15 @@ Revision 9 resolved eighteen findings from a second review (IRR-2). Two of them 
 
 9. ~~**Does the first-run setup wizard ship with a setup token?**~~ **RESOLVED - Revision 9: yes, in the same Stage 3 work.** Random single-use token generated at startup while zero users exist, logged at `WARNING`, required by the setup endpoint, held in memory only so a restart reissues it. See 3.6. Deferring it would have shipped an open claim window on a deployment that 14.2 says should never be open by default.
 
-**Section 11 has no open items at Revision 9.** Note this is narrower than Revision 8's claim that the document was "fully locked": IRR-2 findings gating Stage 5 and later (H2, H5–H7, H9–H14, and several Medium items) remain **open against this revision** and are tracked in that register, not here. Section 11 tracks decisions awaiting confirmation; IRR-2 tracks findings awaiting a decision.
+10. ~~**When is a series' first occurrence, and is it held back to its date?**~~ **RESOLVED - Revision 10.** The user gives a **start date** when creating the task, together with its other parameters (`start_date`, 3.2); the first occurrence is derived from it rather than from the moment of creation (9.1). For a flexible task the start date and `deadline_offset_minutes` fix the first occurrence's window, and **no flexible occurrence is placed before its own date**, the first included (6.2). Revision 9 had exempted a completion-anchored template's first instance from that gate; the code placed it as soon as it fitted. Worked Example O shows both.
+
+11. ~~**What does "this and future" change when a series has several open occurrences?**~~ **RESOLVED - Revision 10.** Literally what it says: the edited occurrence and every open occurrence dated after it, plus the ones not generated yet. Which occurrences happen to exist as rows, and the template behind them, are implementation details the user should not have to reason about. Occurrences before the edited one, and terminal ones, are never changed. Occurrences edited on their own are skipped by default, so a deliberate change isn't silently undone, but because that departs from the literal reading the edit dialog must name them and offer a checkbox that includes them (3.10, 8.1). Rejected alternatives: reaching only the newest open occurrence (the Revision 7 rule, which left the edited occurrence itself unchanged when it wasn't the newest); closing the previous open occurrence whenever a new one is generated (cuts short a window the user chose); and not generating a new occurrence until the previous one is closed (erases the difference between the two anchors). Worked Example M shows both checkbox states.
+
+12. ~~**How does the user move a flexible task that landed in a bad slot?**~~ **RESOLVED - Revision 10: they don't; Tessera does.** Moving flexible work is automated rather than a manual action. Whenever something takes a scheduled flexible task's slot - an external event (6.4) or a fixed task created, moved, lengthened or generated there (6.5) - the task is placed again between its earliest start and its deadline, or flagged `unschedulable` with a notification. Rejected: a manual "not before" date, pinning an exact time (which would make one occurrence behave as fixed and need its own rules), a "find another time" button, and editing the deadline as a stand-in for moving. Before this revision the code also rejected a fixed task outright when a flexible task happened to sit in its slot, contradicting 6.5's list of what counts as a conflict; 6.5 now states the give-way rule explicitly.
+
+13. ~~**What happens to a fixed task that is still waiting on a dependency when its time comes?**~~ **RESOLVED - Revision 10 (IRR-2 H11).** It holds its slot while it waits (6.5); when its time passes it gets the ordinary fixed-task `overdue` notice, naming the unfinished prerequisite, and stays `blocked` until the user acts (6.6); and when the prerequisite completes it becomes `scheduled`, overdue at once if its time has passed (6.9). Rejected: letting the slot go until it unblocks (the appointment could then collide with anything booked meanwhile), and skipping it automatically when its time passes (Tessera would be deciding on the user's behalf that an appointment did not happen). H11's claim that the series would also stop generating no longer holds - calendar-anchored series generate on the occurrence boundary regardless (9.1). A warning *before* the time arrives is H10's subject, not this item's.
+
+**Section 11 has no open items at Revision 10.** Note this is narrower than Revision 8's claim that the document was "fully locked": IRR-2 findings gating Stage 5 and later (H2, H5–H7, H9–H14, and several Medium items) remain **open against this revision** and are tracked in that register, not here. Section 11 tracks decisions awaiting confirmation; IRR-2 tracks findings awaiting a decision.
 
 Two related items were resolved **without** flagging, since they don't change load-bearing behavior and follow directly from rules already on the books:
 - Instances may be marked `completed` directly without first being `scheduled` (3.3/4) - this is a natural reading of "the user did the task," not a new mechanism.

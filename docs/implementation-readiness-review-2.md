@@ -453,7 +453,7 @@ Plain-HTTP LAN is a **fully supported deployment**, not a degraded mode. The fla
 **Where:** design-doc §4, §6.6, §6.7
 **Finding:** `missed` is explicitly flexible-only. A fixed instance that is `blocked` when its `scheduled_time` arrives never becomes `scheduled`, so §6.6's overdue check (keyed on `scheduled_time` passing) may or may not apply depending on whether a blocked fixed instance carries a `scheduled_time` at all - itself unstated. Either way it sits `blocked` forever with a time in the past, and per B1 its template never generates again.
 **Recommendation:** decide whether a `blocked` fixed instance holds a `scheduled_time` (recommend yes - it is user-specified and known at creation), and give it a terminal path when that time passes while still blocked.
-**Disposition:** needs stakeholder decision.
+**Disposition:** **resolved in design doc Revision 10** (Section 11 item 13). It holds its time and its slot while blocked (§6.5), is overdue like any fixed instance when the time passes (§6.6), and becomes `scheduled` when unblocked (§6.9). The series-stall half no longer applies: calendar-anchored generation no longer waits on the predecessor (§9.1).
 
 ### H12 - Timezone re-projection (§14.1) is optional-sounding, unassigned, and can create conflicts
 **Where:** design-doc §14.1 vs implementation-plan Stages 4/5/6
