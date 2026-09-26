@@ -1,7 +1,7 @@
 # Tessera - Design Document (POC)
 ### Revision 10
 
-> **Revision 10 settles two recurring-series questions** - when a series starts, and what "this and future" reaches (Section 11 items 10 and 11). Everything below about Revision 9 still stands.
+> **Revision 10 settles three scheduling questions** - when a series starts, what "this and future" reaches, and who moves a flexible task whose slot is taken (Section 11 items 10-12). Everything below about Revision 9 still stands.
 >
 > **Revision 9 resolves the second implementation-readiness review.** `docs/implementation-readiness-review-2.md` (IRR-2) is the findings register and the reasoning trail behind the changes below; this document is authoritative for *what the system does*, IRR-2 for *why it says so*. Every IRR-2 finding gating Stages 1, 2 and 3 has been drafted in here, and Section 11 has no open items. Findings gating Stage 5 and later (H2, H5, H6, H7, H9–H14, and the remaining Medium items) are **not yet resolved** and remain open against this revision - IRR-2 Section 6 lists which gates which stage.
 
@@ -29,7 +29,7 @@ Full diffs are in git; IRR-2 (`docs/implementation-readiness-review-2.md`) holds
 | 7 | **Reversed Revision 6's refusal of instance-level overrides.** Added 3.10 (Edit Scope & Propagation) and the `detached` flag, modelled on Google Calendar's edit-scope prompt. Also formalised fixed-task "reschedule" as a "this occurrence" edit |
 | 8 | Closed the last five `[UNCONFIRMED]` items, all confirmed as specified. Markup only, no behaviour change |
 | 9 | Resolved eighteen findings from the second readiness review (IRR-2) - see below |
-| 10 | Recurring-series rules: every occurrence has its own date, a template takes an explicit start date, flexible occurrences are never placed before their date, and "this and future" reaches every open occurrence from the edited one onward - see below |
+| 10 | Recurring-series rules: every occurrence has its own date, a template takes an explicit start date, flexible occurrences are never placed before their date, and "this and future" reaches every open occurrence from the edited one onward. A scheduled flexible task gives way to a fixed one instead of blocking it - see below |
 
 **Revision 9 changelog.** Eighteen IRR-2 findings, following stakeholder decisions taken 2026-08-05 to 2026-08-07. Revision 8's "locked" status meant "no unilateral edits"; it did not mean "verified correct". IRR-2 records what each finding was and why it mattered; this lists only what the specification now says.
 
@@ -61,7 +61,7 @@ Full diffs are in git; IRR-2 (`docs/implementation-readiness-review-2.md`) holds
 
 *Status:* **Section 11 has no open items at Revision 9.** IRR-2 findings gating Stage 5 and later remain open against this revision and are tracked there.
 
-**Revision 10 changelog.** Stakeholder decisions taken 2026-09-25 and 2026-09-26 (Section 11 items 10 and 11).
+**Revision 10 changelog.** Stakeholder decisions taken 2026-09-25 and 2026-09-26 (Section 11 items 10-12).
 
 *Occurrence dates (3.2, 3.3, 9.1):*
 - **Every occurrence has its own date** (`nominal_date`, 3.3), fixed when it is generated. The series advances from it; nothing is derived from where an occurrence ended up.
@@ -72,6 +72,9 @@ Full diffs are in git; IRR-2 (`docs/implementation-readiness-review-2.md`) holds
 - **Reaches the edited occurrence and every open occurrence dated after it**, plus the ones not generated yet. Earlier and terminal occurrences are never changed. The old rule touched only the single newest instance, which was wrong once calendar-anchored series could have several open at once (Revision 9).
 - **Occurrences edited on their own are skipped by default**, and the edit dialog names them. A checkbox applies the edit to them too, and they rejoin the series.
 - The edited occurrence itself always takes the edit and rejoins the series, even if it was edited on its own before.
+
+*Moving flexible tasks (6.5, 8.1):*
+- **Tessera moves flexible work itself; there is no manual move for a flexible task.** A fixed task no longer conflicts with a scheduled flexible one - the flexible task gives way and is placed again, or flagged `unschedulable`.
 
 ---
 
@@ -589,7 +592,7 @@ All types support auto-resolution per 3.9, **except `budget_exceeded`**: it reco
 
 ### 6.2 Core placement algorithm
 
-Runs whenever: a new flexible instance enters `pending`, an external sync or overdue event invalidates a scheduled flexible instance (returns it to `pending`), a dependency completes/is removed and unblocks a downstream instance (6.9), or **(added Revision 7, amended Revision 10)** a flexible instance reached by a "this and future" edit (3.10) has its `estimated_duration_minutes`/`deadline` changed in a way that invalidates its current placement.
+Runs whenever: a new flexible instance enters `pending`, an external sync, a fixed task taking its slot (6.5, added Revision 10) or an overdue event invalidates a scheduled flexible instance (returns it to `pending`), a dependency completes/is removed and unblocks a downstream instance (6.9), or **(added Revision 7, amended Revision 10)** a flexible instance reached by a "this and future" edit (3.10) has its `estimated_duration_minutes`/`deadline` changed in a way that invalidates its current placement.
 
 **Placement is an incremental fit, not a reflow (added Revision 9).** A pass places only the new or changed candidate into the gaps left by everything already committed. **Existing placements are never moved by a later pass**, so adding a task never silently reshuffles what is already on the timeline. The notes below record the consequence, which is deliberate and accepted.
 
@@ -724,6 +727,7 @@ On each poll:
 
 - On creating/retiming a `fixed` instance, validate against all other `scheduled` fixed instances and all known external busy-blocks (filtered per Section 7).
 - **Hard block on creation** if overlap found. No save-with-override in POC (Backlog 12.8).
+- **(Added Revision 10) A scheduled flexible instance is not a conflict - it gives way.** Only commitments block a fixed task: other fixed instances, external busy-blocks, and a flexible instance the user has already started (`in_progress`). When a fixed instance lands on a slot a `scheduled` flexible instance occupies - created, rescheduled, lengthened, retimed by a "this and future" edit (3.10), or generated at an occurrence boundary (9.1) - that flexible instance is moved in the same transaction, exactly as 6.4 moves one displaced by an external event: back to `pending`, the 6.7 gate first, then 6.2 places it again between its earliest start (its own date or now, whichever is later) and its deadline. If nothing fits, it stays `pending` with an `unschedulable` Notification (5).
 
 ### 6.6 Overdue-task handling
 
@@ -822,7 +826,7 @@ WebUI only (Backlog 12.2 for IM bot).
 2. **Timeline / Task list view** - calendar-style view of `scheduled` instances, **plus display-only virtual/"ghost" projections of upcoming recurring occurrences (9.2, added Revision 6)**, external busy-blocks overlaid read-only and visually distinguished (post-filtering per Section 7), blackout dates visibly marked.
 3. **Task creation/edit form** - for a new task, or when editing a one-time (`recurrence: one_time`) template, edits the `TaskTemplate` directly as in Revision 6. **(Rev 10)** Creation asks for the **start date** (`start_date`, 3.2) with the other parameters, and for a flexible task presents `deadline_offset_minutes` as how long each occurrence may take to get done, counted from its date. **(Rev 7)** For an existing recurring task, first prompts for edit scope - **"this occurrence"** vs. **"this and future occurrences"** (3.10) - before applying the edit; includes the optional active-hours override (3.2); surfaces the archival/deletion warning (3.8); surfaces the feasibility validation error on save if applicable (6.8, added Revision 6).
    - **(Rev 10) Skipped occurrences are announced, not discovered.** When "this and future" would skip later occurrences that were edited on their own (3.10), the form says so before saving and names them - e.g. "2 upcoming occurrences have their own changes and won't be updated: Wed 1 Oct, Fri 3 Oct". Next to that message it offers an unticked checkbox, **"Apply to all upcoming occurrences, including these"**. Ticked, the edit reaches every open occurrence from the edited one onward with no exceptions; past occurrences are still never changed. When nothing would be skipped, neither the message nor the checkbox is shown.
-4. **Task detail view** - single `TaskInstance`: status, status history, dependencies (with current status), a visible **`detached` indicator** when applicable (3.10, added Rev 7), actions: mark complete (from any non-terminal status, 3.3), mark in-progress, **skip this occurrence (Rev 9 - transitions to `dismissed`, 3.8; the primary action on a stale recurring occurrence)**, reschedule (for `sync_conflict`/`overdue` fixed tasks - a "this occurrence" edit per 3.10/6.6), extend deadline (for `missed` flexible tasks, 6.7 - also a "this occurrence" edit per 3.10).
+4. **Task detail view** - single `TaskInstance`. **(Rev 10)** There is deliberately no "move" or "reschedule" action for a **flexible** instance: Tessera moves flexible work itself whenever its slot is taken (6.4, 6.5), and the user shapes placement through the task's window - its date and deadline - and duration. Fields: status, status history, dependencies (with current status), a visible **`detached` indicator** when applicable (3.10, added Rev 7), actions: mark complete (from any non-terminal status, 3.3), mark in-progress, **skip this occurrence (Rev 9 - transitions to `dismissed`, 3.8; the primary action on a stale recurring occurrence)**, reschedule (for `sync_conflict`/`overdue` fixed tasks - a "this occurrence" edit per 3.10/6.6), extend deadline (for `missed` flexible tasks, 6.7 - also a "this occurrence" edit per 3.10).
 5. **Notifications panel** - undismissed/unresolved `Notification` rows; auto-resolved ones show the "already resolved" state if opened (3.9).
 5a. **Backlog view (added Rev 9)** - everything that needs the user's attention and has no place on the Timeline: instances in `blocked`, `unschedulable` *(i.e. `pending` with an active `unschedulable` notification)*, and `missed`. This is a **filtered view over `TaskInstance`, not a separate entity** - a backlog item is an ordinary instance, and nothing is moved or copied when it enters or leaves the view. Making it an entity would put one task in two places with a migration between them, which is exactly the silent-desynchronisation failure the architecture is built to avoid.
    - The dependency relation is navigable **in both directions**: from a backlog item, see and edit what is blocking it; from any task, see what is waiting on it. This is what 3.3's join-table storage exists for.
@@ -940,6 +944,8 @@ All examples use timezone `America/New_York` and the 15-minute grid (6.2). Times
 | User action | Create `fixed` template "Team sync", `fixed_time_of_day: "18:00"`, `estimated_duration_minutes: 60`, first occurrence Mon 2026-03-02 |
 
 **Expected:** save rejected with error code `creation_conflict`. No `TaskTemplate` and no `TaskInstance` are created. The user must pick another time or switch the task to `flexible`.
+
+**Flexible variant, added Revision 10.** Had the 18:00–19:00 slot been occupied not by "Date night" but by a `scheduled` flexible "Water plants" (30 minutes, `deadline` Wed 2026-03-04 21:00), the save **succeeds**: "Team sync" is created at 18:00, and in the same transaction "Water plants" returns to `pending` and is placed again by 6.2 - at 19:00 if Monday's window still has room, otherwise on a later day before its deadline, otherwise `unschedulable` (6.5).
 
 **Example B - Flexible placement, merged active-hours override and grid alignment (3.2, 6.2).**
 
@@ -1138,6 +1144,8 @@ Revision 9 resolved eighteen findings from a second review (IRR-2). Two of them 
 10. ~~**When is a series' first occurrence, and is it held back to its date?**~~ **RESOLVED - Revision 10.** The user gives a **start date** when creating the task, together with its other parameters (`start_date`, 3.2); the first occurrence is derived from it rather than from the moment of creation (9.1). For a flexible task the start date and `deadline_offset_minutes` fix the first occurrence's window, and **no flexible occurrence is placed before its own date**, the first included (6.2). Revision 9 had exempted a completion-anchored template's first instance from that gate; the code placed it as soon as it fitted. Worked Example O shows both.
 
 11. ~~**What does "this and future" change when a series has several open occurrences?**~~ **RESOLVED - Revision 10.** Literally what it says: the edited occurrence and every open occurrence dated after it, plus the ones not generated yet. Which occurrences happen to exist as rows, and the template behind them, are implementation details the user should not have to reason about. Occurrences before the edited one, and terminal ones, are never changed. Occurrences edited on their own are skipped by default, so a deliberate change isn't silently undone, but because that departs from the literal reading the edit dialog must name them and offer a checkbox that includes them (3.10, 8.1). Rejected alternatives: reaching only the newest open occurrence (the Revision 7 rule, which left the edited occurrence itself unchanged when it wasn't the newest); closing the previous open occurrence whenever a new one is generated (cuts short a window the user chose); and not generating a new occurrence until the previous one is closed (erases the difference between the two anchors). Worked Example M shows both checkbox states.
+
+12. ~~**How does the user move a flexible task that landed in a bad slot?**~~ **RESOLVED - Revision 10: they don't; Tessera does.** Moving flexible work is automated rather than a manual action. Whenever something takes a scheduled flexible task's slot - an external event (6.4) or a fixed task created, moved, lengthened or generated there (6.5) - the task is placed again between its earliest start and its deadline, or flagged `unschedulable` with a notification. Rejected: a manual "not before" date, pinning an exact time (which would make one occurrence behave as fixed and need its own rules), a "find another time" button, and editing the deadline as a stand-in for moving. Before this revision the code also rejected a fixed task outright when a flexible task happened to sit in its slot, contradicting 6.5's list of what counts as a conflict; 6.5 now states the give-way rule explicitly.
 
 **Section 11 has no open items at Revision 10.** Note this is narrower than Revision 8's claim that the document was "fully locked": IRR-2 findings gating Stage 5 and later (H2, H5–H7, H9–H14, and several Medium items) remain **open against this revision** and are tracked in that register, not here. Section 11 tracks decisions awaiting confirmation; IRR-2 tracks findings awaiting a decision.
 

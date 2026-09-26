@@ -39,6 +39,7 @@ This is the high-risk piece. It's a greedy two-pass algorithm:
 - Accounts for: active-hours windows, blackout dates, task dependencies, fixed tasks, external calendar events (filtered per design-doc Section 7), and daily budget per day-of-week
 - **Incremental fit, not a reflow:** existing placements are never moved by a later pass. Greedy corner-painting (`unschedulable` where a global rearrangement would have fitted) is accepted behaviour, not a bug
 - **Obstacles = every instance in `scheduled` or `in_progress`, both types**, plus intra-pass placements, plus filtered external events
+- **A scheduled flexible task gives way to a fixed one** (design-doc 6.5, Rev 10): it is not a creation conflict; the fixed task is saved and the flexible task is placed again or flagged `unschedulable`. There is no manual move for flexible tasks
 - **Start times land on a 15-minute grid** aligned to the hour in local wall-clock. **Durations are never quantised**
 - **No topological sort.** The `blocked` gate already guarantees every candidate's dependencies are `completed`. Do not build one
 - All dates/times computed in the user's IANA timezone, never UTC offsets (design-doc 14.1)
