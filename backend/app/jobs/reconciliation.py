@@ -33,7 +33,11 @@ from app.jobs.interface import (
     overdue_job_key,
     reminder_job_key,
 )
-from app.scheduling.orchestration import schedule_next_occurrence_boundary, schedule_reminder_and_overdue_jobs
+from app.scheduling.orchestration import (
+    schedule_dependency_at_risk_job,
+    schedule_next_occurrence_boundary,
+    schedule_reminder_and_overdue_jobs,
+)
 from app.task_instances.service import promote_if_unblocked
 
 _LIVE_SCHEDULED_STATUSES = ("scheduled", "in_progress")
@@ -77,9 +81,17 @@ def _recreate_or_cancel_instance_jobs(db: Session, jobs: JobScheduler) -> None:
             jobs.schedule_at(job_key=deadline_elapsed_job_key(instance.id), run_at=instance.deadline)
 
     for instance in repo.list_by_statuses(("blocked",)):
-        # Only dependency-at-risk belongs to a blocked instance - reminder/overdue never
-        # applied (no scheduled_time), and deadline-elapsed for blocked instances is the
-        # periodic sweep's job (§6.7 check #1), not a per-instance one-off.
+        # A blocked fixed instance holds its time (§6.5, Rev 10) and keeps its reminder
+        # and overdue jobs like a scheduled one.
+        if instance.type == "fixed" and instance.scheduled_time is not None:
+            template = templates_by_id.get(instance.template_id)
+            schedule_reminder_and_overdue_jobs(jobs, instance, template.reminder_offsets_minutes if template is not None else ())
+            schedule_dependency_at_risk_job(jobs, instance)
+            jobs.cancel(job_key=deadline_elapsed_job_key(instance.id))
+            continue
+        # Otherwise only dependency-at-risk belongs to a blocked instance - reminder/overdue
+        # never applied (no scheduled_time), and deadline-elapsed for blocked instances is
+        # the periodic sweep's job (§6.7 check #1), not a per-instance one-off.
         jobs.cancel(job_key=overdue_job_key(instance.id))
         jobs.cancel(job_key=deadline_elapsed_job_key(instance.id))
         template = templates_by_id.get(instance.template_id)

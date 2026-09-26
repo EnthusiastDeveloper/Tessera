@@ -34,18 +34,20 @@ from app.db.schemas import (
     UserSettings,
 )
 from app.jobs.interface import (
+    DEPENDENCY_AT_RISK_THRESHOLD,
     JobScheduler,
     deadline_elapsed_job_key,
+    dependency_at_risk_job_key,
     occurrence_boundary_job_key,
     overdue_job_key,
     reminder_job_key,
 )
 from app.scheduling.adapter import (
-    OBSTACLE_STATUSES,
     attempt_placement,
     find_overlapping_scheduled_instances,
     gather_external_obstacles,
     has_fixed_conflict,
+    holds_slot,
 )
 from app.scheduling.generation import generate_next_instance
 from app.scheduling_engine.deadlines import is_deadline_elapsed
@@ -61,6 +63,20 @@ DEADLINE_MISSED = "deadline_missed"
 CREATION_CONFLICT = "creation_conflict"
 #: Stage 7 addition - §6.4's fixed-instance collision Notification.
 SYNC_CONFLICT = "sync_conflict"
+#: §6.3 - raised by the dependency-at-risk job, resolved here when the instance unblocks.
+DEPENDENCY_AT_RISK = "dependency_at_risk"
+
+
+def schedule_dependency_at_risk_job(jobs: JobScheduler, instance: TaskInstance) -> None:
+    """§6.3: a `blocked` instance is checked 3 days before the point it cannot slip past -
+    a flexible instance's `deadline`, or (Rev 10) a fixed instance's `scheduled_time`,
+    since a fixed instance has no deadline. Re-call it whenever that point moves.
+    """
+    if instance.status != "blocked":
+        return
+    point = instance.scheduled_time if instance.type == "fixed" else instance.deadline
+    if point is not None:
+        jobs.schedule_at(job_key=dependency_at_risk_job_key(instance.id), run_at=point - DEPENDENCY_AT_RISK_THRESHOLD)
 
 
 def place_or_defer(
@@ -377,19 +393,19 @@ def displace_flexible_under(db: Session, jobs: JobScheduler, instance: TaskInsta
     """§6.5 (Rev 10): a fixed `instance` just landed on its slot - created, generated,
     moved or lengthened - so the flexible work there gives way to it.
     """
-    if instance.type != "fixed" or instance.status not in OBSTACLE_STATUSES or instance.scheduled_time is None:
+    if instance.type != "fixed" or not holds_slot(instance) or instance.scheduled_time is None:
         return
     end = instance.scheduled_time + timedelta(minutes=instance.estimated_duration_minutes)
     displace_flexible_from(db, jobs, start=instance.scheduled_time, end=end, now=now, exclude_instance_id=instance.id)
 
 
 def fixed_slot_change_conflicts(db: Session, instance: TaskInstance, *, start: datetime, duration_minutes: int) -> bool:
-    """§6.5 for an edit to a fixed instance that is on the timeline (`scheduled` or
-    `in_progress`): would its new slot - a new start, a longer duration, or both - collide
+    """§6.5 for an edit to a fixed instance that holds its slot (`scheduled`, `in_progress`,
+    or `blocked` - see `holds_slot`): would its new slot - a new start, a longer duration, or both - collide
     with another fixed instance or an external busy-block? An edit that neither moves the
     start nor lengthens the slot can't create a new overlap, so it is never rejected here.
     """
-    if instance.type != "fixed" or instance.status not in OBSTACLE_STATUSES or instance.scheduled_time is None:
+    if instance.type != "fixed" or not holds_slot(instance) or instance.scheduled_time is None:
         return False
     if start == instance.scheduled_time and duration_minutes <= instance.estimated_duration_minutes:
         return False
@@ -447,6 +463,7 @@ __all__ = [
     "all_dependencies_completed",
     "archive_template_and_cancel_jobs",
     "create_notification",
+    "DEPENDENCY_AT_RISK",
     "displace_flexible_from",
     "displace_flexible_under",
     "fixed_slot_change_conflicts",
@@ -457,6 +474,7 @@ __all__ = [
     "resolve_cleared_sync_conflicts",
     "resolve_notifications",
     "return_to_pending",
+    "schedule_dependency_at_risk_job",
     "schedule_next_occurrence_boundary",
     "schedule_reminder_and_overdue_jobs",
 ]

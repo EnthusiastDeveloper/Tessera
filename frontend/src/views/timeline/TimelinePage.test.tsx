@@ -107,7 +107,7 @@ describe('TimelinePage', () => {
 
   it('requests scheduled instances, projections, external events, and settings on load', async () => {
     renderTimeline();
-    await waitFor(() => expect(mockedInstances.listInstances).toHaveBeenCalledWith({ status: 'scheduled' }));
+    await waitFor(() => expect(mockedInstances.listInstances).toHaveBeenCalledWith());
     expect(mockedTemplates.listProjections).toHaveBeenCalled();
     expect(mockedExternalEvents.listExternalEvents).toHaveBeenCalled();
     expect(mockedSettings.getSettings).toHaveBeenCalled();

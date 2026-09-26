@@ -16,6 +16,7 @@ moved on since they were scheduled, not RPCs with a guaranteed-current target.
 from __future__ import annotations
 
 from datetime import timedelta
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
@@ -30,8 +31,9 @@ from app.db.repositories import (
 )
 from app.db.schemas import TaskInstance
 from app.jobs.interface import JobScheduler
-from app.scheduling.adapter import attempt_placement
+from app.scheduling.adapter import attempt_placement, holds_slot
 from app.scheduling.orchestration import (
+    DEPENDENCY_AT_RISK,
     all_dependencies_completed,
     create_notification,
     generate_and_place_next_instance,
@@ -44,7 +46,6 @@ from app.scheduling_engine.deadlines import is_deadline_elapsed
 
 REMINDER = "reminder"
 OVERDUE = "overdue"
-DEPENDENCY_AT_RISK = "dependency_at_risk"
 
 
 def run_reminder(db: Session, *, instance_id: str, offset_minutes: int) -> None:
@@ -52,7 +53,7 @@ def run_reminder(db: Session, *, instance_id: str, offset_minutes: int) -> None:
     the instance is no longer live and scheduled by the time this fires.
     """
     instance = TaskInstanceRepository(db).get(instance_id)
-    if instance is None or instance.status not in ("scheduled", "in_progress"):
+    if instance is None or not holds_slot(instance):
         return
     create_notification(
         db, type_=REMINDER, instance_id=instance.id, message=f'Reminder: "{instance.name}" is coming up.', now=utcnow()
@@ -66,10 +67,16 @@ def run_overdue_check(db: Session, jobs: JobScheduler, *, instance_id: str) -> N
     first), plus the same `overdue` Notification so the move isn't silent.
     """
     instance = TaskInstanceRepository(db).get(instance_id)
-    if instance is None or instance.status not in ("scheduled", "in_progress"):
+    if instance is None or not holds_slot(instance):
         return
 
     now = utcnow()
+    if instance.type == "fixed":
+        # A fixed instance can come round twice - once while blocked, again when it is
+        # unblocked after its time (§6.9) - but it is only overdue once.
+        if not has_active_notification(db, instance_id=instance.id, notification_type=OVERDUE):
+            create_notification(db, type_=OVERDUE, instance_id=instance.id, message=_overdue_message(db, instance), now=now)
+        return
     if instance.type == "flexible":
         template = TaskTemplateRepository(db).get(instance.template_id)
         settings = UserSettingsRepository(db).get()
@@ -79,6 +86,13 @@ def run_overdue_check(db: Session, jobs: JobScheduler, *, instance_id: str) -> N
         place_or_defer(db, jobs, instance=reverted, template=template, settings=settings, now=now)
 
     create_notification(db, type_=OVERDUE, instance_id=instance.id, message=f'"{instance.name}" is overdue.', now=now)
+
+
+def _overdue_message(db: Session, instance: TaskInstance) -> str:
+    """§6.6 (Rev 10): a fixed instance still waiting on a prerequisite says which one."""
+    if instance.status != "blocked":
+        return f'"{instance.name}" is overdue.'
+    return f'"{instance.name}" is overdue - it is still waiting on {_unfinished_prerequisites(db, instance)}.'
 
 
 def run_deadline_elapsed_check(db: Session, jobs: JobScheduler, *, instance_id: str) -> None:
@@ -136,9 +150,12 @@ def run_dependency_at_risk_check(db: Session, *, instance_id: str) -> None:
     instance = TaskInstanceRepository(db).get(instance_id)
     if instance is None or instance.status in ("completed", "dismissed", "missed"):
         return
-    if instance.type != "flexible" or instance.deadline is None or not instance.dependencies:
+    if not instance.dependencies or all_dependencies_completed(db, instance):
         return
-    if all_dependencies_completed(db, instance):
+    if instance.type == "fixed":
+        _warn_fixed_dependency_at_risk(db, instance)
+        return
+    if instance.deadline is None:
         return
 
     template = TaskTemplateRepository(db).get(instance.template_id)
@@ -162,6 +179,37 @@ def run_dependency_at_risk_check(db: Session, *, instance_id: str) -> None:
             message=f'"{instance.name}" is at risk of missing its deadline - an incomplete dependency may not leave enough time.',
             now=now,
         )
+
+
+def _warn_fixed_dependency_at_risk(db: Session, instance: TaskInstance) -> None:
+    """§6.3 (Rev 10): a fixed instance's time can't slip, so an incomplete prerequisite
+    this close to it (the job fires 3 days before) is the risk - no speculative pass.
+    """
+    settings = UserSettingsRepository(db).get()
+    if (
+        instance.scheduled_time is None
+        or settings is None
+        or has_active_notification(db, instance_id=instance.id, notification_type=DEPENDENCY_AT_RISK)
+    ):
+        return
+    when = instance.scheduled_time.astimezone(ZoneInfo(settings.timezone)).strftime("%a %d %b %H:%M")
+    create_notification(
+        db,
+        type_=DEPENDENCY_AT_RISK,
+        instance_id=instance.id,
+        message=f'"{instance.name}" is on {when} and is still waiting on {_unfinished_prerequisites(db, instance)}.',
+        now=utcnow(),
+    )
+
+
+def _unfinished_prerequisites(db: Session, instance: TaskInstance) -> str:
+    repo = TaskInstanceRepository(db)
+    names = [
+        dependency.name
+        for dependency_id in instance.dependencies
+        if (dependency := repo.get(dependency_id)) is not None and dependency.status != "completed"
+    ]
+    return ", ".join(f'"{name}"' for name in names)
 
 
 def run_occurrence_boundary(db: Session, jobs: JobScheduler, *, template_id: str) -> None:

@@ -214,6 +214,19 @@ input[type='password'] {
   opacity: 0.35;
 }
 
+/* §8.1 (Rev 10): a fixed task waiting on a prerequisite still holds its time, so it is
+   drawn - but unlike a ready task: dashed border on a half-transparent fill. Uses the
+   accent colour rather than external events' default, so the two dashed styles differ. */
+.fc-event-waiting {
+  border: 2px dashed var(--color-accent);
+  background-color: color-mix(in srgb, var(--color-accent) 35%, transparent);
+  color: var(--color-text);
+}
+
+.fc-event-waiting .fc-event-main {
+  color: var(--color-text);
+}
+
 /* §7: external busy-blocks are read-only overlays, visually distinguished from a real
    task by a dashed border rather than a solid fill. */
 .fc-event-external {

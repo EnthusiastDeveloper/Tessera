@@ -16,7 +16,8 @@ import type { ExternalEvent, VirtualOccurrence } from '../../types/timeline';
 
 type LoadState = 'loading' | 'error' | 'ready';
 
-/** Design doc §8.1 screen 2 / §9.2: calendar-style view of real `scheduled` instances,
+/** Design doc §8.1 screen 2 / §9.2: calendar-style view of real `scheduled` instances
+ * (and waiting fixed ones, drawn distinctly - Rev 10),
  * plus display-only virtual "ghost" projections of upcoming recurring occurrences,
  * external busy-blocks (post-filtering per §7), and blackout dates.
  *
@@ -45,7 +46,9 @@ export function TimelinePage(): JSX.Element {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([listInstances({ status: 'scheduled' }), listProjections(), listExternalEvents(), getSettings()])
+    // Unfiltered: the Timeline shows `scheduled` instances and waiting (`blocked`) fixed
+    // ones, and needs the others' names to label what those are waiting on.
+    Promise.all([listInstances(), listProjections(), listExternalEvents(), getSettings()])
       .then(([loadedInstances, loadedProjections, loadedExternalEvents, settings]) => {
         if (cancelled) return;
         setInstances(loadedInstances);

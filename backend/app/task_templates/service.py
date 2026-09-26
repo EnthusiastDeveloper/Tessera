@@ -27,9 +27,7 @@ from app.db.schemas import (
     UserSettings,
 )
 from app.jobs.interface import (
-    DEPENDENCY_AT_RISK_THRESHOLD,
     JobScheduler,
-    dependency_at_risk_job_key,
     occurrence_boundary_job_key,
 )
 from app.scheduling.adapter import build_active_hours_map, has_fixed_conflict
@@ -49,6 +47,7 @@ from app.scheduling.orchestration import (
     require_settings,
     resolve_cleared_sync_conflicts,
     return_to_pending,
+    schedule_dependency_at_risk_job,
     schedule_next_occurrence_boundary,
     schedule_reminder_and_overdue_jobs,
 )
@@ -185,8 +184,7 @@ def create_template(db: Session, jobs: JobScheduler, draft: TaskTemplateDraft) -
             now=now,
         )
 
-    if blocked and instance.deadline is not None:
-        jobs.schedule_at(job_key=dependency_at_risk_job_key(instance.id), run_at=instance.deadline - DEPENDENCY_AT_RISK_THRESHOLD)
+    schedule_dependency_at_risk_job(jobs, instance)
 
     if template.recurrence.pattern != "one_time" and template.recurrence.anchor == "calendar":
         schedule_next_occurrence_boundary(db, jobs, template=template, latest_instance=instance, settings=settings, now=now)
@@ -208,7 +206,9 @@ def _create_fixed_instance(
         raise ValueError("a fixed template's generated instance must have a scheduled_time")
     scheduled_time = generated.scheduled_time
     end = scheduled_time + timedelta(minutes=generated.estimated_duration_minutes)
-    if not blocked and has_fixed_conflict(db, start=scheduled_time, end=end):
+    # A blocked fixed instance holds its slot while it waits (§6.5, Rev 10), so it is
+    # validated - and wired - exactly like an unblocked one.
+    if has_fixed_conflict(db, start=scheduled_time, end=end):
         raise TemplateValidationError(
             "creation_conflict", "This fixed time collides with an existing fixed task or external event."
         )
@@ -221,9 +221,8 @@ def _create_fixed_instance(
         dependencies=dependencies,
         now=now,
     )
-    if not blocked:
-        schedule_reminder_and_overdue_jobs(jobs, instance, template.reminder_offsets_minutes)
-        displace_flexible_under(db, jobs, instance, now=now)
+    schedule_reminder_and_overdue_jobs(jobs, instance, template.reminder_offsets_minutes)
+    displace_flexible_under(db, jobs, instance, now=now)
     return instance
 
 
@@ -440,18 +439,20 @@ def _propagate_to_instance(
     updated = repo.update(instance.model_copy(update=instance_updates)) if instance_updates else instance
 
     reminders_changed = previous.reminder_offsets_minutes != template.reminder_offsets_minutes
-    if updated.status == "scheduled" and (retimed_at is not None or reminders_changed):
+    # A blocked fixed instance holds its time and carries its jobs like a scheduled one (§6.5).
+    on_timeline = updated.status == "scheduled" or (updated.type == "fixed" and updated.status == "blocked")
+    if on_timeline and (retimed_at is not None or reminders_changed):
         schedule_reminder_and_overdue_jobs(
             jobs, updated, template.reminder_offsets_minutes, dropped_offsets=previous.reminder_offsets_minutes
         )
-    if retimed_at is not None and updated.status == "scheduled":
+    if retimed_at is not None and on_timeline:
         # §3.9: moving clear of an external event resolves its sync_conflict right away,
         # the same as a manual reschedule does.
         resolve_cleared_sync_conflicts(db, now=now)
     if retimed_at is not None or "estimated_duration_minutes" in patch:
         displace_flexible_under(db, jobs, updated, now=now)
-    if new_deadline is not None and updated.status == "blocked":
-        jobs.schedule_at(job_key=dependency_at_risk_job_key(updated.id), run_at=new_deadline - DEPENDENCY_AT_RISK_THRESHOLD)
+    if new_deadline is not None or retimed_at is not None:
+        schedule_dependency_at_risk_job(jobs, updated)
 
     if template.type != "flexible" or updated.status not in ("pending", "scheduled"):
         return updated
