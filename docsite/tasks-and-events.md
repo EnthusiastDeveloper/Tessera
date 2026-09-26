@@ -12,7 +12,7 @@ The template holds recurrence rules and defaults (name, priority, duration, dead
 |---|---|---|
 | You specify | An exact time (`fixed_time_of_day`) | A deadline offset |
 | Tessera specifies | Nothing - it's exactly where you put it | The scheduled time, via the placement algorithm |
-| Conflict with something else | **Hard-blocked at creation** - save is rejected (`creation_conflict`), nothing is created | N/A - the algorithm finds a free slot or reports `unschedulable` |
+| Conflict with something else | **Hard-blocked at creation** if it collides with another fixed task, a busy external event or a flexible task you've already started - save is rejected (`creation_conflict`), nothing is created. A flexible task that's only *scheduled* there isn't a conflict: it moves out of the way | Moved automatically when its slot is taken - to another free slot before its deadline, or reported `unschedulable` |
 | Bound by active hours / budget | No - never constrained by your scheduling window | Yes - the whole point of the setting |
 | Still counts against the daily budget | Yes - a fixed task's duration counts toward the day's cap even though it isn't *placed* by the algorithm | Yes |
 
@@ -116,4 +116,4 @@ Events synced from Google/Outlook aren't "tasks" - they're opaque busy-blocks Te
 - Events marked **"Free"/transparent** by the provider don't block anything.
 - **All-day events** are shown but don't block flexible placement (display-only for now).
 
-If a synced event collides with an already-scheduled fixed task, Tessera raises a `sync_conflict` notification rather than silently moving or deleting anything - you resolve it manually.
+If a synced event collides with an already-scheduled fixed task, Tessera raises a `sync_conflict` notification rather than silently moving or deleting anything - you resolve it manually. A flexible task in the way is simply moved to another free slot before its deadline, or reported `unschedulable` if there's none.
