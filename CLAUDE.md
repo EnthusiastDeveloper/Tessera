@@ -45,7 +45,7 @@ This is the high-risk piece. It's a greedy two-pass algorithm:
 - All dates/times computed in the user's IANA timezone, never UTC offsets (design-doc 14.1)
 
 ### Task Statuses (design-doc Section 4)
-`pending` → `scheduled` → `in_progress` → `completed` (terminal). Also: `blocked` (has incomplete dependencies), `missed` (flexible task's deadline elapsed before scheduling, design-doc 6.7), and `dismissed` (terminal - "skip this occurrence", design-doc 3.8). **Neither `missed` nor `dismissed` satisfies a dependency** - a downstream task stays `blocked`.
+`pending` → `scheduled` → `in_progress` → `completed` (terminal). Also: `blocked` (has incomplete dependencies), `missed` (flexible task's deadline elapsed before scheduling, design-doc 6.7), and `dismissed` (terminal - "skip this occurrence", design-doc 3.8). **Neither `missed` nor `dismissed` satisfies a dependency** - a downstream task stays `blocked`. A `blocked` **fixed** task keeps its time and holds its slot, goes overdue normally if the time passes, and becomes `scheduled` (never `pending`) when unblocked (design-doc 6.5, 6.6, 6.9).
 
 ### Notifications (design-doc Sections 3.4, 5)
 - `reminder`, `creation_conflict`, `sync_conflict`, `unschedulable`, `dependency_at_risk`, `overdue`, `budget_exceeded`, `deadline_missed` - all distinct from task status
