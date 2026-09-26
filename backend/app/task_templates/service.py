@@ -208,7 +208,9 @@ def _create_fixed_instance(
         raise ValueError("a fixed template's generated instance must have a scheduled_time")
     scheduled_time = generated.scheduled_time
     end = scheduled_time + timedelta(minutes=generated.estimated_duration_minutes)
-    if not blocked and has_fixed_conflict(db, start=scheduled_time, end=end):
+    # A blocked fixed instance holds its slot while it waits (§6.5, Rev 10), so it is
+    # validated - and wired - exactly like an unblocked one.
+    if has_fixed_conflict(db, start=scheduled_time, end=end):
         raise TemplateValidationError(
             "creation_conflict", "This fixed time collides with an existing fixed task or external event."
         )
@@ -221,9 +223,8 @@ def _create_fixed_instance(
         dependencies=dependencies,
         now=now,
     )
-    if not blocked:
-        schedule_reminder_and_overdue_jobs(jobs, instance, template.reminder_offsets_minutes)
-        displace_flexible_under(db, jobs, instance, now=now)
+    schedule_reminder_and_overdue_jobs(jobs, instance, template.reminder_offsets_minutes)
+    displace_flexible_under(db, jobs, instance, now=now)
     return instance
 
 
@@ -440,11 +441,13 @@ def _propagate_to_instance(
     updated = repo.update(instance.model_copy(update=instance_updates)) if instance_updates else instance
 
     reminders_changed = previous.reminder_offsets_minutes != template.reminder_offsets_minutes
-    if updated.status == "scheduled" and (retimed_at is not None or reminders_changed):
+    # A blocked fixed instance holds its time and carries its jobs like a scheduled one (§6.5).
+    on_timeline = updated.status == "scheduled" or (updated.type == "fixed" and updated.status == "blocked")
+    if on_timeline and (retimed_at is not None or reminders_changed):
         schedule_reminder_and_overdue_jobs(
             jobs, updated, template.reminder_offsets_minutes, dropped_offsets=previous.reminder_offsets_minutes
         )
-    if retimed_at is not None and updated.status == "scheduled":
+    if retimed_at is not None and on_timeline:
         # §3.9: moving clear of an external event resolves its sync_conflict right away,
         # the same as a manual reschedule does.
         resolve_cleared_sync_conflicts(db, now=now)

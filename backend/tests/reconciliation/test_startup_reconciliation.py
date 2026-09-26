@@ -106,6 +106,28 @@ class TestRecreatesMissingJobsForLiveInstances:
 
         assert dependency_at_risk_job_key(instance.id) in jobs.scheduled_keys()
 
+    def test_a_blocked_fixed_instance_keeps_its_overdue_and_reminder_jobs(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        # Design doc §6.5 (Rev 10): it holds its time while waiting on a prerequisite.
+        flexible = _persist_template(db_session)
+        blocking = _persist_instance(db_session, template=flexible, status="pending", deadline=utcnow() + timedelta(days=30))
+        fixed = _persist_template(db_session, type="fixed", fixed_time_of_day="09:00")
+        instance = _persist_instance(
+            db_session,
+            template=fixed,
+            status="blocked",
+            dependencies=(blocking.id,),
+            scheduled_time=utcnow() + timedelta(days=1),
+        )
+        db_session.commit()
+
+        reconcile_on_startup(db_session, jobs)
+
+        assert overdue_job_key(instance.id) in jobs.scheduled_keys()
+        assert reminder_job_key(instance.id, 15) in jobs.scheduled_keys()
+        assert overdue_job_key(instance.id) not in jobs.cancelled
+
 
 class TestCancelsOrphansForNonLiveInstances:
     def test_terminal_instances_have_all_their_jobs_cancelled(
@@ -188,6 +210,28 @@ class TestMissedUnblocks:
         refreshed = TaskInstanceRepository(db_session).get(dependent.id)
         assert refreshed is not None
         assert refreshed.status != "blocked"
+
+    def test_a_fixed_instance_unblocked_on_startup_becomes_scheduled(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        # Design doc §4/§6.9: never `pending`, which fixed instances cannot leave.
+        flexible = _persist_template(db_session)
+        dependency = _persist_instance(db_session, template=flexible, status="completed", completed_at=utcnow())
+        fixed = _persist_template(db_session, type="fixed", fixed_time_of_day="09:00")
+        dependent = _persist_instance(
+            db_session,
+            template=fixed,
+            status="blocked",
+            dependencies=(dependency.id,),
+            scheduled_time=utcnow() + timedelta(days=1),
+        )
+        db_session.commit()
+
+        reconcile_on_startup(db_session, jobs)
+
+        refreshed = TaskInstanceRepository(db_session).get(dependent.id)
+        assert refreshed is not None
+        assert refreshed.status == "scheduled"
 
     def test_a_blocked_instance_with_an_incomplete_dependency_stays_blocked(
         self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler

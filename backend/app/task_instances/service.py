@@ -17,8 +17,8 @@ from app.db.repositories import (
     TaskInstanceRepository,
     TaskTemplateRepository,
 )
-from app.db.schemas import StatusHistoryEntry, TaskInstance, TaskTemplate
-from app.jobs.interface import JobScheduler
+from app.db.schemas import StatusHistoryEntry, TaskInstance, TaskInstanceStatus, TaskTemplate
+from app.jobs.interface import JobScheduler, overdue_job_key
 from app.scheduling.adapter import build_active_hours_map, has_fixed_conflict
 from app.scheduling.orchestration import (
     DEADLINE_MISSED,
@@ -380,17 +380,28 @@ def promote_if_unblocked(db: Session, jobs: JobScheduler, instance: TaskInstance
     repo = TaskInstanceRepository(db)
     template = _require_template(db, instance.template_id)
     settings = require_settings(db)
+    # §4/§6.9: a fixed instance already has its time - it goes straight to `scheduled`.
+    # It held its slot while blocked (§6.5), so there is nothing to place or re-check.
+    new_status: TaskInstanceStatus = "scheduled" if instance.type == "fixed" else "pending"
     promoted = repo.update(
         instance.model_copy(
             update={
-                "status": "pending",
-                "status_history": (*instance.status_history, StatusHistoryEntry(status="pending", at=now)),
+                "status": new_status,
+                "status_history": (*instance.status_history, StatusHistoryEntry(status=new_status, at=now)),
             }
         )
     )
-    if promoted.type == "flexible":
-        return place_or_defer(db, jobs, instance=promoted, template=template, settings=settings, now=now)
-    return promoted
+    if promoted.type == "fixed":
+        if promoted.scheduled_time is not None and promoted.scheduled_time > now:
+            # Idempotent: re-points the jobs it already carried while blocked, and gives
+            # an instance blocked before this rule existed the jobs it never got.
+            schedule_reminder_and_overdue_jobs(jobs, promoted, template.reminder_offsets_minutes)
+        else:
+            # Its time has passed: overdue now (§6.9), without replaying stale reminders.
+            # The handler skips it if the notice was already raised while blocked.
+            jobs.schedule_at(job_key=overdue_job_key(promoted.id), run_at=now)
+        return promoted
+    return place_or_defer(db, jobs, instance=promoted, template=template, settings=settings, now=now)
 
 
 def _require_instance(db: Session, instance_id: str) -> TaskInstance:
