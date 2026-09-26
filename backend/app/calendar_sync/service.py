@@ -23,8 +23,6 @@ from app.db.repositories import (
     ExternalCalendarConnectionRepository,
     ExternalEventRepository,
     OAuthTokenRepository,
-    TaskTemplateRepository,
-    UserSettingsRepository,
 )
 from app.db.schemas import (
     CalendarProvider,
@@ -37,10 +35,9 @@ from app.scheduling.adapter import find_overlapping_scheduled_instances
 from app.scheduling.orchestration import (
     SYNC_CONFLICT,
     create_notification,
+    displace_flexible_from,
     has_active_notification,
-    place_or_defer,
     resolve_cleared_sync_conflicts,
-    return_to_pending,
 )
 
 logger = logging.getLogger(__name__)
@@ -289,22 +286,15 @@ def sync_connection(
 
 def _handle_collision(db: Session, jobs: JobScheduler, *, event: ExternalEvent, app_settings: Settings, now: datetime) -> None:
     for instance in find_overlapping_scheduled_instances(db, start=event.start, end=event.end):
-        if instance.type == "fixed":
-            if not has_active_notification(db, instance_id=instance.id, notification_type=SYNC_CONFLICT):
-                create_notification(
-                    db,
-                    type_=SYNC_CONFLICT,
-                    instance_id=instance.id,
-                    message=f'"{instance.name}" now collides with the external event "{event.title}".',
-                    now=now,
-                )
-        else:
-            template = TaskTemplateRepository(db).get(instance.template_id)
-            settings = UserSettingsRepository(db).get()
-            if template is None or settings is None:
-                continue
-            reverted = return_to_pending(db, jobs, instance, template=template, now=now)
-            place_or_defer(db, jobs, instance=reverted, template=template, settings=settings, now=now)
+        if instance.type == "fixed" and not has_active_notification(db, instance_id=instance.id, notification_type=SYNC_CONFLICT):
+            create_notification(
+                db,
+                type_=SYNC_CONFLICT,
+                instance_id=instance.id,
+                message=f'"{instance.name}" now collides with the external event "{event.title}".',
+                now=now,
+            )
+    displace_flexible_from(db, jobs, start=event.start, end=event.end, now=now)
 
 
 def _store_refreshed_token(

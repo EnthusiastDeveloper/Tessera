@@ -8,7 +8,7 @@ The core value proposition: you tell Tessera a task's duration, priority, and de
 
 ## Two task types, one editing model
 
-**Fixed** tasks happen at a time *you* choose and are never moved by the algorithm - creating one that collides with something else is rejected outright, not silently double-booked. **Flexible** tasks get a deadline instead of a time, and Tessera finds the time. Both come from **recurring templates** if you want them to repeat, with independent recurrence patterns and a choice of what "the next one" anchors against. See [Tasks & Events](tasks-and-events.md).
+**Fixed** tasks happen at a time *you* choose and are never moved by the algorithm - creating one that collides with another commitment is rejected outright, not silently double-booked. A flexible task that happens to sit in that slot moves out of the way instead. **Flexible** tasks get a deadline instead of a time, and Tessera finds the time. Both come from **recurring templates** if you want them to repeat, with independent recurrence patterns and a choice of what "the next one" anchors against. See [Tasks & Events](tasks-and-events.md).
 
 ## Task dependencies
 

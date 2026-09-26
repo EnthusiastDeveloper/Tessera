@@ -43,6 +43,7 @@ from app.scheduling.generation import (
 from app.scheduling.orchestration import (
     TERMINAL_STATUSES,
     archive_template_and_cancel_jobs,
+    displace_flexible_under,
     fixed_slot_change_conflicts,
     place_or_defer,
     require_settings,
@@ -222,6 +223,7 @@ def _create_fixed_instance(
     )
     if not blocked:
         schedule_reminder_and_overdue_jobs(jobs, instance, template.reminder_offsets_minutes)
+        displace_flexible_under(db, jobs, instance, now=now)
     return instance
 
 
@@ -446,6 +448,8 @@ def _propagate_to_instance(
         # §3.9: moving clear of an external event resolves its sync_conflict right away,
         # the same as a manual reschedule does.
         resolve_cleared_sync_conflicts(db, now=now)
+    if retimed_at is not None or "estimated_duration_minutes" in patch:
+        displace_flexible_under(db, jobs, updated, now=now)
     if new_deadline is not None and updated.status == "blocked":
         jobs.schedule_at(job_key=dependency_at_risk_job_key(updated.id), run_at=new_deadline - DEPENDENCY_AT_RISK_THRESHOLD)
 

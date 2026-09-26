@@ -96,9 +96,13 @@ def gather_external_obstacles(db: Session) -> tuple[Obstacle, ...]:
     return tuple(obstacles)
 
 
-def gather_obstacles(db: Session, *, exclude_instance_id: str | None = None) -> tuple[Obstacle, ...]:
+def gather_obstacles(
+    db: Session, *, exclude_instance_id: str | None = None, include_scheduled_flexible: bool = True
+) -> tuple[Obstacle, ...]:
     """Every `scheduled`/`in_progress` instance, both types, plus every filtered external
-    busy-block (§7) - the full §6.2 obstacle set.
+    busy-block (§7) - the full §6.2 obstacle set. `include_scheduled_flexible=False`
+    drops `scheduled` flexible instances, for §6.5's fixed-task check: those give way
+    to a fixed task rather than block it (see `has_fixed_conflict`).
 
     Takes the database write lock first, so the set stays current until the caller's
     placement or conflict decision commits - see `acquire_write_lock` (issue #24).
@@ -108,6 +112,8 @@ def gather_obstacles(db: Session, *, exclude_instance_id: str | None = None) -> 
     obstacles: list[Obstacle] = []
     for instance in repo.list_by_statuses(OBSTACLE_STATUSES):
         if instance.id == exclude_instance_id or instance.scheduled_time is None:
+            continue
+        if not include_scheduled_flexible and instance.type == "flexible" and instance.status == "scheduled":
             continue
         end = instance.scheduled_time + timedelta(minutes=instance.estimated_duration_minutes)
         obstacles.append(Obstacle(start=instance.scheduled_time, end=end))
@@ -215,8 +221,13 @@ def attempt_placement(
 
 
 def has_fixed_conflict(db: Session, *, start: datetime, end: datetime, exclude_instance_id: str | None = None) -> bool:
-    """§6.5: hard-block predicate for creating/retiming a `fixed` instance."""
-    return engine_check_fixed_conflict(start, end, gather_obstacles(db, exclude_instance_id=exclude_instance_id))
+    """§6.5: hard-block predicate for creating/retiming a `fixed` instance. Only
+    commitments block it - other fixed instances, external busy-blocks and an
+    `in_progress` flexible one. A `scheduled` flexible instance in the way is not a
+    conflict: the caller moves it with `displace_flexible_from` (Rev 10).
+    """
+    obstacles = gather_obstacles(db, exclude_instance_id=exclude_instance_id, include_scheduled_flexible=False)
+    return engine_check_fixed_conflict(start, end, obstacles)
 
 
 __all__ = [
