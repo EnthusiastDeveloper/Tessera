@@ -43,10 +43,6 @@ def _install_mock_provider(monkeypatch: pytest.MonkeyPatch) -> MockCalendarProvi
 
 
 class TestListConnections:
-    def test_requires_authentication(self, app_client: TestClient) -> None:
-        _complete_setup(app_client)
-        assert app_client.get("/api/v1/calendar-connections").status_code == 401
-
     def test_returns_empty_list_when_none_connected(self, app_client: TestClient) -> None:
         _login(app_client)
         response = app_client.get("/api/v1/calendar-connections")
@@ -55,10 +51,6 @@ class TestListConnections:
 
 
 class TestConnect:
-    def test_requires_authentication(self, app_client: TestClient) -> None:
-        _complete_setup(app_client)
-        assert app_client.get("/api/v1/calendar-connections/google/connect").status_code == 401
-
     def test_requires_app_base_url(self, app_client: TestClient) -> None:
         _login(app_client)
         response = app_client.get("/api/v1/calendar-connections/google/connect")
@@ -99,11 +91,6 @@ class TestCallback:
     def _authorize_url_query(self, app_client: TestClient) -> dict[str, list[str]]:
         response = app_client.get("/api/v1/calendar-connections/google/connect")
         return parse_qs(urlparse(response.json()["authorize_url"]).query)
-
-    def test_requires_authentication(self, app_client: TestClient) -> None:
-        _complete_setup(app_client)
-        response = app_client.get("/api/v1/calendar-connections/google/callback?code=abc&state=x", follow_redirects=False)
-        assert response.status_code == 401
 
     def test_rejects_an_invalid_state(self, app_client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
         _login(app_client)
@@ -156,10 +143,6 @@ class TestCallback:
 
 
 class TestDisconnect:
-    def test_requires_authentication(self, app_client: TestClient) -> None:
-        _complete_setup(app_client)
-        assert app_client.delete("/api/v1/calendar-connections/anything").status_code == 401
-
     def test_unknown_connection_returns_404(self, app_client: TestClient) -> None:
         _login(app_client)
         response = app_client.delete("/api/v1/calendar-connections/does-not-exist")

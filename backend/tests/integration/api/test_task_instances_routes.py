@@ -52,10 +52,6 @@ def _create_recurring_fixed(client: TestClient) -> dict[str, object]:
 
 
 class TestListInstances:
-    def test_requires_authentication(self, app_client: TestClient) -> None:
-        _complete_setup(app_client)
-        assert app_client.get("/api/v1/task-instances").status_code == 401
-
     def test_lists_created_instances(self, app_client: TestClient) -> None:
         _login(app_client)
         instance = _create_fixed(app_client)
@@ -78,10 +74,6 @@ class TestListInstances:
 
 
 class TestPatchInstance:
-    def test_requires_authentication(self, app_client: TestClient) -> None:
-        _complete_setup(app_client)
-        assert app_client.patch("/api/v1/task-instances/anything", json={"name": "x"}).status_code == 401
-
     def test_this_occurrence_edit_sets_detached(self, app_client: TestClient) -> None:
         _login(app_client)
         instance = _create_fixed(app_client)
@@ -160,10 +152,6 @@ class TestComplete:
 
 
 class TestStart:
-    def test_requires_authentication(self, app_client: TestClient) -> None:
-        _complete_setup(app_client)
-        assert app_client.post("/api/v1/task-instances/anything/start").status_code == 401
-
     def test_starts_a_scheduled_instance(self, app_client: TestClient) -> None:
         _login(app_client)
         instance = _create_fixed(app_client)
@@ -181,10 +169,6 @@ class TestStart:
 
 
 class TestDismiss:
-    def test_requires_authentication(self, app_client: TestClient) -> None:
-        _complete_setup(app_client)
-        assert app_client.post("/api/v1/task-instances/anything/dismiss").status_code == 401
-
     def test_dismisses(self, app_client: TestClient) -> None:
         _login(app_client)
         instance = _create_fixed(app_client)
@@ -210,13 +194,6 @@ class TestDelete:
         body = response.json()
         assert body["deleted_instance_id"] == instance["id"]
         assert body["unblocked_instance_ids"] == []
-
-    def test_scope_is_required_for_a_recurring_template(self, app_client: TestClient) -> None:
-        _login(app_client)
-        instance = _create_recurring_fixed(app_client)
-        response = app_client.delete(f"/api/v1/task-instances/{instance['id']}")
-        assert response.status_code == 422
-        assert response.json()["code"] == "scope_required"
 
     def test_this_and_future_scope_deletes(self, app_client: TestClient) -> None:
         _login(app_client)

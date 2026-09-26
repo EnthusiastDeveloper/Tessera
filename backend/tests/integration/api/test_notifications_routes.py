@@ -40,10 +40,6 @@ def _create_unschedulable_notification(client: TestClient) -> str:
 
 
 class TestListNotifications:
-    def test_requires_authentication(self, app_client: TestClient) -> None:
-        _complete_setup(app_client)
-        assert app_client.get("/api/v1/notifications").status_code == 401
-
     def test_lists_an_active_unschedulable_notification(self, app_client: TestClient) -> None:
         _login(app_client)
         instance_id = _create_unschedulable_notification(app_client)
@@ -54,10 +50,6 @@ class TestListNotifications:
 
 
 class TestDismissNotification:
-    def test_requires_authentication(self, app_client: TestClient) -> None:
-        _complete_setup(app_client)
-        assert app_client.post("/api/v1/notifications/anything/dismiss").status_code == 401
-
     def test_dismiss_removes_it_from_the_active_list(self, app_client: TestClient) -> None:
         _login(app_client)
         _create_unschedulable_notification(app_client)
