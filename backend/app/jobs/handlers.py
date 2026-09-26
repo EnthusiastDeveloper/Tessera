@@ -30,7 +30,7 @@ from app.db.repositories import (
 )
 from app.db.schemas import TaskInstance
 from app.jobs.interface import JobScheduler
-from app.scheduling.adapter import attempt_placement
+from app.scheduling.adapter import attempt_placement, holds_slot
 from app.scheduling.orchestration import (
     all_dependencies_completed,
     create_notification,
@@ -52,7 +52,7 @@ def run_reminder(db: Session, *, instance_id: str, offset_minutes: int) -> None:
     the instance is no longer live and scheduled by the time this fires.
     """
     instance = TaskInstanceRepository(db).get(instance_id)
-    if instance is None or instance.status not in ("scheduled", "in_progress"):
+    if instance is None or not holds_slot(instance):
         return
     create_notification(
         db, type_=REMINDER, instance_id=instance.id, message=f'Reminder: "{instance.name}" is coming up.', now=utcnow()
@@ -66,10 +66,16 @@ def run_overdue_check(db: Session, jobs: JobScheduler, *, instance_id: str) -> N
     first), plus the same `overdue` Notification so the move isn't silent.
     """
     instance = TaskInstanceRepository(db).get(instance_id)
-    if instance is None or instance.status not in ("scheduled", "in_progress"):
+    if instance is None or not holds_slot(instance):
         return
 
     now = utcnow()
+    if instance.type == "fixed":
+        # A fixed instance can come round twice - once while blocked, again when it is
+        # unblocked after its time (§6.9) - but it is only overdue once.
+        if not has_active_notification(db, instance_id=instance.id, notification_type=OVERDUE):
+            create_notification(db, type_=OVERDUE, instance_id=instance.id, message=_overdue_message(db, instance), now=now)
+        return
     if instance.type == "flexible":
         template = TaskTemplateRepository(db).get(instance.template_id)
         settings = UserSettingsRepository(db).get()
@@ -79,6 +85,20 @@ def run_overdue_check(db: Session, jobs: JobScheduler, *, instance_id: str) -> N
         place_or_defer(db, jobs, instance=reverted, template=template, settings=settings, now=now)
 
     create_notification(db, type_=OVERDUE, instance_id=instance.id, message=f'"{instance.name}" is overdue.', now=now)
+
+
+def _overdue_message(db: Session, instance: TaskInstance) -> str:
+    """§6.6 (Rev 10): a fixed instance still waiting on a prerequisite says which one."""
+    if instance.status != "blocked":
+        return f'"{instance.name}" is overdue.'
+    repo = TaskInstanceRepository(db)
+    waiting_on = [
+        dependency.name
+        for dependency_id in instance.dependencies
+        if (dependency := repo.get(dependency_id)) is not None and dependency.status != "completed"
+    ]
+    names = ", ".join(f'"{name}"' for name in waiting_on)
+    return f'"{instance.name}" is overdue - it is still waiting on {names}.'
 
 
 def run_deadline_elapsed_check(db: Session, jobs: JobScheduler, *, instance_id: str) -> None:

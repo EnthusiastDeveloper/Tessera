@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.db.base import generate_id
 from app.db.repositories import NotificationRepository, TaskInstanceRepository, TaskTemplateRepository
 from app.db.schemas import Notification, Recurrence, UserSettings
+from app.jobs.handlers import run_overdue_check
 from app.scheduling.generation import generate_next_instance
 from app.scheduling.orchestration import generate_and_place_next_instance
 from app.task_instances import service as task_instances_service
@@ -74,17 +75,22 @@ class TestCreateTemplate:
         assert any(key.startswith("overdue:") for key in jobs.scheduled_keys())
         assert sum(1 for key in jobs.scheduled_keys() if key.startswith("reminder:")) == 3
 
-    def test_a_blocked_fixed_instance_schedules_no_jobs_yet(
+    def test_a_blocked_fixed_instance_is_wired_like_a_scheduled_one(
         self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
     ) -> None:
+        # §6.5 (Rev 10): it keeps its time while it waits, so it gets its reminder and
+        # overdue jobs from creation.
         prep = create_template(db_session, jobs, _flexible_draft(name="Buy supplies"))
         db_session.commit()
         jobs.scheduled.clear()
 
-        create_template(db_session, jobs, _fixed_draft(name="Assemble", dependencies=(prep.instance.id,)))
+        assemble = create_template(
+            db_session, jobs, _fixed_draft(name="Assemble", dependencies=(prep.instance.id,), reminder_offsets_minutes=(15,))
+        )
         db_session.commit()
 
-        assert jobs.scheduled == []
+        assert assemble.instance.status == "blocked"
+        assert set(jobs.scheduled_keys()) == {f"overdue:{assemble.instance.id}", f"reminder:{assemble.instance.id}:15"}
 
     def test_example_a_fixed_conflict_is_a_hard_block_creating_nothing(
         self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
@@ -693,3 +699,101 @@ class TestFixedTaskDisplacesFlexible:
         assert generated.scheduled_time == ny(2026, 3, 2, 9, 0)
         assert NotificationRepository(db_session).list_for_instance(generated.id) == ()
         assert self._reload(db_session, plants_id).scheduled_time == ny(2026, 3, 2, 10, 0)
+
+
+@pytest.mark.usefixtures("pinned_now")
+class TestFixedTaskWaitingOnADependency:
+    """Worked Example N2 (design doc §4, §6.5, §6.6, §6.9, Rev 10): a `blocked` fixed task
+    keeps its time and holds its slot, goes overdue like any fixed task, and becomes
+    `scheduled` - never `pending` - when its prerequisite completes. `_NOW` is Mon 08:00;
+    the 60-minute "Buy battery" lands at Mon 09:00.
+    """
+
+    def _buy_battery(self, db_session: Session, jobs: RecordingJobScheduler) -> str:
+        created = create_template(db_session, jobs, _flexible_draft(name="Buy battery"))
+        db_session.commit()
+        assert created.instance.scheduled_time == ny(2026, 3, 2, 9, 0)
+        return created.instance.id
+
+    def _replace_battery(self, db_session: Session, jobs: RecordingJobScheduler, *, at: str, depends_on: str) -> str:
+        created = create_template(
+            db_session, jobs, _fixed_draft(name="Replace battery", fixed_time_of_day=at, dependencies=(depends_on,))
+        )
+        db_session.commit()
+        assert created.instance.status == "blocked"
+        return created.instance.id
+
+    def test_it_holds_its_slot_against_another_fixed_task(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        battery_id = self._buy_battery(db_session, jobs)
+        self._replace_battery(db_session, jobs, at="12:00", depends_on=battery_id)
+
+        with pytest.raises(TemplateValidationError) as exc_info:
+            create_template(db_session, jobs, _fixed_draft(name="Call", fixed_time_of_day="12:30"))
+        assert exc_info.value.code == "creation_conflict"
+
+    def test_flexible_work_gives_way_to_it(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        battery_id = self._buy_battery(db_session, jobs)
+        plants = create_template(db_session, jobs, _flexible_draft(name="Water plants"))
+        db_session.commit()
+        assert plants.instance.scheduled_time == ny(2026, 3, 2, 10, 0)
+
+        self._replace_battery(db_session, jobs, at="10:00", depends_on=battery_id)
+
+        moved = TaskInstanceRepository(db_session).get(plants.instance.id)
+        assert moved is not None
+        assert moved.scheduled_time == ny(2026, 3, 2, 11, 0)
+
+    def test_its_time_passing_raises_overdue_naming_the_prerequisite(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        battery_id = self._buy_battery(db_session, jobs)
+        replace_id = self._replace_battery(db_session, jobs, at="12:00", depends_on=battery_id)
+
+        run_overdue_check(db_session, jobs, instance_id=replace_id)
+        db_session.commit()
+
+        still = TaskInstanceRepository(db_session).get(replace_id)
+        assert still is not None and still.status == "blocked"
+        (notice,) = NotificationRepository(db_session).list_for_instance(replace_id)
+        assert notice.type == "overdue"
+        assert '"Buy battery"' in notice.message
+
+    def test_completing_the_prerequisite_first_makes_it_scheduled_at_its_time(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        battery_id = self._buy_battery(db_session, jobs)
+        replace_id = self._replace_battery(db_session, jobs, at="12:00", depends_on=battery_id)
+        jobs.scheduled.clear()
+
+        complete(db_session, jobs, battery_id)
+        db_session.commit()
+
+        replaced = TaskInstanceRepository(db_session).get(replace_id)
+        assert replaced is not None
+        assert replaced.status == "scheduled"
+        assert replaced.scheduled_time == ny(2026, 3, 2, 12, 0)
+        assert (f"overdue:{replace_id}", ny(2026, 3, 2, 12, 0)) in jobs.scheduled
+
+    def test_completing_the_prerequisite_after_its_time_leaves_it_overdue_once(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        battery_id = self._buy_battery(db_session, jobs)
+        # 07:00 today is already past at _NOW (08:00).
+        replace_id = self._replace_battery(db_session, jobs, at="07:00", depends_on=battery_id)
+        run_overdue_check(db_session, jobs, instance_id=replace_id)
+        jobs.scheduled.clear()
+
+        complete(db_session, jobs, battery_id)
+        db_session.commit()
+
+        replaced = TaskInstanceRepository(db_session).get(replace_id)
+        assert replaced is not None and replaced.status == "scheduled"
+        # Overdue at once, and no stale reminders replayed.
+        assert jobs.scheduled == [(f"overdue:{replace_id}", _NOW)]
+        run_overdue_check(db_session, jobs, instance_id=replace_id)
+        db_session.commit()
+        assert len(NotificationRepository(db_session).list_for_instance(replace_id)) == 1
