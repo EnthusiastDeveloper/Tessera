@@ -7,24 +7,22 @@ Framework-agnostic like every other service-layer module - no FastAPI imports he
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import cast
 
 from sqlalchemy.orm import Session
 
 from app.calendar_sync import token_crypto
 from app.calendar_sync.oauth_state import generate_state, verify_state
-from app.calendar_sync.providers.base import CalendarProviderClient, ProviderError
+from app.calendar_sync.providers.base import CalendarProviderClient, ProviderError, ProviderTokenSet
 from app.calendar_sync.providers.registry import ProviderNotConfiguredError, get_provider_client
 from app.core.config import Settings
 from app.db.base import generate_id
 from app.db.repositories import (
     ExternalCalendarConnectionRepository,
     ExternalEventRepository,
-    NotificationRepository,
     OAuthTokenRepository,
-    TaskInstanceRepository,
     TaskTemplateRepository,
     UserSettingsRepository,
 )
@@ -32,14 +30,20 @@ from app.db.schemas import (
     CalendarProvider,
     ExternalCalendarConnection,
     ExternalEvent,
-    Notification,
-    NotificationType,
     OAuthToken,
-    StatusHistoryEntry,
 )
 from app.jobs.interface import JobScheduler, calendar_poll_job_key
 from app.scheduling.adapter import find_overlapping_scheduled_instances
-from app.scheduling.orchestration import SYNC_CONFLICT, place_or_defer, resolve_cleared_sync_conflicts
+from app.scheduling.orchestration import (
+    SYNC_CONFLICT,
+    create_notification,
+    has_active_notification,
+    place_or_defer,
+    resolve_cleared_sync_conflicts,
+    return_to_pending,
+)
+
+logger = logging.getLogger(__name__)
 
 #: §7: "a rolling 90-day forward horizon" - the poll's fetch window.
 SYNC_HORIZON_DAYS = 90
@@ -206,6 +210,10 @@ def sync_connection(
     client = _require_provider_client(connection.provider, app_settings=app_settings)
     access_token = token_crypto.decrypt(token.encrypted_access_token, secret_key=app_settings.secret_key)
 
+    # Both provider calls happen before any database write. A write opens SQLite's
+    # write transaction and holds its lock until commit, so writing the refreshed token
+    # first would block every other request for the length of the event fetch.
+    refreshed: ProviderTokenSet | None = None
     if token.access_token_expires_at <= now:
         if token.encrypted_refresh_token is None:
             raise CalendarSyncError(
@@ -218,27 +226,23 @@ def sync_connection(
         except ProviderError as exc:
             raise CalendarSyncError("token_refresh_failed", str(exc)) from exc
         access_token = refreshed.access_token
-        token = token_repo.update(
-            token.model_copy(
-                update={
-                    "encrypted_access_token": token_crypto.encrypt(refreshed.access_token, secret_key=app_settings.secret_key),
-                    "encrypted_refresh_token": (
-                        token_crypto.encrypt(refreshed.refresh_token, secret_key=app_settings.secret_key)
-                        if refreshed.refresh_token is not None
-                        else token.encrypted_refresh_token
-                    ),
-                    "access_token_expires_at": refreshed.expires_at,
-                    "updated_at": now,
-                }
-            )
-        )
 
     horizon_start = now
     horizon_end = now + timedelta(days=SYNC_HORIZON_DAYS)
     try:
         provider_events = client.fetch_events(access_token=access_token, horizon_start=horizon_start, horizon_end=horizon_end)
     except ProviderError as exc:
-        raise CalendarSyncError("calendar_fetch_failed", str(exc)) from exc
+        if refreshed is None:
+            raise CalendarSyncError("calendar_fetch_failed", str(exc)) from exc
+        # Keep the refreshed token even though this poll failed: raising would roll it
+        # back, and a provider that rotates refresh tokens (Microsoft) may already have
+        # invalidated the old one. The connection stays unsynced until the next poll.
+        _store_refreshed_token(token_repo, token, refreshed, app_settings=app_settings, now=now)
+        logger.warning("Calendar fetch failed for connection %s; kept its refreshed token: %s", connection.id, exc)
+        return connection
+
+    if refreshed is not None:
+        _store_refreshed_token(token_repo, token, refreshed, app_settings=app_settings, now=now)
 
     event_repo = ExternalEventRepository(db)
     changed_events: list[ExternalEvent] = []
@@ -286,37 +290,39 @@ def sync_connection(
 def _handle_collision(db: Session, jobs: JobScheduler, *, event: ExternalEvent, app_settings: Settings, now: datetime) -> None:
     for instance in find_overlapping_scheduled_instances(db, start=event.start, end=event.end):
         if instance.type == "fixed":
-            if not _has_active_sync_conflict(db, instance.id):
-                NotificationRepository(db).create(
-                    Notification(
-                        id=generate_id(),
-                        type=cast(NotificationType, SYNC_CONFLICT),
-                        related_instance_id=instance.id,
-                        message=f'"{instance.name}" now collides with the external event "{event.title}".',
-                        created_at=now,
-                    )
+            if not has_active_notification(db, instance_id=instance.id, notification_type=SYNC_CONFLICT):
+                create_notification(
+                    db,
+                    type_=SYNC_CONFLICT,
+                    instance_id=instance.id,
+                    message=f'"{instance.name}" now collides with the external event "{event.title}".',
+                    now=now,
                 )
         else:
             template = TaskTemplateRepository(db).get(instance.template_id)
             settings = UserSettingsRepository(db).get()
             if template is None or settings is None:
                 continue
-            reverted = TaskInstanceRepository(db).update(
-                instance.model_copy(
-                    update={
-                        "status": "pending",
-                        "scheduled_time": None,
-                        "status_history": (*instance.status_history, StatusHistoryEntry(status="pending", at=now)),
-                    }
-                )
-            )
+            reverted = return_to_pending(db, jobs, instance, template=template, now=now)
             place_or_defer(db, jobs, instance=reverted, template=template, settings=settings, now=now)
 
 
-def _has_active_sync_conflict(db: Session, instance_id: str) -> bool:
-    return any(
-        n.type == SYNC_CONFLICT and n.resolved_at is None and n.dismissed_at is None
-        for n in NotificationRepository(db).list_for_instance(instance_id)
+def _store_refreshed_token(
+    token_repo: OAuthTokenRepository, token: OAuthToken, refreshed: ProviderTokenSet, *, app_settings: Settings, now: datetime
+) -> OAuthToken:
+    return token_repo.update(
+        token.model_copy(
+            update={
+                "encrypted_access_token": token_crypto.encrypt(refreshed.access_token, secret_key=app_settings.secret_key),
+                "encrypted_refresh_token": (
+                    token_crypto.encrypt(refreshed.refresh_token, secret_key=app_settings.secret_key)
+                    if refreshed.refresh_token is not None
+                    else token.encrypted_refresh_token
+                ),
+                "access_token_expires_at": refreshed.expires_at,
+                "updated_at": now,
+            }
+        )
     )
 
 

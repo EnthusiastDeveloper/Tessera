@@ -25,9 +25,27 @@ Templates support five patterns: `one_time`, `daily`, `weekly`, `monthly`, and `
 Every non-one-time template picks an **anchor**, which decides where the *next* occurrence lands:
 
 - **`calendar`** - the next occurrence is generated at the next date the recurrence rule produces, full stop, independent of whether the previous occurrence was ever completed. Use this for rigid commitments like a weekly meeting - if you missed last Monday's, next Monday's still shows up on schedule, and you clear the stale one with **skip this occurrence** (below).
-- **`completion`** - the next occurrence is generated at `completed_at + cadence`, i.e. relative to when you actually finished the previous one. Use this for upkeep work that should shift with reality ("replace the filter a month after I actually did it last," not a month after some date I never got to).
+- **`completion`** - the next occurrence is generated at `completed_at + cadence`, i.e. relative to when you actually finished the previous one. Use this for upkeep work that should shift with reality ("replace the filter a month after I actually did it last," not a month after some date I never got to). The new occurrence isn't scheduled before that date - finish the filter on 7 March and the next one is placed on or after 7 April, not the same afternoon. The very first occurrence of a new template is the exception: it's scheduled as soon as it fits.
 
 `anchor: completion` is **only valid on flexible templates** - saving it on a fixed template is rejected with `invalid_recurrence_anchor`. The reason is structural: completion-anchoring means "this occurrence can slide within a window," and that window is the deadline offset a flexible task has and a fixed task doesn't.
+
+### Each occurrence keeps its own date
+
+When an occurrence is generated, Tessera records the date the recurrence rule gave it. The next occurrence is counted from that date, not from wherever this one ended up. So none of these move the rest of the series:
+
+- rescheduling one occurrence of a fixed task to another day,
+- giving one occurrence of a flexible task a later (or earlier) deadline,
+- the scheduler placing a flexible occurrence late in its window, or moving it after a calendar clash or an overdue check.
+
+A weekly task rescheduled from Monday to Wednesday one week is still due on Monday the next. (`completion`-anchored series are the one exception, by design: they count from when you finished.)
+
+### Dates, times and time zones
+
+Occurrence dates and times of day are worked out in the time zone set in Settings:
+
+- A fixed task's time of day is local clock time. "18:00" means 18:00 where you are, on both sides of a daylight-saving change.
+- A flexible task's deadline offset is a length of time, not a clock time. A 3-day offset that spans a daylight-saving change ends an hour earlier or later on the clock than it started. This is intended.
+- Changing the time zone in Settings doesn't move occurrences that already have a time; they stay at the same moment. Occurrences generated after the change use the new time zone.
 
 ## Status lifecycle
 

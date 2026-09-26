@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.orm import Session
 
 from app.db.base import generate_id, utcnow
-from app.db.repositories import TaskInstanceRepository, TaskTemplateRepository, UserSettingsRepository
+from app.db.repositories import TaskInstanceRepository, TaskTemplateRepository
 from app.db.schemas import (
     ActiveHoursWindow,
     DayName,
@@ -27,11 +27,10 @@ from app.db.schemas import (
     UserSettings,
 )
 from app.jobs.interface import (
+    DEPENDENCY_AT_RISK_THRESHOLD,
     JobScheduler,
     dependency_at_risk_job_key,
     occurrence_boundary_job_key,
-    overdue_job_key,
-    reminder_job_key,
 )
 from app.scheduling.adapter import build_active_hours_map, has_fixed_conflict
 from app.scheduling.generation import (
@@ -42,19 +41,18 @@ from app.scheduling.generation import (
     project_virtual_occurrences,
 )
 from app.scheduling.orchestration import (
+    TERMINAL_STATUSES,
     archive_template_and_cancel_jobs,
+    fixed_slot_change_conflicts,
     place_or_defer,
+    require_settings,
     resolve_cleared_sync_conflicts,
+    return_to_pending,
     schedule_next_occurrence_boundary,
+    schedule_reminder_and_overdue_jobs,
 )
 from app.scheduling_engine.dependencies import cycle_check
 from app.scheduling_engine.feasibility import validate_feasible_duration
-
-#: §6.3's flat POC threshold. Duplicated from `app.jobs.handlers`' identical constant
-#: rather than imported - a trivial 1-line constant, same "small duplication across
-#: layers beats improper coupling" precedent as the priority-mapping constant in
-#: `app.db.repositories.task_template_repository` and `app.scheduling.generation`.
-_DEPENDENCY_AT_RISK_THRESHOLD = timedelta(days=3)
 
 
 class TemplateValidationError(Exception):
@@ -111,7 +109,7 @@ def list_virtual_occurrences(db: Session, *, now: datetime) -> list[VirtualOccur
     `app.scheduling.generation.project_virtual_occurrences` so it agrees with §9.1's real
     generator by construction rather than by a second, separately-written implementation.
     """
-    settings = _require_settings(db)
+    settings = require_settings(db)
     templates = TaskTemplateRepository(db).list(include_archived=False)
     instance_repo = TaskInstanceRepository(db)
     latest_by_template = {
@@ -133,7 +131,7 @@ def create_template(db: Session, jobs: JobScheduler, draft: TaskTemplateDraft) -
     if draft.recurrence.anchor == "completion" and draft.type != "flexible":
         raise TemplateValidationError("invalid_recurrence_anchor", 'anchor: "completion" is only valid on flexible templates.')
 
-    settings = _require_settings(db)
+    settings = require_settings(db)
 
     if draft.dependencies:
         _ensure_no_cycle(db, dependency_ids=draft.dependencies)
@@ -187,9 +185,7 @@ def create_template(db: Session, jobs: JobScheduler, draft: TaskTemplateDraft) -
         )
 
     if blocked and instance.deadline is not None:
-        jobs.schedule_at(
-            job_key=dependency_at_risk_job_key(instance.id), run_at=instance.deadline - _DEPENDENCY_AT_RISK_THRESHOLD
-        )
+        jobs.schedule_at(job_key=dependency_at_risk_job_key(instance.id), run_at=instance.deadline - DEPENDENCY_AT_RISK_THRESHOLD)
 
     if template.recurrence.pattern != "one_time" and template.recurrence.anchor == "calendar":
         schedule_next_occurrence_boundary(db, jobs, template=template, latest_instance=instance, settings=settings, now=now)
@@ -225,9 +221,7 @@ def _create_fixed_instance(
         now=now,
     )
     if not blocked:
-        jobs.schedule_at(job_key=overdue_job_key(instance.id), run_at=scheduled_time)
-        for offset in template.reminder_offsets_minutes:
-            jobs.schedule_at(job_key=reminder_job_key(instance.id, offset), run_at=scheduled_time - timedelta(minutes=offset))
+        schedule_reminder_and_overdue_jobs(jobs, instance, template.reminder_offsets_minutes)
     return instance
 
 
@@ -278,6 +272,7 @@ def _persist_instance(
             detached=False,
             scheduled_time=generated.scheduled_time,
             deadline=generated.deadline,
+            nominal_date=generated.nominal_date,
             status=instance_status,
             status_history=(StatusHistoryEntry(status=instance_status, at=now),),
             dependencies=dependencies,
@@ -304,8 +299,6 @@ _RETIMABLE_FIXED_STATUSES = frozenset({"scheduled", "blocked"})
 #: `missed` is deliberately excluded: §6.7 makes leaving `missed` a user-driven action
 #: (extend-deadline, complete or delete), never a side effect of a template-wide edit.
 _REDEADLINABLE_FLEXIBLE_STATUSES = frozenset({"pending", "scheduled", "blocked", "in_progress"})
-
-_TERMINAL_STATUSES = frozenset({"completed", "dismissed"})
 
 
 @dataclass(frozen=True)
@@ -334,7 +327,7 @@ def archive_template(db: Session, jobs: JobScheduler, template_id: str) -> Archi
     incomplete = tuple(
         instance.id
         for instance in TaskInstanceRepository(db).list_by_template(template_id)
-        if instance.status not in _TERMINAL_STATUSES
+        if instance.status not in TERMINAL_STATUSES
     )
     archived = archive_template_and_cancel_jobs(db, jobs, template_id)
     return ArchiveResult(template=archived, incomplete_instance_ids=incomplete)
@@ -361,7 +354,7 @@ def edit_template_this_and_future(db: Session, jobs: JobScheduler, template_id: 
     if prospective.recurrence.anchor == "completion" and prospective.type != "flexible":
         raise TemplateValidationError("invalid_recurrence_anchor", 'anchor: "completion" is only valid on flexible templates.')
 
-    settings = _require_settings(db)
+    settings = require_settings(db)
     duration_or_hours_changed = "estimated_duration_minutes" in patch or "active_hours_override" in patch
     if prospective.type == "flexible" and duration_or_hours_changed:
         effective_hours = build_active_hours_map(settings, prospective.active_hours_override)
@@ -378,12 +371,17 @@ def edit_template_this_and_future(db: Session, jobs: JobScheduler, template_id: 
         if propagate_to is not None
         else None
     )
-    if propagate_to is not None and retimed_at is not None and propagate_to.status == "scheduled":
-        end = retimed_at + timedelta(minutes=prospective.estimated_duration_minutes)
-        if has_fixed_conflict(db, start=retimed_at, end=end, exclude_instance_id=propagate_to.id):
-            raise TemplateValidationError(
-                "creation_conflict", "The new fixed time collides with an existing fixed task or external event."
-            )
+    if propagate_to is not None and fixed_slot_change_conflicts(
+        db,
+        propagate_to,
+        start=retimed_at or propagate_to.scheduled_time or utcnow(),
+        duration_minutes=prospective.estimated_duration_minutes
+        if "estimated_duration_minutes" in patch
+        else propagate_to.estimated_duration_minutes,
+    ):
+        raise TemplateValidationError(
+            "creation_conflict", "The new fixed time or duration collides with an existing fixed task or external event."
+        )
 
     new_template = repo.update(prospective)
 
@@ -407,7 +405,7 @@ def edit_template_this_and_future(db: Session, jobs: JobScheduler, template_id: 
 def _find_live_instance(db: Session, template_id: str) -> TaskInstance | None:
     """The most recently generated non-terminal instance - §3.10's "currently-live" one."""
     for instance in TaskInstanceRepository(db).list_by_template(template_id):  # most-recent-first
-        if instance.status not in _TERMINAL_STATUSES:
+        if instance.status not in TERMINAL_STATUSES:
             return instance
     return None
 
@@ -441,13 +439,15 @@ def _propagate_to_instance(
 
     reminders_changed = previous.reminder_offsets_minutes != template.reminder_offsets_minutes
     if updated.status == "scheduled" and (retimed_at is not None or reminders_changed):
-        _rewire_reminder_and_overdue_jobs(jobs, updated, previous=previous, template=template)
+        schedule_reminder_and_overdue_jobs(
+            jobs, updated, template.reminder_offsets_minutes, dropped_offsets=previous.reminder_offsets_minutes
+        )
     if retimed_at is not None and updated.status == "scheduled":
         # §3.9: moving clear of an external event resolves its sync_conflict right away,
         # the same as a manual reschedule does.
         resolve_cleared_sync_conflicts(db, now=now)
     if new_deadline is not None and updated.status == "blocked":
-        jobs.schedule_at(job_key=dependency_at_risk_job_key(updated.id), run_at=new_deadline - _DEPENDENCY_AT_RISK_THRESHOLD)
+        jobs.schedule_at(job_key=dependency_at_risk_job_key(updated.id), run_at=new_deadline - DEPENDENCY_AT_RISK_THRESHOLD)
 
     if template.type != "flexible" or updated.status not in ("pending", "scheduled"):
         return updated
@@ -463,7 +463,7 @@ def _propagate_to_instance(
         return updated
 
     if updated.status == "scheduled":
-        updated = _return_to_pending(db, jobs, updated, template=template, now=now)
+        updated = return_to_pending(db, jobs, updated, template=template, now=now)
     return place_or_defer(db, jobs, instance=updated, template=template, settings=settings, now=now)
 
 
@@ -503,46 +503,6 @@ def _fits_before(instance: TaskInstance, deadline: datetime) -> bool:
     return instance.scheduled_time + timedelta(minutes=instance.estimated_duration_minutes) <= deadline
 
 
-def _return_to_pending(
-    db: Session, jobs: JobScheduler, instance: TaskInstance, *, template: TaskTemplate, now: datetime
-) -> TaskInstance:
-    """Evicts a scheduled flexible instance back into the pending pool - persisted, with
-    `scheduled_time` cleared and its old slot's reminder/overdue jobs cancelled, the same
-    shape as §6.4's sync eviction and §6.6's overdue revert. `place_or_defer` then either
-    places it again or leaves it `pending` with an `unschedulable` notification.
-    """
-    jobs.cancel(job_key=overdue_job_key(instance.id))
-    for offset in template.reminder_offsets_minutes:
-        jobs.cancel(job_key=reminder_job_key(instance.id, offset))
-    return TaskInstanceRepository(db).update(
-        instance.model_copy(
-            update={
-                "status": "pending",
-                "scheduled_time": None,
-                "status_history": (*instance.status_history, StatusHistoryEntry(status="pending", at=now)),
-            }
-        )
-    )
-
-
-def _rewire_reminder_and_overdue_jobs(
-    jobs: JobScheduler, instance: TaskInstance, *, previous: TaskTemplate, template: TaskTemplate
-) -> None:
-    """Re-points a scheduled instance's reminder and overdue jobs at its current
-    `scheduled_time` and the template's current reminder offsets. Offsets the edit
-    dropped are cancelled explicitly: `run_reminder` doesn't re-check timing, so a
-    leftover job would fire a reminder nobody asked for.
-    """
-    assert instance.scheduled_time is not None
-    for offset in set(previous.reminder_offsets_minutes) - set(template.reminder_offsets_minutes):
-        jobs.cancel(job_key=reminder_job_key(instance.id, offset))
-    jobs.schedule_at(job_key=overdue_job_key(instance.id), run_at=instance.scheduled_time)
-    for offset in template.reminder_offsets_minutes:
-        jobs.schedule_at(
-            job_key=reminder_job_key(instance.id, offset), run_at=instance.scheduled_time - timedelta(minutes=offset)
-        )
-
-
 def _rewire_occurrence_boundary(
     db: Session, jobs: JobScheduler, *, previous: TaskTemplate, template: TaskTemplate, settings: UserSettings
 ) -> None:
@@ -578,13 +538,6 @@ def _ensure_no_cycle(db: Session, *, dependency_ids: tuple[str, ...], dependent_
     edges.extend((dependent_id, dependency_id) for dependency_id in dependency_ids)
     if cycle_check(edges):
         raise TemplateValidationError("cycle_detected", "This dependency list would create a cycle.")
-
-
-def _require_settings(db: Session) -> UserSettings:
-    settings = UserSettingsRepository(db).get()
-    if settings is None:
-        raise RuntimeError("UserSettings row missing - expected to exist from app startup (Stage 4)")
-    return settings
 
 
 __all__ = [

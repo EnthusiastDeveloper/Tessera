@@ -202,6 +202,41 @@ class TestEditThisOccurrence:
         assert stored.scheduled_time is None
 
 
+class TestFixedDurationGrowth:
+    """§6.5: lengthening a fixed instance on the timeline is held to the same hard block
+    as retiming it - it can't grow into the next fixed task or a busy external event.
+    """
+
+    def _two_fixed(self, db_session: Session, jobs: RecordingJobScheduler) -> tuple[str, str]:
+        first = create_template(db_session, jobs, _fixed_draft(name="Dinner", fixed_time_of_day="18:00"))
+        second = create_template(db_session, jobs, _fixed_draft(name="Call", fixed_time_of_day="19:30"))
+        db_session.commit()
+        return first.instance.id, second.instance.id
+
+    def test_growing_into_the_next_fixed_task_is_rejected(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        dinner_id, _ = self._two_fixed(db_session, jobs)
+
+        with pytest.raises(InstanceValidationError) as exc_info:
+            edit_this_occurrence(db_session, jobs, dinner_id, patch={"estimated_duration_minutes": 120})
+        assert exc_info.value.code == "creation_conflict"
+
+    def test_growing_up_to_the_next_fixed_task_is_allowed(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        dinner_id, _ = self._two_fixed(db_session, jobs)
+
+        updated = edit_this_occurrence(db_session, jobs, dinner_id, patch={"estimated_duration_minutes": 90})
+        assert updated.estimated_duration_minutes == 90
+
+    def test_shrinking_is_never_rejected(self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler) -> None:
+        dinner_id, _ = self._two_fixed(db_session, jobs)
+
+        updated = edit_this_occurrence(db_session, jobs, dinner_id, patch={"estimated_duration_minutes": 30})
+        assert updated.estimated_duration_minutes == 30
+
+
 class TestReschedule:
     def test_moves_a_fixed_instance_and_rewires_its_jobs(
         self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler

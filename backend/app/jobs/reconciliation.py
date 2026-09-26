@@ -14,8 +14,6 @@ event that would have triggered it has already been consumed.
 
 from __future__ import annotations
 
-from datetime import timedelta
-
 from sqlalchemy.orm import Session
 
 from app.db.base import utcnow
@@ -25,8 +23,8 @@ from app.db.repositories import (
     TaskTemplateRepository,
     UserSettingsRepository,
 )
-from app.jobs.handlers import DEPENDENCY_AT_RISK_THRESHOLD
 from app.jobs.interface import (
+    DEPENDENCY_AT_RISK_THRESHOLD,
     JobScheduler,
     calendar_poll_job_key,
     deadline_elapsed_job_key,
@@ -35,7 +33,7 @@ from app.jobs.interface import (
     overdue_job_key,
     reminder_job_key,
 )
-from app.scheduling.orchestration import schedule_next_occurrence_boundary
+from app.scheduling.orchestration import schedule_next_occurrence_boundary, schedule_reminder_and_overdue_jobs
 from app.task_instances.service import promote_if_unblocked
 
 _LIVE_SCHEDULED_STATUSES = ("scheduled", "in_progress")
@@ -68,13 +66,8 @@ def _recreate_or_cancel_instance_jobs(db: Session, jobs: JobScheduler) -> None:
     for instance in repo.list_by_statuses(_LIVE_SCHEDULED_STATUSES):
         if instance.scheduled_time is None:
             continue
-        jobs.schedule_at(job_key=overdue_job_key(instance.id), run_at=instance.scheduled_time)
         template = templates_by_id.get(instance.template_id)
-        if template is not None:
-            for offset in template.reminder_offsets_minutes:
-                jobs.schedule_at(
-                    job_key=reminder_job_key(instance.id, offset), run_at=instance.scheduled_time - timedelta(minutes=offset)
-                )
+        schedule_reminder_and_overdue_jobs(jobs, instance, template.reminder_offsets_minutes if template is not None else ())
         jobs.cancel(job_key=deadline_elapsed_job_key(instance.id))
         jobs.cancel(job_key=dependency_at_risk_job_key(instance.id))
 

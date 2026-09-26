@@ -28,7 +28,7 @@ Everything below lives in **Settings** in the app itself, not in environment var
 
 An IANA timezone name (e.g. `America/New_York`), not a raw UTC offset. Every scheduling computation - active-hours windows, deadlines, the 15-minute placement grid, day boundaries for budget accounting - runs in this timezone, and DST transitions are handled by the timezone library rather than any custom offset math.
 
-Changing your timezone re-projects fixed tasks' wall-clock times against the new zone, unless a given instance has been individually edited (`detached` - see [Tasks & Events](tasks-and-events.md#detach-and-edit-scope)), in which case it keeps its own value.
+Changing it doesn't move occurrences that already have a time - only occurrences generated afterwards use the new zone. See [Tasks & Events](tasks-and-events.md#dates-times-and-time-zones) for how dates, times of day and deadline offsets relate to your time zone.
 
 ### Active hours
 

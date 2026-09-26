@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.api.dependencies import get_request_job_scheduler
+from app.api.dependencies import DB_SESSION, get_request_job_scheduler
 from app.api.errors import AppError
 from app.db.base import utcnow
 from app.db.schemas import (
@@ -22,19 +22,10 @@ from app.db.schemas import (
     TaskTemplate,
     TaskType,
 )
-from app.db.session import get_db
 from app.jobs.interface import JobScheduler
 from app.task_templates import service
 
 router = APIRouter(prefix="/api/v1/task-templates", tags=["task-templates"])
-
-_VALIDATION_ERROR_STATUS = {
-    "invalid_recurrence_anchor": 422,
-    "infeasible_duration": 422,
-    "creation_conflict": 409,
-    "cycle_detected": 409,
-    "not_found": 404,
-}
 
 
 class RecurrenceIn(BaseModel):
@@ -103,7 +94,7 @@ class VirtualOccurrenceResponse(BaseModel):
 
 
 @router.get("/projections")
-def list_projections_endpoint(db: Session = Depends(get_db)) -> list[VirtualOccurrenceResponse]:
+def list_projections_endpoint(db: Session = DB_SESSION) -> list[VirtualOccurrenceResponse]:
     """`GET /task-templates/projections` (design doc §9.2) - Timeline "ghost" occurrences
     for every recurring template, out to the fixed 30-day horizon. Registered *before*
     `/{template_id}` below so `"projections"` is never captured as a `template_id` path
@@ -125,17 +116,17 @@ def list_projections_endpoint(db: Session = Depends(get_db)) -> list[VirtualOccu
 
 
 @router.get("/{template_id}")
-def get_template_endpoint(template_id: str, db: Session = Depends(get_db)) -> TaskTemplate:
+def get_template_endpoint(template_id: str, db: Session = DB_SESSION) -> TaskTemplate:
     try:
         return service.get_template(db, template_id)
     except service.TemplateValidationError as exc:
-        raise AppError(_VALIDATION_ERROR_STATUS[exc.code], exc.code, str(exc)) from exc
+        raise AppError.for_code(exc.code, str(exc)) from exc
 
 
 @router.post("", status_code=201)
 def create_template_endpoint(
     payload: CreateTemplateRequest,
-    db: Session = Depends(get_db),
+    db: Session = DB_SESSION,
     jobs: JobScheduler = Depends(get_request_job_scheduler),
 ) -> CreateTemplateResponse:
     draft = service.TaskTemplateDraft(
@@ -155,7 +146,7 @@ def create_template_endpoint(
     try:
         result = service.create_template(db, jobs, draft)
     except service.TemplateValidationError as exc:
-        raise AppError(_VALIDATION_ERROR_STATUS[exc.code], exc.code, str(exc)) from exc
+        raise AppError.for_code(exc.code, str(exc)) from exc
     return CreateTemplateResponse(template=result.template, instance=result.instance)
 
 
@@ -164,7 +155,7 @@ def patch_template_endpoint(
     template_id: str,
     payload: PatchTemplateRequest,
     scope: Literal["this_and_future"] = Query(...),
-    db: Session = Depends(get_db),
+    db: Session = DB_SESSION,
     jobs: JobScheduler = Depends(get_request_job_scheduler),
 ) -> TaskTemplate:
     # Deliberately not payload.model_dump() - see the identical note in
@@ -176,12 +167,12 @@ def patch_template_endpoint(
     try:
         return service.edit_template_this_and_future(db, jobs, template_id, patch=patch)
     except service.TemplateValidationError as exc:
-        raise AppError(_VALIDATION_ERROR_STATUS[exc.code], exc.code, str(exc)) from exc
+        raise AppError.for_code(exc.code, str(exc)) from exc
 
 
 @router.delete("/{template_id}")
 def archive_template_endpoint(
-    template_id: str, db: Session = Depends(get_db), jobs: JobScheduler = Depends(get_request_job_scheduler)
+    template_id: str, db: Session = DB_SESSION, jobs: JobScheduler = Depends(get_request_job_scheduler)
 ) -> ArchiveResponse:
     """§3.8: soft-delete. Returns the incomplete instances left behind so the frontend's
     confirmation dialog (§3.8's "must show a confirmation dialog explaining the
@@ -190,5 +181,5 @@ def archive_template_endpoint(
     try:
         result = service.archive_template(db, jobs, template_id)
     except service.TemplateValidationError as exc:
-        raise AppError(_VALIDATION_ERROR_STATUS[exc.code], exc.code, str(exc)) from exc
+        raise AppError.for_code(exc.code, str(exc)) from exc
     return ArchiveResponse(template=result.template, incomplete_instance_ids=result.incomplete_instance_ids)

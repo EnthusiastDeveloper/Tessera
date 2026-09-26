@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ScopePrompt } from '../../components/ScopePrompt';
-import { ApiError } from '../../api/client';
+import { ApiError, toApiError } from '../../api/client';
 import { deleteInstance } from '../../api/taskInstances';
 import type { DeleteInstanceResult } from '../../api/taskInstances';
 import { listInstances } from '../../api/taskInstances';
@@ -52,7 +52,7 @@ export function DeleteTaskDialog({ template, instance, onDeleted, onCancel }: De
       const result = await deleteInstance(instance.id, isRecurring ? scope! : undefined);
       onDeleted(result);
     } catch (err) {
-      setError(err instanceof ApiError ? err : new ApiError(0, 'network_error', 'Could not reach the server.'));
+      setError(toApiError(err));
       setSubmitting(false);
     }
   };

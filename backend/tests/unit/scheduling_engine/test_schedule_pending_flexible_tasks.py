@@ -354,3 +354,26 @@ def test_committed_minutes_are_dst_correct_across_a_spring_forward_obstacle() ->
     )
 
     assert result.placements == (Placement("task", ny(2026, 3, 8, 4, 0), False),)
+
+
+def test_not_before_gates_placement_past_now() -> None:
+    """§9.1 / Example O: a completion-anchored occurrence isn't placed before its nominal date."""
+    candidate = FlexibleTaskCandidate(
+        id="hvac-filter",
+        deadline=ny(2026, 4, 12, 14, 20),
+        priority=2,
+        estimated_duration_minutes=30,
+        not_before=ny(2026, 4, 7, 14, 20),
+    )
+
+    result = schedule_pending_flexible_tasks(
+        candidates=[candidate],
+        now=ny(2026, 3, 7, 14, 20),
+        active_hours=every_day("09:00", "21:00"),
+        blackout_dates=[],
+        daily_time_budget_minutes=no_budget(),
+        budget_enforcement="soft",
+        obstacles=[],
+    )
+
+    assert result.placements == (Placement("hvac-filter", ny(2026, 4, 7, 14, 30), False),)

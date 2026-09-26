@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { connect as connectProvider, disconnect as disconnectConnection, listConnections } from '../../api/calendarConnections';
-import { ApiError } from '../../api/client';
+import { ApiError, toApiError } from '../../api/client';
 import type { CalendarProvider, ExternalCalendarConnection } from '../../types/calendarConnection';
 
 type LoadState = 'loading' | 'error' | 'ready';
@@ -57,7 +57,7 @@ export function ExternalCalendarsSection({ justConnectedProvider }: ExternalCale
         setState('ready');
       })
       .catch((err: unknown) => {
-        setError(err instanceof ApiError ? err : new ApiError(0, 'network_error', 'Could not reach the server.'));
+        setError(toApiError(err));
         setState('error');
       });
   }, []);
@@ -76,7 +76,7 @@ export function ExternalCalendarsSection({ justConnectedProvider }: ExternalCale
       // backend's callback redirect (see `justConnectedProvider` above).
       window.location.href = authorizeUrl;
     } catch (err) {
-      setError(err instanceof ApiError ? err : new ApiError(0, 'network_error', 'Could not reach the server.'));
+      setError(toApiError(err));
       setConnectingProvider(null);
     }
   };
@@ -88,7 +88,7 @@ export function ExternalCalendarsSection({ justConnectedProvider }: ExternalCale
       await disconnectConnection(connectionId);
       setConnections((prev) => prev.filter((connection) => connection.id !== connectionId));
     } catch (err) {
-      setError(err instanceof ApiError ? err : new ApiError(0, 'network_error', 'Could not reach the server.'));
+      setError(toApiError(err));
     } finally {
       setDisconnectingId(null);
     }

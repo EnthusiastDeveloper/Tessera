@@ -9,7 +9,7 @@ for contexts that need the interface satisfied without a job store.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
 class JobScheduler(ABC):
@@ -60,6 +60,12 @@ class NoOpJobScheduler(JobScheduler):
 
     def schedule_interval(self, *, job_key: str, minutes: int) -> None:
         return None
+
+
+#: §6.3's flat POC threshold: the dependency-at-risk check fires this long before a
+#: blocked instance's deadline. Shared by the services that schedule the job and the
+#: reconciliation pass that recreates it.
+DEPENDENCY_AT_RISK_THRESHOLD = timedelta(days=3)
 
 
 def reminder_job_key(instance_id: str, offset_minutes: int) -> str:

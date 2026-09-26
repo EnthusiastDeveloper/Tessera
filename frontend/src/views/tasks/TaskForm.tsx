@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { DurationInput } from '../../components/DurationInput';
 import { ScopePrompt } from '../../components/ScopePrompt';
-import { ApiError } from '../../api/client';
+import { ApiError, toApiError } from '../../api/client';
 import { createTemplate, patchTemplateThisAndFuture } from '../../api/taskTemplates';
 import type { CreateTemplatePayload, PatchTemplatePayload } from '../../api/taskTemplates';
 import { patchInstanceThisOccurrence } from '../../api/taskInstances';
@@ -150,7 +150,7 @@ export function TaskForm({ mode, template, instance, onSaved, onCancel }: TaskFo
         onSaved({ instance: updated });
       }
     } catch (err) {
-      setError(err instanceof ApiError ? err : new ApiError(0, 'network_error', 'Could not reach the server.'));
+      setError(toApiError(err));
     } finally {
       setSubmitting(false);
     }

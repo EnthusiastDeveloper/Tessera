@@ -59,6 +59,7 @@ export interface TaskInstance {
   detached: boolean;
   scheduled_time?: string | null;
   deadline?: string | null;
+  nominal_date?: string | null;
   status: TaskInstanceStatus;
   status_history: StatusHistoryEntry[];
   dependencies: string[];

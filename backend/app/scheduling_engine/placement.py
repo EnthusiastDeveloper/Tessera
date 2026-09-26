@@ -111,7 +111,7 @@ def schedule_pending_flexible_tasks(
     unschedulable: list[str] = []
 
     for task in ordered:
-        earliest_start = max(now, max(task.dependency_completed_at, default=now))
+        earliest_start = max(now, max(task.dependency_completed_at, default=now), task.not_before or now)
         effective_hours = merge_active_hours(active_hours, task.active_hours_override)
 
         slot = find_first_free_slot(

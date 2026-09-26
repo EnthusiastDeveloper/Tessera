@@ -4,22 +4,16 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.api.dependencies import DB_SESSION
 from app.api.errors import AppError
 from app.db.schemas import ActiveHoursWindow, BlackoutDate, DayName, UserSettings
-from app.db.session import get_db
 from app.settings import service
 
 router = APIRouter(prefix="/api/v1/settings", tags=["settings"])
-
-_VALIDATION_ERROR_STATUS = {
-    "invalid_timezone": 422,
-    "invalid_day_map": 422,
-    "settings_not_initialized": 500,
-}
 
 
 class SettingsPatchRequest(BaseModel):
@@ -40,12 +34,12 @@ class SettingsPatchRequest(BaseModel):
 
 
 @router.get("")
-def get_settings_endpoint(db: Session = Depends(get_db)) -> UserSettings:
+def get_settings_endpoint(db: Session = DB_SESSION) -> UserSettings:
     return service.get_or_create_default(db, default_timezone="UTC")
 
 
 @router.patch("")
-def patch_settings_endpoint(payload: SettingsPatchRequest, db: Session = Depends(get_db)) -> UserSettings:
+def patch_settings_endpoint(payload: SettingsPatchRequest, db: Session = DB_SESSION) -> UserSettings:
     # Deliberately not payload.model_dump() - that recursively flattens nested models
     # (ActiveHoursWindow, BlackoutDate) to plain dicts, and model_copy(update=...) below
     # does not re-validate, so the domain object would end up holding raw dicts where it
@@ -57,4 +51,4 @@ def patch_settings_endpoint(payload: SettingsPatchRequest, db: Session = Depends
     try:
         return service.update_settings(db, patch=patch)
     except service.SettingsValidationError as exc:
-        raise AppError(_VALIDATION_ERROR_STATUS[exc.code], exc.code, str(exc)) from exc
+        raise AppError.for_code(exc.code, str(exc)) from exc

@@ -18,25 +18,15 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
-from app.api.dependencies import get_request_job_scheduler
+from app.api.dependencies import DB_SESSION, get_request_job_scheduler
 from app.api.errors import AppError
 from app.calendar_sync import service
 from app.core.config import get_settings
 from app.db.base import utcnow
 from app.db.schemas import CalendarProvider, ExternalCalendarConnection
-from app.db.session import get_db
 from app.jobs.interface import JobScheduler
 
 router = APIRouter(prefix="/api/v1/calendar-connections", tags=["calendar-connections"])
-
-_ERROR_STATUS = {
-    "not_found": 404,
-    "invalid_oauth_state": 400,
-    "provider_not_configured": 400,
-    "oauth_exchange_failed": 502,
-    "token_refresh_failed": 502,
-    "calendar_fetch_failed": 502,
-}
 
 
 def _callback_redirect_uri(provider: CalendarProvider, *, app_base_url: str) -> str:
@@ -46,12 +36,12 @@ def _callback_redirect_uri(provider: CalendarProvider, *, app_base_url: str) -> 
 def _require_app_base_url() -> str:
     app_base_url = get_settings().app_base_url
     if not app_base_url:
-        raise AppError(400, "app_base_url_not_configured", "APP_BASE_URL must be set to use calendar sync.")
+        raise AppError.for_code("app_base_url_not_configured", "APP_BASE_URL must be set to use calendar sync.")
     return app_base_url
 
 
 @router.get("")
-def list_connections_endpoint(db: Session = Depends(get_db)) -> list[ExternalCalendarConnection]:
+def list_connections_endpoint(db: Session = DB_SESSION) -> list[ExternalCalendarConnection]:
     return list(service.list_connections(db))
 
 
@@ -71,7 +61,7 @@ def connect_endpoint(
             app_settings=get_settings(),
         )
     except service.CalendarSyncError as exc:
-        raise AppError(_ERROR_STATUS[exc.code], exc.code, str(exc)) from exc
+        raise AppError.for_code(exc.code, str(exc)) from exc
     return {"authorize_url": result.authorize_url}
 
 
@@ -81,7 +71,7 @@ def callback_endpoint(
     code: str,
     state: str,
     request: Request,
-    db: Session = Depends(get_db),
+    db: Session = DB_SESSION,
     jobs: JobScheduler = Depends(get_request_job_scheduler),
 ) -> RedirectResponse:
     app_base_url = _require_app_base_url()
@@ -98,7 +88,7 @@ def callback_endpoint(
             now=utcnow(),
         )
     except service.CalendarSyncError as exc:
-        raise AppError(_ERROR_STATUS[exc.code], exc.code, str(exc)) from exc
+        raise AppError.for_code(exc.code, str(exc)) from exc
     # No frontend route exists yet (Stage 9) - land back on the app root with a query
     # flag it can pick up once it does, rather than returning a bare JSON body to what is
     # a real browser top-level navigation.
@@ -107,9 +97,9 @@ def callback_endpoint(
 
 @router.delete("/{connection_id}", status_code=204)
 def disconnect_endpoint(
-    connection_id: str, db: Session = Depends(get_db), jobs: JobScheduler = Depends(get_request_job_scheduler)
+    connection_id: str, db: Session = DB_SESSION, jobs: JobScheduler = Depends(get_request_job_scheduler)
 ) -> None:
     try:
         service.disconnect(db, jobs, connection_id)
     except service.CalendarSyncError as exc:
-        raise AppError(_ERROR_STATUS[exc.code], exc.code, str(exc)) from exc
+        raise AppError.for_code(exc.code, str(exc)) from exc

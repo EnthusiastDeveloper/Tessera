@@ -2,34 +2,20 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.api.dependencies import DB_SESSION
 from app.api.errors import AppError
 from app.auth import service
 from app.auth.cookie_signing import sign
 from app.core.config import get_settings
 from app.db.schemas import User
-from app.db.session import get_db
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
 SESSION_COOKIE_NAME = "tessera_session"
-
-_SETUP_ERROR_STATUS = {
-    "already_configured": 410,
-    "invalid_setup_token": 401,
-    "password_too_short": 422,
-}
-_AUTH_ERROR_STATUS = {
-    "invalid_credentials": 401,
-    "too_many_attempts": 429,
-}
-_CHANGE_PASSWORD_ERROR_STATUS = {
-    "invalid_credentials": 401,
-    "password_too_short": 422,
-}
 
 
 class SetupRequest(BaseModel):
@@ -70,31 +56,31 @@ def _set_session_cookie(response: Response, session_id: str) -> None:
 
 
 @router.post("/setup", status_code=201)
-def setup_endpoint(payload: SetupRequest, db: Session = Depends(get_db)) -> UserResponse:
+def setup_endpoint(payload: SetupRequest, db: Session = DB_SESSION) -> UserResponse:
     """Public only while zero `User` rows exist (§3.6) - `410 Gone` afterwards, enforced
     inside `service.setup`, not by the auth guard (this route is always allowlisted).
     """
     try:
         user = service.setup(db, token=payload.token, password=payload.password)
     except service.SetupError as exc:
-        raise AppError(_SETUP_ERROR_STATUS[exc.code], exc.code, str(exc)) from exc
+        raise AppError.for_code(exc.code, str(exc)) from exc
     return _user_response(user)
 
 
 @router.post("/login")
-def login_endpoint(payload: LoginRequest, request: Request, response: Response, db: Session = Depends(get_db)) -> UserResponse:
+def login_endpoint(payload: LoginRequest, request: Request, response: Response, db: Session = DB_SESSION) -> UserResponse:
     client_host = request.client.host if request.client else "unknown"
     throttle_key = f"{client_host}:{payload.username}"
     try:
         user, user_session = service.login(db, username=payload.username, password=payload.password, throttle_key=throttle_key)
     except service.AuthError as exc:
-        raise AppError(_AUTH_ERROR_STATUS[exc.code], exc.code, str(exc)) from exc
+        raise AppError.for_code(exc.code, str(exc)) from exc
     _set_session_cookie(response, user_session.id)
     return _user_response(user)
 
 
 @router.post("/logout", status_code=204)
-def logout_endpoint(request: Request, response: Response, db: Session = Depends(get_db)) -> None:
+def logout_endpoint(request: Request, response: Response, db: Session = DB_SESSION) -> None:
     """Not in the public allowlist - reaching this handler already implies a valid session.
     Returns 204 regardless of the delete's outcome (§14.2) - logout is idempotent.
     """
@@ -112,7 +98,7 @@ def me_endpoint(request: Request) -> UserResponse:
 
 @router.post("/change-password")
 def change_password_endpoint(
-    payload: ChangePasswordRequest, request: Request, response: Response, db: Session = Depends(get_db)
+    payload: ChangePasswordRequest, request: Request, response: Response, db: Session = DB_SESSION
 ) -> UserResponse:
     """Not in the public allowlist - reaching this handler already implies a valid
     session (§8.1 screen 6 "Account: change password"). §3.6/§14.2's session policy is
@@ -127,6 +113,6 @@ def change_password_endpoint(
             db, user=request.state.user, current_password=payload.current_password, new_password=payload.new_password
         )
     except (service.AuthError, service.SetupError) as exc:
-        raise AppError(_CHANGE_PASSWORD_ERROR_STATUS[exc.code], exc.code, str(exc)) from exc
+        raise AppError.for_code(exc.code, str(exc)) from exc
     _set_session_cookie(response, new_session.id)
     return _user_response(request.state.user)

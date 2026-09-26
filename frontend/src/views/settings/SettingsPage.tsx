@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { getSettings } from '../../api/settings';
-import { ApiError } from '../../api/client';
+import { ApiError, toApiError } from '../../api/client';
 import type { CalendarProvider } from '../../types/calendarConnection';
 import type { UserSettings } from '../../types/settings';
 import { AccountSection } from './AccountSection';
@@ -40,7 +40,7 @@ export function SettingsPage(): JSX.Element {
         setState('ready');
       })
       .catch((err: unknown) => {
-        setError(err instanceof ApiError ? err : new ApiError(0, 'network_error', 'Could not reach the server.'));
+        setError(toApiError(err));
         setState('error');
       });
   }, []);
