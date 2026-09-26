@@ -26,6 +26,7 @@ from app.scheduling.orchestration import (
     UNSCHEDULABLE,
     all_dependencies_completed,
     archive_template_and_cancel_jobs,
+    displace_flexible_under,
     fixed_slot_change_conflicts,
     generate_and_place_next_instance,
     has_active_notification,
@@ -151,6 +152,9 @@ def edit_this_occurrence(
     now = utcnow()
     updated = TaskInstanceRepository(db).update(instance.model_copy(update={**patch, "detached": True}))
 
+    if "estimated_duration_minutes" in patch:
+        displace_flexible_under(db, jobs, updated, now=now)
+
     invalidates_placement = "estimated_duration_minutes" in patch or "deadline" in patch
     if updated.type == "flexible" and updated.status in ("pending", "scheduled") and invalidates_placement:
         if updated.status == "scheduled":
@@ -177,6 +181,7 @@ def reschedule(db: Session, jobs: JobScheduler, instance_id: str, *, new_schedul
     )
     template = _require_template(db, instance.template_id)
     schedule_reminder_and_overdue_jobs(jobs, updated, template.reminder_offsets_minutes)
+    displace_flexible_under(db, jobs, updated, now=now)
     # §3.9: a manual reschedule that clears the collision resolves any sync_conflict this
     # instance was carrying, immediately rather than waiting for the next poll (Stage 7).
     resolve_cleared_sync_conflicts(db, now=now)

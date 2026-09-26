@@ -7,7 +7,7 @@ Notifications are a separate concept from task **status** - a task can be `sched
 | Type | Fires when | How it resolves |
 |---|---|---|
 | `reminder` | A task's scheduled time minus one of its configured reminder offsets is reached | Informational; you dismiss it |
-| `creation_conflict` | A fixed task's creation collides with an existing fixed task or external event | The save was already hard-blocked - you must change the time or task type before it can be created at all |
+| `creation_conflict` | A fixed task's creation collides with an existing fixed task, an external event or a started flexible task | The save was already hard-blocked - you must change the time or task type before it can be created at all |
 | `sync_conflict` | An external calendar sync introduces an event that collides with an already-`scheduled` fixed task | Manual - reschedule the fixed task or dismiss the notice |
 | `unschedulable` | A flexible task's placement search finds no valid slot before its deadline (budget ignored, in soft mode) | Relax the deadline or duration, or intervene manually |
 | `dependency_at_risk` | The deadline is within 3 days and at least one dependency is still incomplete | Informational - chase the dependency or adjust the deadline |

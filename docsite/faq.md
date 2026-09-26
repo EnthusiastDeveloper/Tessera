@@ -31,7 +31,7 @@ The SQLite database must live on a mounted volume (the provided `docker-compose.
 Check the Notifications panel and the Backlog view. If it has an active `unschedulable` notification, every eligible day before its deadline is booked solid - relax the deadline, shorten the duration, or free up a day. If it's sitting `blocked` instead, it has an incomplete dependency.
 
 **A task I created was rejected outright.**
-- `creation_conflict` - a fixed task collided with something at save time; fixed tasks are hard-blocked on conflict, never silently double-booked.
+- `creation_conflict` - a fixed task collided with another fixed task, a busy external event or a flexible task you've started; fixed tasks are hard-blocked on conflict, never silently double-booked. A flexible task that's only scheduled there isn't a conflict - it's moved.
 - `infeasible_duration` - a flexible task's duration can't fit any day's active-hours window under any circumstance; shorten it or widen your active hours.
 - `invalid_recurrence_anchor` - you set `anchor: completion` on a fixed template; completion-anchoring is flexible-only, since it needs a deadline window to slide within.
 

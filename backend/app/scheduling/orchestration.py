@@ -40,7 +40,13 @@ from app.jobs.interface import (
     overdue_job_key,
     reminder_job_key,
 )
-from app.scheduling.adapter import OBSTACLE_STATUSES, attempt_placement, gather_external_obstacles, has_fixed_conflict
+from app.scheduling.adapter import (
+    OBSTACLE_STATUSES,
+    attempt_placement,
+    find_overlapping_scheduled_instances,
+    gather_external_obstacles,
+    has_fixed_conflict,
+)
 from app.scheduling.generation import generate_next_instance
 from app.scheduling_engine.deadlines import is_deadline_elapsed
 
@@ -176,6 +182,7 @@ def generate_and_place_next_instance(
                 now=now,
             )
         schedule_reminder_and_overdue_jobs(jobs, instance, template.reminder_offsets_minutes)
+        displace_flexible_under(db, jobs, instance, now=now)
         return instance
 
     return place_or_defer(db, jobs, instance=instance, template=template, settings=settings, now=now)
@@ -344,6 +351,38 @@ def return_to_pending(
     )
 
 
+def displace_flexible_from(
+    db: Session, jobs: JobScheduler, *, start: datetime, end: datetime, now: datetime, exclude_instance_id: str | None = None
+) -> None:
+    """§6.4/§6.5: something now occupies `[start, end)` - an external event, or a fixed
+    instance just written there - so every `scheduled` flexible instance overlapping it
+    goes back to `pending` and is placed again (or deferred: `missed`/`unschedulable`).
+    Called after the occupant is persisted, so re-placement already sees it as an obstacle.
+    """
+    settings = UserSettingsRepository(db).get()
+    if settings is None:
+        return
+    template_repo = TaskTemplateRepository(db)
+    for instance in find_overlapping_scheduled_instances(db, start=start, end=end):
+        if instance.type != "flexible" or instance.id == exclude_instance_id:
+            continue
+        template = template_repo.get(instance.template_id)
+        if template is None:
+            continue
+        reverted = return_to_pending(db, jobs, instance, template=template, now=now)
+        place_or_defer(db, jobs, instance=reverted, template=template, settings=settings, now=now)
+
+
+def displace_flexible_under(db: Session, jobs: JobScheduler, instance: TaskInstance, *, now: datetime) -> None:
+    """§6.5 (Rev 10): a fixed `instance` just landed on its slot - created, generated,
+    moved or lengthened - so the flexible work there gives way to it.
+    """
+    if instance.type != "fixed" or instance.status not in OBSTACLE_STATUSES or instance.scheduled_time is None:
+        return
+    end = instance.scheduled_time + timedelta(minutes=instance.estimated_duration_minutes)
+    displace_flexible_from(db, jobs, start=instance.scheduled_time, end=end, now=now, exclude_instance_id=instance.id)
+
+
 def fixed_slot_change_conflicts(db: Session, instance: TaskInstance, *, start: datetime, duration_minutes: int) -> bool:
     """§6.5 for an edit to a fixed instance that is on the timeline (`scheduled` or
     `in_progress`): would its new slot - a new start, a longer duration, or both - collide
@@ -408,6 +447,8 @@ __all__ = [
     "all_dependencies_completed",
     "archive_template_and_cancel_jobs",
     "create_notification",
+    "displace_flexible_from",
+    "displace_flexible_under",
     "fixed_slot_change_conflicts",
     "generate_and_place_next_instance",
     "has_active_notification",

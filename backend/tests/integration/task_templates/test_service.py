@@ -13,6 +13,7 @@ from app.db.base import generate_id
 from app.db.repositories import NotificationRepository, TaskInstanceRepository, TaskTemplateRepository
 from app.db.schemas import Notification, Recurrence, UserSettings
 from app.scheduling.generation import generate_next_instance
+from app.scheduling.orchestration import generate_and_place_next_instance
 from app.task_instances import service as task_instances_service
 from app.task_instances.service import complete, edit_this_occurrence, reschedule
 from app.task_templates import service as task_templates_service
@@ -579,3 +580,116 @@ class TestSeriesNominalDate:
         assert successor.id != filters.instance.id
         assert successor.nominal_date == ny(2026, 4, 2, 8, 0)
         assert successor.scheduled_time == ny(2026, 4, 2, 9, 0)
+
+
+@pytest.mark.usefixtures("pinned_now")
+class TestFixedTaskDisplacesFlexible:
+    """§6.5 (Rev 10): a scheduled flexible task is not a conflict for a fixed one - it
+    gives way. Whichever path gives the fixed task its slot, the flexible task there is
+    placed again before its deadline, or left `pending` with an `unschedulable` notice.
+    `_NOW` is Mon 08:00, so a new 60-minute flexible task lands at Mon 09:00.
+    """
+
+    def _flexible_at_nine(self, db_session: Session, jobs: RecordingJobScheduler, **overrides: object) -> str:
+        created = create_template(db_session, jobs, _flexible_draft(name="Water plants", **overrides))
+        db_session.commit()
+        assert created.instance.scheduled_time == ny(2026, 3, 2, 9, 0)
+        return created.instance.id
+
+    def _reload(self, db_session: Session, instance_id: str):  # type: ignore[no-untyped-def]
+        instance = TaskInstanceRepository(db_session).get(instance_id)
+        assert instance is not None
+        return instance
+
+    def test_creating_a_fixed_task_on_its_slot_moves_the_flexible_task(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        plants_id = self._flexible_at_nine(db_session, jobs)
+        jobs.scheduled.clear()
+
+        sync = create_template(db_session, jobs, _fixed_draft(fixed_time_of_day="09:00"))
+        db_session.commit()
+
+        assert sync.instance.scheduled_time == ny(2026, 3, 2, 9, 0)
+        plants = self._reload(db_session, plants_id)
+        assert plants.status == "scheduled"
+        assert plants.scheduled_time == ny(2026, 3, 2, 10, 0)
+        assert f"overdue:{plants_id}" in jobs.scheduled_keys()
+
+    def test_a_started_flexible_task_still_blocks_a_fixed_one(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        plants_id = self._flexible_at_nine(db_session, jobs)
+        task_instances_service.start_progress(db_session, plants_id)
+        db_session.commit()
+
+        with pytest.raises(TemplateValidationError) as exc_info:
+            create_template(db_session, jobs, _fixed_draft(fixed_time_of_day="09:00"))
+        assert exc_info.value.code == "creation_conflict"
+
+    def test_a_displaced_task_with_no_room_left_is_flagged_unschedulable(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        # Deadline Mon 10:00: the 09:00 slot is the only one that fits.
+        plants_id = self._flexible_at_nine(db_session, jobs, deadline_offset_minutes=120)
+
+        create_template(db_session, jobs, _fixed_draft(fixed_time_of_day="09:00"))
+        db_session.commit()
+
+        plants = self._reload(db_session, plants_id)
+        assert plants.status == "pending"
+        assert plants.scheduled_time is None
+        assert any(n.type == "unschedulable" for n in NotificationRepository(db_session).list_for_instance(plants_id))
+
+    def test_rescheduling_a_fixed_task_onto_its_slot_moves_the_flexible_task(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        sync = create_template(db_session, jobs, _fixed_draft(fixed_time_of_day="12:00"))
+        plants_id = self._flexible_at_nine(db_session, jobs)
+
+        reschedule(db_session, jobs, sync.instance.id, new_scheduled_time=ny(2026, 3, 2, 9, 0))
+        db_session.commit()
+
+        assert self._reload(db_session, plants_id).scheduled_time == ny(2026, 3, 2, 10, 0)
+
+    def test_lengthening_a_fixed_task_into_its_slot_moves_the_flexible_task(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        sync = create_template(db_session, jobs, _fixed_draft(fixed_time_of_day="08:00"))
+        plants_id = self._flexible_at_nine(db_session, jobs)
+
+        edit_this_occurrence(db_session, jobs, sync.instance.id, patch={"estimated_duration_minutes": 120})
+        db_session.commit()
+
+        assert self._reload(db_session, plants_id).scheduled_time == ny(2026, 3, 2, 10, 0)
+
+    def test_a_this_and_future_retime_onto_its_slot_moves_the_flexible_task(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        sync = create_template(db_session, jobs, _fixed_draft(fixed_time_of_day="12:00"))
+        plants_id = self._flexible_at_nine(db_session, jobs)
+
+        edit_template_this_and_future(db_session, jobs, sync.template.id, patch={"fixed_time_of_day": "09:00"})
+        db_session.commit()
+
+        assert self._reload(db_session, plants_id).scheduled_time == ny(2026, 3, 2, 10, 0)
+
+    def test_a_generated_fixed_occurrence_moves_the_flexible_task_without_a_conflict_notice(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        sync = create_template(db_session, jobs, _fixed_draft(fixed_time_of_day="12:00"))
+        plants_id = self._flexible_at_nine(db_session, jobs)
+
+        generated = generate_and_place_next_instance(
+            db_session,
+            jobs,
+            template=sync.template.model_copy(update={"fixed_time_of_day": "09:00"}),
+            predecessor=None,
+            settings=settings,
+            now=_NOW,
+        )
+        db_session.commit()
+
+        assert generated.scheduled_time == ny(2026, 3, 2, 9, 0)
+        assert NotificationRepository(db_session).list_for_instance(generated.id) == ()
+        assert self._reload(db_session, plants_id).scheduled_time == ny(2026, 3, 2, 10, 0)
