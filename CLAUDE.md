@@ -7,9 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Tessera** is a self-hosted task scheduling application that auto-places flexible tasks into your calendar while respecting fixed commitments, deadlines, and priorities. It's a Python FastAPI backend + React frontend, single-user, containerized.
 
 ### Key References
-- **Product specification:** `docs/design-doc.md` (Revision 9) - this is the authoritative source for what the system *does*
-- **Implementation plan:** `docs/architecture-plan.md` (Revision 3) - defines how it's structured and built
-- **Findings register / decision log:** `docs/implementation-readiness-review-2.md` (IRR-2) - why Revisions 9 and 3 say what they say, plus the findings still open (H2 onward, gating Stage 5+)
+- **Product specification:** `docs/design-doc.md` (Revision 10) - this is the authoritative source for what the system *does*
+- **Implementation plan:** `docs/architecture-plan.md` (Revision 4) - defines how it's structured and built
+- **Findings register / decision log:** `docs/implementation-readiness-review-2.md` (IRR-2) - why Revisions 9 and 3 say what they say (Revision 10's decisions are recorded in design-doc Section 11), plus the findings still open (H2 onward, gating Stage 5+)
 - **Architecture enforcement:** `backend/pyproject.toml` has an `import-linter` configuration that blocks layering violations at CI
 
 ### Common Commands
@@ -28,8 +28,9 @@ Backend layering rules and module map: see `backend/CLAUDE.md`.
 - A **TaskTemplate** defines recurrence rules and defaults (one-time, daily, weekly, etc.), including a **`recurrence.anchor`** of `calendar` (next occurrence lands where the rule says, regardless of the predecessor) or `completion` (`completed_at` + cadence; **flexible templates only**, rejected at save on fixed ones)
 - A **TaskInstance** is the schedulable unit - generated from the template, has a deadline + scheduled_time + status
 - Editing is **two-scoped** (design-doc 3.10):
-  - **"This occurrence"** → edits just the live TaskInstance, sets `detached=true` (design-doc 3.3), skips template propagation forever
-  - **"This and future"** → edits the template; if the live instance isn't `detached`, updates its fields immediately in the same transaction (architecture-plan 4.1)
+  - **"This occurrence"** → edits just that TaskInstance, sets `detached=true` (design-doc 3.3); later series edits skip it unless the user opts in
+  - **"This and future"** → the edited occurrence plus every open occurrence dated after it (by `nominal_date`) and the template, in one transaction (architecture-plan 4.1). Later `detached` occurrences are skipped unless the user ticks the dialog's "include these" checkbox (`include_detached`); earlier and terminal occurrences are never touched (design-doc 3.10, Rev 10)
+- **Every occurrence has its own `nominal_date`** (design-doc 9.1), never edited; a template's first one comes from the user-supplied `start_date`, and no flexible occurrence is placed before its date
 
 ### The Scheduling Algorithm (design-doc Section 6.2)
 This is the high-risk piece. It's a greedy two-pass algorithm:
@@ -82,7 +83,7 @@ Background job wiring and reconciliation rules: see `backend/CLAUDE.md`.
 - `POST /api/v1/task-instances/{id}/reschedule` - reschedule a fixed task (also a "this occurrence" edit per design-doc 6.6, sets `detached=true`)
 - `POST /api/v1/task-instances/{id}/complete` - mark complete
 - `POST /api/v1/task-instances/{id}/extend-deadline` - extend deadline on a `missed` instance (also a "this occurrence" edit per design-doc 6.7)
-- `PATCH /api/v1/task-templates/{id}?scope=this_and_future` - "this and future" edit (touches template + conditionally live instance)
+- `PATCH /api/v1/task-templates/{id}?scope=this_and_future&from_instance={id}` - "this and future" edit (template + the edited and later open occurrences; `include_detached` to include individually edited ones)
 - `DELETE /api/v1/task-instances/{id}` - delete (dependency unlink, not cascade)
 - `POST /api/v1/auth/login`, `/logout` - session-based auth
 - `POST /api/v1/task-instances/{id}/dismiss` - "skip this occurrence"; terminal, preserves the row, and for a completion-anchored template **must generate the successor** or the series silently ends
@@ -96,6 +97,7 @@ Consistent across all endpoints: HTTP status + machine-readable code + human mes
 - `creation_conflict` - fixed task collides with existing event
 - `infeasible_duration` - flexible task can't fit any single day's active-hours window (design-doc 6.8)
 - `invalid_recurrence_anchor` - `anchor: "completion"` on a fixed template
+- `invalid_start_date` - a template's `start_date` is before today
 - `session_expired` - distinct from a generic 401 so the client redirects to login
 - `409 Conflict` - optimistic lock collision; see architecture-plan 5.1. The client sends an `expected` map of the values it read for the fields it is changing; the server compares only those and merges onto the current row. **PATCH must be genuinely partial** - sending the whole object defeats the mechanism
 
@@ -105,6 +107,7 @@ Consistent across all endpoints: HTTP status + machine-readable code + human mes
 
 **TaskTemplate** (design-doc 3.2):
 - `name`, `description`, `location` (informational)
+- `start_date`: local date, required at creation - the first occurrence is derived from it
 - `type`: "fixed" | "flexible"
 - `recurrence`: pattern + interval (one_time, daily, weekly, monthly, custom) + **`anchor`** (`calendar` | `completion`)
 - `fixed_time_of_day`: wall-clock local time (e.g. "18:00"), **re-projected per timezone change** unless instance is `detached`
@@ -119,7 +122,8 @@ Consistent across all endpoints: HTTP status + machine-readable code + human mes
 - `template_id`: always set (even for one-time tasks)
 - `name`, `description`, `location`, `type`, `priority` (copied from template at generation)
 - `estimated_duration_minutes`: integer minutes
-- `detached`: boolean (true = this instance no longer receives template propagation)
+- `detached`: boolean (true = this instance was edited on its own; series edits skip it unless the user opts in)
+- `nominal_date`: DateTime - this occurrence's own date, set at generation, never edited; the series advances from it
 - `scheduled_time`: DateTime (set once placed on timeline)
 - `deadline`: DateTime (set at generation for flexible tasks)
 - `status`: pending | scheduled | in_progress | completed | blocked | missed
@@ -174,7 +178,7 @@ Consistent across all endpoints: HTTP status + machine-readable code + human mes
 
 5. **Don't assume `schedule_time` means the task actually happened.** A flexible task can be marked `completed` without ever being `scheduled` (design-doc 3.3, Section 4) - user already did the task. The timestamp is `completed_at`, not `scheduled_time`.
 
-6. **Don't forget detach.** "This occurrence" edits and manual fixed-task reschedules set `detached=true` (design-doc 3.10, 6.6). A detached instance stops receiving template propagation. The UI should indicate this visibly so users understand why a later template edit didn't land on an instance.
+6. **Don't forget detach.** "This occurrence" edits and manual fixed-task reschedules set `detached=true` (design-doc 3.10, 6.6). A detached instance is skipped by later "this and future" edits unless the user ticks the dialog's checkbox, which also clears the flag. The UI should indicate it visibly, and the edit dialog must name the occurrences it will skip (design-doc 8.1).
 
 7. **Don't store raw UTC offsets for timezone.** Use IANA timezone names (design-doc 14.1). `pytz` or `zoneinfo` (Python 3.9+) handle DST automatically; custom UTC offset math will silently drift by an hour at DST boundaries.
 
