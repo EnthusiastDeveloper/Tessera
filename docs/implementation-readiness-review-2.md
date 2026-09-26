@@ -447,7 +447,7 @@ Plain-HTTP LAN is a **fully supported deployment**, not a degraded mode. The fla
 **Where:** design-doc §6.3, §3.3
 **Finding:** §6.3 applies to "any non-completed instance with ≥1 incomplete dependency" and keys off `deadline`. `deadline` is optional and only set "at generation for flexible tasks" (§3.3). A blocked *fixed* instance - e.g. "Annual inspection, Tuesday 09:00, depends on Prepare car" - has no `deadline`, so it never warns, which is the case where a warning matters most (the time is immovable).
 **Recommendation:** for fixed instances, evaluate the threshold against `scheduled_time`. One line in §6.3.
-**Disposition:** safe correction.
+**Disposition:** **resolved in design doc Revision 10** (Section 11 item 14), as recommended. The waiting fixed instance also appears on the Timeline (§8.1).
 
 ### H11 - A blocked fixed instance whose time passes has no defined outcome
 **Where:** design-doc §4, §6.6, §6.7
