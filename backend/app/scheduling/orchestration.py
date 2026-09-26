@@ -41,11 +41,11 @@ from app.jobs.interface import (
     reminder_job_key,
 )
 from app.scheduling.adapter import (
-    OBSTACLE_STATUSES,
     attempt_placement,
     find_overlapping_scheduled_instances,
     gather_external_obstacles,
     has_fixed_conflict,
+    holds_slot,
 )
 from app.scheduling.generation import generate_next_instance
 from app.scheduling_engine.deadlines import is_deadline_elapsed
@@ -377,19 +377,19 @@ def displace_flexible_under(db: Session, jobs: JobScheduler, instance: TaskInsta
     """§6.5 (Rev 10): a fixed `instance` just landed on its slot - created, generated,
     moved or lengthened - so the flexible work there gives way to it.
     """
-    if instance.type != "fixed" or instance.status not in OBSTACLE_STATUSES or instance.scheduled_time is None:
+    if instance.type != "fixed" or not holds_slot(instance) or instance.scheduled_time is None:
         return
     end = instance.scheduled_time + timedelta(minutes=instance.estimated_duration_minutes)
     displace_flexible_from(db, jobs, start=instance.scheduled_time, end=end, now=now, exclude_instance_id=instance.id)
 
 
 def fixed_slot_change_conflicts(db: Session, instance: TaskInstance, *, start: datetime, duration_minutes: int) -> bool:
-    """§6.5 for an edit to a fixed instance that is on the timeline (`scheduled` or
-    `in_progress`): would its new slot - a new start, a longer duration, or both - collide
+    """§6.5 for an edit to a fixed instance that holds its slot (`scheduled`, `in_progress`,
+    or `blocked` - see `holds_slot`): would its new slot - a new start, a longer duration, or both - collide
     with another fixed instance or an external busy-block? An edit that neither moves the
     start nor lengthens the slot can't create a new overlap, so it is never rejected here.
     """
-    if instance.type != "fixed" or instance.status not in OBSTACLE_STATUSES or instance.scheduled_time is None:
+    if instance.type != "fixed" or not holds_slot(instance) or instance.scheduled_time is None:
         return False
     if start == instance.scheduled_time and duration_minutes <= instance.estimated_duration_minutes:
         return False

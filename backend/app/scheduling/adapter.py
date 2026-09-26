@@ -40,6 +40,19 @@ from app.scheduling_engine.types import BlackoutDate as EngineBlackoutDate
 OBSTACLE_STATUSES = ("scheduled", "in_progress")
 
 
+def holds_slot(instance: TaskInstance) -> bool:
+    """Whether `instance` occupies its `scheduled_time` on the timeline: anything
+    `scheduled` or `in_progress`, plus a `blocked` fixed instance - an appointment keeps
+    its time while it waits on a prerequisite (design doc §6.5, Rev 10).
+    """
+    if instance.scheduled_time is None:
+        return False
+    return instance.status in OBSTACLE_STATUSES or (instance.type == "fixed" and instance.status == "blocked")
+
+
+_SLOT_HOLDING_STATUSES = (*OBSTACLE_STATUSES, "blocked")
+
+
 def _parse_hhmm(value: str) -> time:
     hour, minute = value.split(":")
     return time(int(hour), int(minute))
@@ -110,8 +123,8 @@ def gather_obstacles(
     acquire_write_lock(db)
     repo = TaskInstanceRepository(db)
     obstacles: list[Obstacle] = []
-    for instance in repo.list_by_statuses(OBSTACLE_STATUSES):
-        if instance.id == exclude_instance_id or instance.scheduled_time is None:
+    for instance in repo.list_by_statuses(_SLOT_HOLDING_STATUSES):
+        if instance.id == exclude_instance_id or instance.scheduled_time is None or not holds_slot(instance):
             continue
         if not include_scheduled_flexible and instance.type == "flexible" and instance.status == "scheduled":
             continue
@@ -126,18 +139,19 @@ def gather_obstacles(
 #: purposes (§6.2). An `in_progress` instance is never evicted or flagged here: yanking an
 #: actively-worked-on task off the timeline, or auto-resolving a still-open notification
 #: the moment the user starts it, are both outside what §6.4 asks for.
-_COLLISION_EVICTION_STATUSES = ("scheduled",)
+_COLLISION_EVICTION_STATUSES = ("scheduled", "blocked")
 
 
 def find_overlapping_scheduled_instances(db: Session, *, start: datetime, end: datetime) -> tuple[TaskInstance, ...]:
     """Every `scheduled` (not `in_progress` - see `_COLLISION_EVICTION_STATUSES`) instance
     whose window overlaps `[start, end)` - §6.4 step 3's "for new/moved events colliding
-    with a `scheduled` instance" lookup, the reverse direction of `gather_obstacles`.
+    with a `scheduled` instance" lookup, the reverse direction of `gather_obstacles` -
+    plus every `blocked` fixed instance, which holds its slot while it waits (§6.5).
     """
     repo = TaskInstanceRepository(db)
     overlapping: list[TaskInstance] = []
     for instance in repo.list_by_statuses(_COLLISION_EVICTION_STATUSES):
-        if instance.scheduled_time is None:
+        if instance.scheduled_time is None or not holds_slot(instance):
             continue
         instance_end = instance.scheduled_time + timedelta(minutes=instance.estimated_duration_minutes)
         if instance.scheduled_time < end and start < instance_end:
@@ -240,5 +254,6 @@ __all__ = [
     "gather_external_obstacles",
     "gather_obstacles",
     "has_fixed_conflict",
+    "holds_slot",
     "to_engine_active_hours",
 ]

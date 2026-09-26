@@ -75,6 +75,8 @@ Because a candidate only becomes eligible for scheduling once all its dependenci
 
 Deleting a task that others depend on doesn't cascade: the dependency link is simply removed from the dependent(s), which may unblock them.
 
+**A fixed task that's waiting keeps its time.** A fixed task with an unfinished dependency still holds its slot: nothing else can be booked on top of it, flexible tasks stay out of its way, and you get its reminders as usual. If its time comes while it's still waiting, you get the normal overdue notice, naming what it's waiting on, and can reschedule, mark it complete or skip it. Once the dependency is completed, the task is scheduled at its time as normal. If its time has already passed by then, it stays overdue until you deal with it.
+
 ## Skip vs. delete: two different intents
 
 These look similar but mean different things, and Tessera keeps them distinct:
