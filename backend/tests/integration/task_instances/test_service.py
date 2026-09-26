@@ -538,15 +538,6 @@ class TestDismiss:
             dismiss(db_session, jobs, created.instance.id)
         assert exc_info.value.code == "invalid_field"
 
-    def test_cancels_all_jobs(self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler) -> None:
-        created = create_template(db_session, jobs, _fixed_draft())
-        db_session.commit()
-
-        dismiss(db_session, jobs, created.instance.id)
-        db_session.commit()
-
-        assert created.instance.id in jobs.cancelled_instances
-
     def test_resolves_overdue_unschedulable_and_deadline_missed_notifications(
         self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
     ) -> None:

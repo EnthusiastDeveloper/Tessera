@@ -4,6 +4,7 @@ architecture-plan §8's "Setup-token tests" and "Auth-boundary test" categories.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -162,12 +163,6 @@ class TestLogin:
 
 
 class TestLogoutAndMe:
-    def test_me_requires_authentication(self, app_client: TestClient) -> None:
-        _complete_setup(app_client)
-        response = app_client.get("/api/v1/auth/me")
-        assert response.status_code == 401
-        assert response.json()["code"] == "unauthenticated"
-
     def test_me_returns_the_logged_in_user(self, app_client: TestClient) -> None:
         _complete_setup(app_client)
         app_client.post("/api/v1/auth/login", json={"username": "admin", "password": VALID_PASSWORD})
@@ -184,11 +179,6 @@ class TestLogoutAndMe:
         assert logout_response.status_code == 204
 
         assert app_client.get("/api/v1/auth/me").status_code == 401
-
-    def test_logout_without_a_session_is_rejected_by_the_guard(self, app_client: TestClient) -> None:
-        _complete_setup(app_client)
-        response = app_client.post("/api/v1/auth/logout")
-        assert response.status_code == 401
 
     def test_tampered_cookie_is_rejected(self, app_client: TestClient) -> None:
         _complete_setup(app_client)
@@ -215,13 +205,6 @@ class TestLogoutAndMe:
 
 
 class TestChangePassword:
-    def test_requires_authentication(self, app_client: TestClient) -> None:
-        _complete_setup(app_client)
-        response = app_client.post(
-            "/api/v1/auth/change-password", json={"current_password": VALID_PASSWORD, "new_password": "a-new-password-123"}
-        )
-        assert response.status_code == 401
-
     def test_wrong_current_password_is_rejected(self, app_client: TestClient) -> None:
         _complete_setup(app_client)
         app_client.post("/api/v1/auth/login", json={"username": "admin", "password": VALID_PASSWORD})
@@ -359,15 +342,21 @@ class TestAuthGuardCoverage:
         for route in _iter_api_routes(app.routes):
             methods = getattr(route, "methods", None)
             path = getattr(route, "path", None)
-            if not methods or path is None or "{" in path:
+            if not methods or path is None:
                 continue
+            # Path parameters get a placeholder id: the guard must reject before any
+            # lookup happens, so the id never has to exist.
+            concrete = re.sub(r"\{[^}]+\}", "some-id", path)
             for method in methods:
                 if method == "HEAD" or (method, path) in PUBLIC_ROUTES:
                     continue
-                response = app_client.request(method, path)
+                response = app_client.request(method, concrete)
                 assert response.status_code == 401, f"{method} {path} should require auth, got {response.status_code}"
+                assert response.json()["code"] == "unauthenticated", f"{method} {path}"
                 checked += 1
-        assert checked >= 4, "expected all four auth endpoints (plus docs/openapi) to be checked"
+        # Every API route but the public ones - currently 25. A drop to a handful
+        # means the route enumeration broke, not that the app shrank.
+        assert checked >= 20, f"only {checked} routes were checked"
 
 
 class TestFrontendRequestsBypassTheGuard:

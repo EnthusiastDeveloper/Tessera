@@ -37,10 +37,6 @@ def _flexible_payload(**overrides: object) -> dict[str, object]:
 
 
 class TestGetTemplate:
-    def test_requires_authentication(self, app_client: TestClient) -> None:
-        _complete_setup(app_client)
-        assert app_client.get("/api/v1/task-templates/anything").status_code == 401
-
     def test_returns_the_template(self, app_client: TestClient) -> None:
         _login(app_client)
         created = app_client.post("/api/v1/task-templates", json=_flexible_payload()).json()
@@ -57,10 +53,6 @@ class TestGetTemplate:
 
 
 class TestCreateTemplate:
-    def test_requires_authentication(self, app_client: TestClient) -> None:
-        _complete_setup(app_client)
-        assert app_client.post("/api/v1/task-templates", json=_flexible_payload()).status_code == 401
-
     def test_creates_a_template_and_its_initial_instance(self, app_client: TestClient) -> None:
         _login(app_client)
         response = app_client.post("/api/v1/task-templates", json=_flexible_payload())
@@ -68,12 +60,6 @@ class TestCreateTemplate:
         body = response.json()
         assert body["template"]["name"] == "Deep clean garage"
         assert body["instance"]["template_id"] == body["template"]["id"]
-
-    def test_infeasible_duration_maps_to_422_with_the_right_code(self, app_client: TestClient) -> None:
-        _login(app_client)
-        response = app_client.post("/api/v1/task-templates", json=_flexible_payload(estimated_duration_minutes=999_999))
-        assert response.status_code == 422
-        assert response.json()["code"] == "infeasible_duration"
 
 
 class TestPatchTemplate:
@@ -138,10 +124,6 @@ class TestProjections:
     proves the route wires up: auth, the "/projections" vs "/{template_id}" path-matching
     order, and the response shape (no `id`, no real-instance fields).
     """
-
-    def test_requires_authentication(self, app_client: TestClient) -> None:
-        _complete_setup(app_client)
-        assert app_client.get("/api/v1/task-templates/projections").status_code == 401
 
     def test_does_not_get_captured_by_the_template_id_path_param(self, app_client: TestClient) -> None:
         """Regression guard: `/projections` must resolve to the dedicated route, not

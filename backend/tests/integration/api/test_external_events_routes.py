@@ -39,10 +39,6 @@ def _seed_connection() -> str:
 
 
 class TestListExternalEvents:
-    def test_requires_authentication(self, app_client: TestClient) -> None:
-        _complete_setup(app_client)
-        assert app_client.get("/api/v1/external-events").status_code == 401
-
     def test_returns_empty_list_when_nothing_cached(self, app_client: TestClient) -> None:
         _login(app_client)
         response = app_client.get("/api/v1/external-events")

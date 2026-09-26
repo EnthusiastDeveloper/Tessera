@@ -21,10 +21,6 @@ def _login(client: TestClient) -> None:
 
 
 class TestGetSettings:
-    def test_requires_authentication(self, app_client: TestClient) -> None:
-        _complete_setup(app_client)
-        assert app_client.get("/api/v1/settings").status_code == 401
-
     def test_default_row_exists_from_startup_with_utc_timezone(self, app_client: TestClient) -> None:
         """No TZ env var is set in the test environment (see app_client's monkeypatch
         setup) - the lifespan-created default row should have fallen back to UTC.
@@ -42,10 +38,6 @@ class TestGetSettings:
 
 
 class TestPatchSettings:
-    def test_requires_authentication(self, app_client: TestClient) -> None:
-        _complete_setup(app_client)
-        assert app_client.patch("/api/v1/settings", json={"timezone": "UTC"}).status_code == 401
-
     def test_valid_partial_patch_succeeds_and_touches_only_that_field(self, app_client: TestClient) -> None:
         _login(app_client)
         response = app_client.patch("/api/v1/settings", json={"timezone": "America/New_York"})
