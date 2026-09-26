@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.db.base import generate_id
 from app.db.repositories import NotificationRepository, TaskInstanceRepository, TaskTemplateRepository
 from app.db.schemas import Notification, Recurrence, UserSettings
-from app.jobs.handlers import run_overdue_check
+from app.jobs.handlers import run_dependency_at_risk_check, run_overdue_check
 from app.scheduling.generation import generate_next_instance
 from app.scheduling.orchestration import generate_and_place_next_instance
 from app.task_instances import service as task_instances_service
@@ -90,7 +90,11 @@ class TestCreateTemplate:
         db_session.commit()
 
         assert assemble.instance.status == "blocked"
-        assert set(jobs.scheduled_keys()) == {f"overdue:{assemble.instance.id}", f"reminder:{assemble.instance.id}:15"}
+        assert set(jobs.scheduled_keys()) == {
+            f"overdue:{assemble.instance.id}",
+            f"reminder:{assemble.instance.id}:15",
+            f"dependency_at_risk:{assemble.instance.id}",
+        }
 
     def test_example_a_fixed_conflict_is_a_hard_block_creating_nothing(
         self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
@@ -797,3 +801,43 @@ class TestFixedTaskWaitingOnADependency:
         run_overdue_check(db_session, jobs, instance_id=replace_id)
         db_session.commit()
         assert len(NotificationRepository(db_session).list_for_instance(replace_id)) == 1
+
+    def test_it_is_warned_three_days_before_its_time_naming_the_prerequisite(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        # §6.3 (Rev 10): measured against its time - a fixed task has no deadline.
+        battery_id = self._buy_battery(db_session, jobs)
+        replace_id = self._replace_battery(db_session, jobs, at="12:00", depends_on=battery_id)
+        assert (f"dependency_at_risk:{replace_id}", ny(2026, 2, 27, 12, 0)) in jobs.scheduled
+
+        run_dependency_at_risk_check(db_session, instance_id=replace_id)
+        run_dependency_at_risk_check(db_session, instance_id=replace_id)
+        db_session.commit()
+
+        (notice,) = NotificationRepository(db_session).list_for_instance(replace_id)
+        assert notice.type == "dependency_at_risk"
+        assert notice.message == '"Replace battery" is on Mon 02 Mar 12:00 and is still waiting on "Buy battery".'
+
+    def test_completing_the_prerequisite_resolves_the_warning(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        battery_id = self._buy_battery(db_session, jobs)
+        replace_id = self._replace_battery(db_session, jobs, at="12:00", depends_on=battery_id)
+        run_dependency_at_risk_check(db_session, instance_id=replace_id)
+
+        complete(db_session, jobs, battery_id)
+        db_session.commit()
+
+        (notice,) = NotificationRepository(db_session).list_for_instance(replace_id)
+        assert notice.resolved_at is not None
+        assert f"dependency_at_risk:{replace_id}" in jobs.cancelled
+
+    def test_rescheduling_it_moves_the_warning(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        battery_id = self._buy_battery(db_session, jobs)
+        replace_id = self._replace_battery(db_session, jobs, at="12:00", depends_on=battery_id)
+
+        reschedule(db_session, jobs, replace_id, new_scheduled_time=ny(2026, 3, 9, 12, 0))
+
+        assert (f"dependency_at_risk:{replace_id}", ny(2026, 3, 6, 12, 0)) in jobs.scheduled

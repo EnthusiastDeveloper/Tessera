@@ -26,17 +26,29 @@ function addDays(isoDate: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+/** Whether a fixed instance is waiting on a prerequisite: it still holds its time
+ * (design doc §6.5, Rev 10), so the Timeline shows it - drawn as waiting (§8.1). */
+function isWaitingFixed(instance: TaskInstance): boolean {
+  return instance.type === 'fixed' && instance.status === 'blocked';
+}
+
 /** A real, persisted `TaskInstance` - the only interactive layer. Design doc §8.1 item 4
- * links a click through to `TaskDetailPage` (`/tasks/:instanceId`). */
-export function buildRealEvent(instance: TaskInstance): EventInput | null {
-  if (!instance.scheduled_time) return null; // defensive - callers already filter status=scheduled
+ * links a click through to `TaskDetailPage` (`/tasks/:instanceId`). Shows `scheduled`
+ * instances, plus `blocked` fixed ones drawn as waiting (dashed, half-transparent) and
+ * labelled with what they wait on; `namesById` resolves those prerequisites' names.
+ * Anything else - including an instance without a time - isn't on the Timeline. */
+export function buildRealEvent(instance: TaskInstance, namesById: ReadonlyMap<string, string> = new Map()): EventInput | null {
+  if (!instance.scheduled_time) return null;
+  const waiting = isWaitingFixed(instance);
+  if (instance.status !== 'scheduled' && !waiting) return null;
   const extendedProps: TimelineExtendedProps = { kind: 'real', instanceId: instance.id };
+  const waitingOn = instance.dependencies.map((id) => namesById.get(id) ?? 'a prerequisite').join(', ');
   return {
     id: `real-${instance.id}`,
-    title: instance.name,
+    title: waiting ? `${instance.name} (waiting on ${waitingOn})` : instance.name,
     start: instance.scheduled_time,
     end: addMinutes(instance.scheduled_time, instance.estimated_duration_minutes),
-    classNames: ['fc-event-real'],
+    classNames: waiting ? ['fc-event-real', 'fc-event-waiting'] : ['fc-event-real'],
     extendedProps,
   };
 }
@@ -115,8 +127,9 @@ export interface BuildCalendarEventsInput {
  * those business rules.
  */
 export function buildCalendarEvents({ instances, projections, externalEvents, blackoutDates }: BuildCalendarEventsInput): EventInput[] {
+  const namesById = new Map(instances.map((instance) => [instance.id, instance.name]));
   return [
-    ...instances.map(buildRealEvent).filter((e): e is EventInput => e !== null),
+    ...instances.map((instance) => buildRealEvent(instance, namesById)).filter((e): e is EventInput => e !== null),
     ...projections.map(buildVirtualEvent),
     ...externalEvents.map(buildExternalEvent),
     ...blackoutDates.map(buildBlackoutEvent),

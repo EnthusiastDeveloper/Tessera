@@ -18,10 +18,11 @@ from app.db.repositories import (
     TaskTemplateRepository,
 )
 from app.db.schemas import StatusHistoryEntry, TaskInstance, TaskInstanceStatus, TaskTemplate
-from app.jobs.interface import JobScheduler, overdue_job_key
+from app.jobs.interface import JobScheduler, dependency_at_risk_job_key, overdue_job_key
 from app.scheduling.adapter import build_active_hours_map, has_fixed_conflict
 from app.scheduling.orchestration import (
     DEADLINE_MISSED,
+    DEPENDENCY_AT_RISK,
     TERMINAL_STATUSES,
     UNSCHEDULABLE,
     all_dependencies_completed,
@@ -35,6 +36,7 @@ from app.scheduling.orchestration import (
     resolve_cleared_sync_conflicts,
     resolve_notifications,
     return_to_pending,
+    schedule_dependency_at_risk_job,
     schedule_reminder_and_overdue_jobs,
 )
 from app.scheduling_engine.feasibility import validate_feasible_duration
@@ -154,6 +156,8 @@ def edit_this_occurrence(
 
     if "estimated_duration_minutes" in patch:
         displace_flexible_under(db, jobs, updated, now=now)
+    if "deadline" in patch:
+        schedule_dependency_at_risk_job(jobs, updated)
 
     invalidates_placement = "estimated_duration_minutes" in patch or "deadline" in patch
     if updated.type == "flexible" and updated.status in ("pending", "scheduled") and invalidates_placement:
@@ -181,6 +185,7 @@ def reschedule(db: Session, jobs: JobScheduler, instance_id: str, *, new_schedul
     )
     template = _require_template(db, instance.template_id)
     schedule_reminder_and_overdue_jobs(jobs, updated, template.reminder_offsets_minutes)
+    schedule_dependency_at_risk_job(jobs, updated)
     displace_flexible_under(db, jobs, updated, now=now)
     # §3.9: a manual reschedule that clears the collision resolves any sync_conflict this
     # instance was carrying, immediately rather than waiting for the next poll (Stage 7).
@@ -391,6 +396,9 @@ def promote_if_unblocked(db: Session, jobs: JobScheduler, instance: TaskInstance
             }
         )
     )
+    # §3.9: nothing is waiting any more, so the at-risk warning has cleared.
+    jobs.cancel(job_key=dependency_at_risk_job_key(promoted.id))
+    resolve_notifications(db, instance_id=promoted.id, types=(DEPENDENCY_AT_RISK,), now=now)
     if promoted.type == "fixed":
         if promoted.scheduled_time is not None and promoted.scheduled_time > now:
             # Idempotent: re-points the jobs it already carried while blocked, and gives

@@ -27,9 +27,7 @@ from app.db.schemas import (
     UserSettings,
 )
 from app.jobs.interface import (
-    DEPENDENCY_AT_RISK_THRESHOLD,
     JobScheduler,
-    dependency_at_risk_job_key,
     occurrence_boundary_job_key,
 )
 from app.scheduling.adapter import build_active_hours_map, has_fixed_conflict
@@ -49,6 +47,7 @@ from app.scheduling.orchestration import (
     require_settings,
     resolve_cleared_sync_conflicts,
     return_to_pending,
+    schedule_dependency_at_risk_job,
     schedule_next_occurrence_boundary,
     schedule_reminder_and_overdue_jobs,
 )
@@ -185,8 +184,7 @@ def create_template(db: Session, jobs: JobScheduler, draft: TaskTemplateDraft) -
             now=now,
         )
 
-    if blocked and instance.deadline is not None:
-        jobs.schedule_at(job_key=dependency_at_risk_job_key(instance.id), run_at=instance.deadline - DEPENDENCY_AT_RISK_THRESHOLD)
+    schedule_dependency_at_risk_job(jobs, instance)
 
     if template.recurrence.pattern != "one_time" and template.recurrence.anchor == "calendar":
         schedule_next_occurrence_boundary(db, jobs, template=template, latest_instance=instance, settings=settings, now=now)
@@ -453,8 +451,8 @@ def _propagate_to_instance(
         resolve_cleared_sync_conflicts(db, now=now)
     if retimed_at is not None or "estimated_duration_minutes" in patch:
         displace_flexible_under(db, jobs, updated, now=now)
-    if new_deadline is not None and updated.status == "blocked":
-        jobs.schedule_at(job_key=dependency_at_risk_job_key(updated.id), run_at=new_deadline - DEPENDENCY_AT_RISK_THRESHOLD)
+    if new_deadline is not None or retimed_at is not None:
+        schedule_dependency_at_risk_job(jobs, updated)
 
     if template.type != "flexible" or updated.status not in ("pending", "scheduled"):
         return updated

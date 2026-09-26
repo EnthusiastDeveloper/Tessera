@@ -67,6 +67,34 @@ describe('buildRealEvent', () => {
   });
 });
 
+describe('buildRealEvent - which instances appear (§8.1, Rev 10)', () => {
+  it('omits instances that are neither scheduled nor waiting fixed tasks', () => {
+    expect(buildRealEvent({ ...BASE_INSTANCE, status: 'pending' })).toBeNull();
+    expect(buildRealEvent({ ...BASE_INSTANCE, status: 'completed' })).toBeNull();
+    expect(buildRealEvent({ ...BASE_INSTANCE, status: 'blocked', type: 'flexible' })).toBeNull();
+  });
+
+  it('draws a waiting fixed task distinctly, labelled with what it waits on, and still clickable', () => {
+    const waiting: TaskInstance = { ...BASE_INSTANCE, id: 'fix-1', name: 'Replace battery', type: 'fixed', status: 'blocked', dependencies: ['dep-1'] };
+    const event = buildRealEvent(waiting, new Map([['dep-1', 'Buy battery']]));
+    expect(event?.title).toBe('Replace battery (waiting on Buy battery)');
+    expect(event?.classNames).toEqual(['fc-event-real', 'fc-event-waiting']);
+    expect(event?.extendedProps).toEqual({ kind: 'real', instanceId: 'fix-1' });
+  });
+
+  it('falls back to a generic label when a prerequisite is not in the loaded list', () => {
+    const waiting: TaskInstance = { ...BASE_INSTANCE, type: 'fixed', status: 'blocked', dependencies: ['unknown'] };
+    expect(buildRealEvent(waiting)?.title).toBe('Water the plants (waiting on a prerequisite)');
+  });
+
+  it('resolves prerequisite names from the other instances passed to buildCalendarEvents', () => {
+    const dep: TaskInstance = { ...BASE_INSTANCE, id: 'dep-1', name: 'Buy battery', status: 'pending', scheduled_time: null };
+    const waiting: TaskInstance = { ...BASE_INSTANCE, id: 'fix-1', name: 'Replace battery', type: 'fixed', status: 'blocked', dependencies: ['dep-1'] };
+    const events = buildCalendarEvents({ instances: [dep, waiting], projections: [], externalEvents: [], blackoutDates: [] });
+    expect(events.map((e) => e.title)).toEqual(['Replace battery (waiting on Buy battery)']);
+  });
+});
+
 describe('buildVirtualEvent', () => {
   it('is non-interactive (kind: virtual, no instanceId) and carries no real id', () => {
     const event = buildVirtualEvent(BASE_OCCURRENCE, 0);
