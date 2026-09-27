@@ -74,7 +74,13 @@ class DeleteResult:
 
 
 def list_instances(
-    db: Session, *, status: str | None = None, priority: int | None = None, type: str | None = None, view: str | None = None
+    db: Session,
+    *,
+    status: str | None = None,
+    priority: int | None = None,
+    type: str | None = None,
+    view: str | None = None,
+    template_id: str | None = None,
 ) -> tuple[TaskInstance, ...]:
     """`GET /task-instances` (architecture-plan §3). `view=backlog` is the Backlog view
     (design doc §8.1, architecture-plan §3 Rev 3): "a filter on the existing collection,
@@ -83,10 +89,22 @@ def list_instances(
     may be combined with the other filters - chosen behavior: it takes over the query
     entirely and the other filters are ignored, since the Backlog view already fully
     determines its own status set.
+
+    `template_id` narrows the list to one series (architecture-plan §3, Rev 4) - the edit
+    dialog uses it to name the occurrences a "this and future" edit would skip.
     """
     if view == "backlog":
         return _list_backlog(db)
-    return TaskInstanceRepository(db).list_filtered(status=status, priority=priority, type_=type)
+    repo = TaskInstanceRepository(db)
+    if template_id is None:
+        return repo.list_filtered(status=status, priority=priority, type_=type)
+    return tuple(
+        instance
+        for instance in repo.list_by_template(template_id)
+        if (status is None or instance.status == status)
+        and (priority is None or instance.priority == priority)
+        and (type is None or instance.type == type)
+    )
 
 
 def _list_backlog(db: Session) -> tuple[TaskInstance, ...]:

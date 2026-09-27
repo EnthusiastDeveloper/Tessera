@@ -20,7 +20,8 @@ from app.jobs.interface import (
     overdue_job_key,
     reminder_job_key,
 )
-from app.task_instances.service import complete, dismiss, start_progress
+from app.scheduling.orchestration import generate_and_place_next_instance
+from app.task_instances.service import complete, dismiss, reschedule, start_progress
 from app.task_templates import service as task_templates_service
 from app.task_templates.service import (
     TaskTemplateDraft,
@@ -226,6 +227,46 @@ def pinned_now(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.usefixtures("pinned_now")
 class TestEditThisAndFuture:
+    def test_a_series_retime_re_wires_every_reached_occurrence_and_no_other(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        """architecture-plan §4.1/§8 (Rev 4): with several open occurrences, the edited one
+        and every later non-detached one get their jobs re-pointed; an earlier one and a
+        later detached one are left alone unless `include_detached`."""
+        daily = create_template(
+            db_session,
+            jobs,
+            _fixed_draft(reminder_offsets_minutes=(15,), recurrence=Recurrence(pattern="daily", interval=1, anchor="calendar")),
+        )
+        occurrences = [daily.instance]
+        for _ in range(3):
+            occurrences.append(
+                generate_and_place_next_instance(
+                    db_session, jobs, template=daily.template, predecessor=occurrences[-1], settings=settings, now=_NOW
+                )
+            )
+        mon, tue, wed, thu = (o.id for o in occurrences)
+        reschedule(db_session, jobs, thu, new_scheduled_time=ny(2026, 3, 5, 21, 0))  # detaches Thursday
+        db_session.commit()
+        jobs.scheduled.clear()
+
+        edit_template_this_and_future(
+            db_session, jobs, daily.template.id, patch={"fixed_time_of_day": "19:00"}, from_instance_id=tue
+        )
+        db_session.commit()
+
+        overdue = {key: run_at for key, run_at in jobs.scheduled if key.startswith("overdue:")}
+        assert overdue == {overdue_job_key(tue): ny(2026, 3, 3, 19, 0), overdue_job_key(wed): ny(2026, 3, 4, 19, 0)}
+        assert (reminder_job_key(wed, 15), ny(2026, 3, 4, 18, 45)) in jobs.scheduled
+        assert not any(mon in key or thu in key for key, _ in jobs.scheduled)
+
+        jobs.scheduled.clear()
+        edit_template_this_and_future(
+            db_session, jobs, daily.template.id, patch={"fixed_time_of_day": "19:30"}, from_instance_id=tue, include_detached=True
+        )
+        db_session.commit()
+        assert (overdue_job_key(thu), ny(2026, 3, 5, 19, 30)) in jobs.scheduled
+
     def test_retiming_re_points_overdue_and_reminder_jobs_at_the_new_time(
         self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
     ) -> None:
@@ -275,7 +316,9 @@ class TestEditThisAndFuture:
         db_session.commit()
         jobs.scheduled.clear()
 
-        edit_template_this_and_future(db_session, jobs, daily.template.id, patch={"fixed_time_of_day": "10:15"})
+        edit_template_this_and_future(
+            db_session, jobs, daily.template.id, patch={"fixed_time_of_day": "10:15"}, from_instance_id=daily.instance.id
+        )
         db_session.commit()
 
         boundary = [run_at for key, run_at in jobs.scheduled if key == occurrence_boundary_job_key(daily.template.id)]
@@ -337,7 +380,11 @@ class TestEditThisAndFuture:
         db_session.commit()
 
         edit_template_this_and_future(
-            db_session, jobs, daily.template.id, patch={"recurrence": Recurrence(pattern="one_time", anchor="calendar")}
+            db_session,
+            jobs,
+            daily.template.id,
+            patch={"recurrence": Recurrence(pattern="one_time", anchor="calendar")},
+            from_instance_id=daily.instance.id,
         )
         db_session.commit()
 

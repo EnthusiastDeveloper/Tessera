@@ -146,7 +146,7 @@ class TestExtendAMissedDeadline:
 
 
 class TestEditARecurringTaskBothScopesAndVerifyDetach:
-    def test_this_occurrence_detaches_and_this_and_future_then_skips_it(self, app_client: TestClient) -> None:
+    def test_this_occurrence_detaches_and_this_and_future_from_it_brings_it_back(self, app_client: TestClient) -> None:
         payload = {
             "name": "Daily standup",
             "type": "fixed",
@@ -167,13 +167,19 @@ class TestEditARecurringTaskBothScopesAndVerifyDetach:
         assert this_occurrence.json()["detached"] is True
         assert this_occurrence.json()["name"] == "Standup (renamed once)"
 
-        # "This and future": PATCH the template - a detached live instance is skipped
-        # entirely by propagation (§3.10 "Detach is sticky and total").
-        this_and_future = app_client.patch(f"/api/v1/task-templates/{template_id}?scope=this_and_future", json={"name": "Sync"})
+        # "This and future" must say which occurrence it starts from (architecture-plan §3).
+        unanchored = app_client.patch(f"/api/v1/task-templates/{template_id}?scope=this_and_future", json={"name": "Sync"})
+        assert unanchored.status_code == 422
+        assert unanchored.json()["code"] == "invalid_field"
+
+        # Edited from that occurrence, it takes the edit and rejoins the series (§3.10, Rev 10).
+        this_and_future = app_client.patch(
+            f"/api/v1/task-templates/{template_id}",
+            params={"scope": "this_and_future", "from_instance": instance_id},
+            json={"name": "Sync"},
+        )
         assert this_and_future.status_code == 200, this_and_future.text
         assert this_and_future.json()["name"] == "Sync"
 
-        untouched_instance = app_client.get("/api/v1/task-instances", params={"status": "scheduled"}).json()
-        matching = [i for i in untouched_instance if i["id"] == instance_id]
-        assert len(matching) == 1
-        assert matching[0]["name"] == "Standup (renamed once)"  # the template edit did not propagate
+        series = app_client.get("/api/v1/task-instances", params={"template_id": template_id}).json()
+        assert [(i["id"], i["name"], i["detached"]) for i in series] == [(instance_id, "Sync", False)]

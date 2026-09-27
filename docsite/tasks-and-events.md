@@ -104,16 +104,18 @@ Dismissal, like completion, is irreversible. Recovering from a mistaken skip mea
 Editing a recurring task asks **which scope** you mean:
 
 - **"This occurrence"** - changes only the live instance (name, duration, priority, deadline/scheduled time, etc.). Sets `detached = true` on that instance. The template, and every future occurrence, is unaffected.
-- **"This and future occurrences"** - edits the template, and - unless the current live instance is already `detached` - also applies the same change to it immediately, in the same operation.
+- **"This and future occurrences"** - changes the occurrence you're editing, **every open occurrence of the series dated after it**, and every occurrence not generated yet. Occurrences dated before the one you're editing, and finished ones (completed or skipped), are never changed. It all happens in one operation: if any reached occurrence can't take the change, nothing is changed and the error says which occurrence.
 
-  Two template fields reach the live instance indirectly:
+  Two template fields reach occurrences indirectly:
 
-  - Changing a fixed task's **time of day** moves the live occurrence to the new time on the same date. If the new time collides with another fixed task or a busy external event, the whole edit is rejected - the same hard block as creating the task there.
-  - Changing a flexible task's **deadline offset** moves the live occurrence's deadline by the same amount. If its current slot still finishes in time it stays put; otherwise it's re-placed, and a deadline that has already passed sends it straight to `missed`. An occurrence that is already `missed` is left for you to resolve.
+  - Changing a fixed task's **time of day** moves each reached occurrence to the new time on its own date. If the new time collides with another fixed task or a busy external event on any of them, the whole edit is rejected - the same hard block as creating the task there.
+  - Changing a flexible task's **deadline offset** puts each reached occurrence's deadline at its date plus the new offset. If its current slot still finishes in time it stays put; otherwise it's re-placed, and a deadline that has already passed sends it straight to `missed`. An occurrence that is already `missed` is left for you to resolve.
 
-Once an instance is `detached`, it's skipped **entirely** by future template-wide edits (not just the field you originally overrode) until it reaches `completed`. A manual reschedule of a fixed task works the same way: it's a "this occurrence" edit and sets `detached = true`.
+**Occurrences you changed on their own are skipped - unless you say otherwise.** A "this occurrence" edit (or a manual reschedule of a fixed task) sets `detached = true` on that occurrence. A later "this and future" edit leaves a *later* detached occurrence exactly as it is, all of it, not just the field you originally changed - a change you made on purpose isn't silently undone. Before you save, the form names the occurrences it will skip and offers **"Apply to all upcoming occurrences, including these"**. Tick it and they take the edit too; fields the edit didn't touch keep their own values.
 
-The UI should always show you when an instance is detached - it's the reason a template-wide edit didn't land on a specific occurrence you're looking at.
+The occurrence you're editing always takes the edit, even if it was detached. Either way, every occurrence the edit reaches rejoins the series (`detached` is cleared), so later series edits reach it again.
+
+The task detail view shows when an occurrence is detached - it's the reason a series edit didn't land on it.
 
 ## Deadline extension for missed tasks
 

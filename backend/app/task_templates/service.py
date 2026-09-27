@@ -56,11 +56,13 @@ from app.scheduling_engine.feasibility import validate_feasible_duration
 
 
 class TemplateValidationError(Exception):
-    """`code` maps to the API error envelope (architecture-plan §3)."""
+    """`code` maps to the API error envelope (architecture-plan §3); `details`, when set,
+    rides along in it (e.g. which occurrence a "this and future" edit failed on)."""
 
-    def __init__(self, code: str, message: str) -> None:
+    def __init__(self, code: str, message: str, *, details: dict[str, object] | None = None) -> None:
         super().__init__(message)
         self.code = code
+        self.details = details
 
 
 @dataclass(frozen=True)
@@ -348,17 +350,32 @@ def archive_template(db: Session, jobs: JobScheduler, template_id: str) -> Archi
     return ArchiveResult(template=archived, incomplete_instance_ids=incomplete)
 
 
-def edit_template_this_and_future(db: Session, jobs: JobScheduler, template_id: str, *, patch: dict[str, object]) -> TaskTemplate:
-    """§3.10 "this and future": writes the template, then - unless the currently-live
-    instance is already `detached` - propagates matching fields to it in the same
-    transaction, re-entering §6.2 if the propagation invalidates its placement.
+def edit_template_this_and_future(
+    db: Session,
+    jobs: JobScheduler,
+    template_id: str,
+    *,
+    patch: dict[str, object],
+    from_instance_id: str | None = None,
+    include_detached: bool = False,
+) -> TaskTemplate:
+    """§3.10 "this and future" (rewritten Rev 10; architecture-plan §4.1): writes the
+    template and, in the same transaction, the edited occurrence (`from_instance_id`) plus
+    every open occurrence of the series dated after it (by `nominal_date`). A later
+    `detached` occurrence is skipped unless `include_detached`; the edited one always
+    takes the edit. Each reached occurrence has its `detached` flag cleared - it rejoins
+    the series. Earlier and terminal occurrences are never touched.
 
-    A `fixed_time_of_day` change re-projects the live fixed instance's `scheduled_time`
-    onto the same local date (§14.1 wall-clock semantics). That is a retime, so §6.5's
-    hard block applies: a collision rejects the whole edit with `creation_conflict`
-    before anything is written or any job is touched. A `deadline_offset_minutes` change
-    moves the live flexible instance's `deadline` by the same delta, keeping its nominal
-    date fixed (§9.1: `deadline = nominal_date + deadline_offset_minutes`).
+    `from_instance_id` is required for a recurring template with open occurrences -
+    without it "this" is undefined (architecture-plan §3). Omitted, the edit starts from
+    the earliest open occurrence, which is unambiguous for a one-time template (it has
+    only the one) and for a series with none open (the edit reaches only the template).
+
+    Every reached occurrence is validated before anything is written: a fixed one retimed
+    or lengthened into a collision rejects the whole edit with `creation_conflict`, naming
+    it. A `fixed_time_of_day` change re-projects each fixed occurrence's `scheduled_time`
+    onto its own local date (§14.1); a `deadline_offset_minutes` change puts each flexible
+    occurrence's `deadline` at `nominal_date` + the new offset (§9.1).
     """
     repo = TaskTemplateRepository(db)
     current = repo.get(template_id)
@@ -379,37 +396,42 @@ def edit_template_this_and_future(db: Session, jobs: JobScheduler, template_id: 
                 "estimated_duration_minutes does not fit any day's effective active-hours window.",
             )
 
-    live = _find_live_instance(db, template_id)
-    propagate_to = live if live is not None and not live.detached else None
-    retimed_at = (
-        _retimed_scheduled_time(propagate_to, previous=current, template=prospective, settings=settings)
-        if propagate_to is not None
-        else None
-    )
-    if propagate_to is not None and fixed_slot_change_conflicts(
-        db,
-        propagate_to,
-        start=retimed_at or propagate_to.scheduled_time or utcnow(),
-        duration_minutes=prospective.estimated_duration_minutes
-        if "estimated_duration_minutes" in patch
-        else propagate_to.estimated_duration_minutes,
-    ):
+    reached = _reached_occurrences(db, template_id, from_instance_id=from_instance_id, include_detached=include_detached)
+    if from_instance_id is None and reached and current.recurrence.pattern != "one_time":
         raise TemplateValidationError(
-            "creation_conflict", "The new fixed time or duration collides with an existing fixed task or external event."
+            "invalid_field", "from_instance is required for a recurring task - it names the occurrence the edit starts from."
         )
+    retimes: dict[str, datetime | None] = {}
+    for occurrence in reached:
+        retimed_at = _retimed_scheduled_time(occurrence, previous=current, template=prospective, settings=settings)
+        retimes[occurrence.id] = retimed_at
+        if fixed_slot_change_conflicts(
+            db,
+            occurrence,
+            start=retimed_at or occurrence.scheduled_time or utcnow(),
+            duration_minutes=prospective.estimated_duration_minutes
+            if "estimated_duration_minutes" in patch
+            else occurrence.estimated_duration_minutes,
+        ):
+            when = _local_label(occurrence, settings=settings)
+            raise TemplateValidationError(
+                "creation_conflict",
+                f"The new fixed time or duration of the {when} occurrence collides with an existing fixed task or external event.",
+                details={"instance_id": occurrence.id},
+            )
 
     new_template = repo.update(prospective)
 
-    if propagate_to is not None:
+    for occurrence in reached:
         _propagate_to_instance(
             db,
             jobs,
-            instance=propagate_to,
+            instance=occurrence,
             previous=current,
             template=new_template,
             settings=settings,
             patch=patch,
-            retimed_at=retimed_at,
+            retimed_at=retimes[occurrence.id],
         )
 
     _rewire_occurrence_boundary(db, jobs, previous=current, template=new_template, settings=settings)
@@ -417,12 +439,45 @@ def edit_template_this_and_future(db: Session, jobs: JobScheduler, template_id: 
     return new_template
 
 
-def _find_live_instance(db: Session, template_id: str) -> TaskInstance | None:
-    """The most recently generated non-terminal instance - §3.10's "currently-live" one."""
-    for instance in TaskInstanceRepository(db).list_by_template(template_id):  # most-recent-first
-        if instance.status not in TERMINAL_STATUSES:
-            return instance
-    return None
+def _reached_occurrences(
+    db: Session, template_id: str, *, from_instance_id: str | None, include_detached: bool
+) -> list[TaskInstance]:
+    """§3.10's reach, oldest first: the edited occurrence, then every open occurrence dated
+    after it - minus the `detached` ones unless `include_detached`."""
+    open_occurrences = sorted(
+        (i for i in TaskInstanceRepository(db).list_by_template(template_id) if i.status not in TERMINAL_STATUSES),
+        key=_occurrence_date,
+    )
+    if from_instance_id is None:
+        if not open_occurrences:
+            return []
+        edited = open_occurrences[0]
+    else:
+        found = TaskInstanceRepository(db).get(from_instance_id)
+        if found is None or found.template_id != template_id:
+            raise TemplateValidationError("invalid_field", "from_instance is not an occurrence of this task.")
+        if found.status in TERMINAL_STATUSES:
+            raise TemplateValidationError(
+                "invalid_field", f"from_instance is {found.status} - a finished occurrence can't be edited."
+            )
+        edited = found
+    later = [
+        i
+        for i in open_occurrences
+        if i.id != edited.id and _occurrence_date(i) > _occurrence_date(edited) and (include_detached or not i.detached)
+    ]
+    return [edited, *later]
+
+
+def _occurrence_date(instance: TaskInstance) -> datetime:
+    """§3.10 orders occurrences by `nominal_date`; `generated_at` stands in on the (only
+    theoretically possible) row the nominal-date backfill skipped."""
+    return instance.nominal_date or instance.generated_at
+
+
+def _local_label(instance: TaskInstance, *, settings: UserSettings) -> str:
+    moment = instance.scheduled_time or _occurrence_date(instance)
+    return moment.astimezone(ZoneInfo(settings.timezone)).strftime("%a %d %b")
 
 
 def _propagate_to_instance(
@@ -436,13 +491,15 @@ def _propagate_to_instance(
     patch: dict[str, object],
     retimed_at: datetime | None,
 ) -> TaskInstance:
-    """Applies a "this and future" edit to the non-detached live instance and re-wires
-    every job the change affects (architecture-plan §4.1: the DB write and its job side
-    effects live in one method). `retimed_at` is precomputed by the caller, which has
-    already run §6.5's conflict check on it.
+    """Applies a "this and future" edit to one reached occurrence and re-wires every job
+    the change affects (architecture-plan §4.1: the DB write and its job side effects
+    live in one method). `retimed_at` is precomputed by the caller, which has already run
+    §6.5's conflict check on it. The occurrence rejoins the series (`detached` cleared).
     """
     now = utcnow()
     instance_updates: dict[str, object] = {field: getattr(template, field) for field in _PROPAGATABLE_FIELDS if field in patch}
+    if instance.detached:
+        instance_updates["detached"] = False
     if retimed_at is not None:
         instance_updates["scheduled_time"] = retimed_at
     new_deadline = _recomputed_deadline(instance, previous=previous, template=template)
@@ -504,16 +561,20 @@ def _retimed_scheduled_time(
 
 
 def _recomputed_deadline(instance: TaskInstance, *, previous: TaskTemplate, template: TaskTemplate) -> datetime | None:
-    """§9.1: `deadline = nominal_date + deadline_offset_minutes`, so an offset change moves
-    the deadline by exactly the delta and leaves the nominal date where it was. `None`
-    when nothing needs to move.
+    """§9.1: `deadline = nominal_date + deadline_offset_minutes`, so an offset change puts
+    the deadline there - which also replaces a custom deadline on an occurrence the user
+    chose to bring back into the series. `None` when the offset didn't change or the
+    deadline is already there.
     """
     if instance.type != "flexible" or instance.status not in _REDEADLINABLE_FLEXIBLE_STATUSES or instance.deadline is None:
         return None
-    delta = (template.deadline_offset_minutes or 0) - (previous.deadline_offset_minutes or 0)
-    if delta == 0:
+    if template.deadline_offset_minutes == previous.deadline_offset_minutes:
         return None
-    return instance.deadline + timedelta(minutes=delta)
+    if instance.nominal_date is None:
+        delta = (template.deadline_offset_minutes or 0) - (previous.deadline_offset_minutes or 0)
+        return instance.deadline + timedelta(minutes=delta)
+    recomputed = instance.nominal_date + timedelta(minutes=template.deadline_offset_minutes or 0)
+    return None if recomputed == instance.deadline else recomputed
 
 
 def _fits_before(instance: TaskInstance, deadline: datetime) -> bool:

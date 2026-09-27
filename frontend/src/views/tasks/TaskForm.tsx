@@ -1,11 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { DurationInput } from '../../components/DurationInput';
 import { ScopePrompt } from '../../components/ScopePrompt';
 import { ApiError, toApiError } from '../../api/client';
 import { createTemplate, patchTemplateThisAndFuture } from '../../api/taskTemplates';
 import type { CreateTemplatePayload, PatchTemplatePayload } from '../../api/taskTemplates';
-import { patchInstanceThisOccurrence } from '../../api/taskInstances';
+import { listInstances, patchInstanceThisOccurrence } from '../../api/taskInstances';
 import type { PatchInstancePayload } from '../../api/taskInstances';
 import { DEADLINE_OFFSET_UNITS, ESTIMATED_DURATION_UNITS } from '../../lib/duration';
 import type {
@@ -36,6 +36,56 @@ function toDatetimeLocal(iso: string | null | undefined): string {
 
 function fromDatetimeLocal(value: string): string {
   return new Date(value).toISOString();
+}
+
+const TERMINAL_STATUSES = new Set(['completed', 'dismissed']);
+
+/** Occurrences a "this and future" edit from `edited` would skip by default: open ones
+ * dated after it that were edited on their own (design doc §3.10, Rev 10). */
+function skippedOccurrences(series: TaskInstance[], edited: TaskInstance): TaskInstance[] {
+  const editedDate = edited.nominal_date ?? edited.generated_at;
+  return series
+    .filter(
+      (occurrence) =>
+        occurrence.id !== edited.id &&
+        occurrence.detached &&
+        !TERMINAL_STATUSES.has(occurrence.status) &&
+        (occurrence.nominal_date ?? occurrence.generated_at) > editedDate
+    )
+    .sort((a, b) => ((a.nominal_date ?? a.generated_at) < (b.nominal_date ?? b.generated_at) ? -1 : 1));
+}
+
+function occurrenceLabel(occurrence: TaskInstance): string {
+  return new Date(occurrence.scheduled_time ?? occurrence.nominal_date ?? occurrence.generated_at).toLocaleDateString(
+    undefined,
+    { weekday: 'short', day: 'numeric', month: 'short' }
+  );
+}
+
+/** Drops null/undefined/'' so "unset" compares equal however each side spells it. */
+function normalized(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(normalized);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([, v]) => v !== null && v !== undefined && v !== '')
+        .sort(([a], [b]) => (a < b ? -1 : 1))
+        .map(([k, v]) => [k, normalized(v)])
+    );
+  }
+  return value === '' ? null : (value ?? null);
+}
+
+/** Only the fields that differ from the template - PATCH must be genuinely partial
+ * (architecture-plan §5.1), and a field the user didn't touch must not be pushed onto
+ * occurrences that kept their own value (design doc §3.10). */
+function changedFields(payload: PatchTemplatePayload, template: TaskTemplate): PatchTemplatePayload {
+  const current = template as unknown as Record<string, unknown>;
+  return Object.fromEntries(
+    Object.entries(payload).filter(
+      ([key, value]) => value !== undefined && JSON.stringify(normalized(value)) !== JSON.stringify(normalized(current[key]))
+    )
+  ) as PatchTemplatePayload;
 }
 
 /** Today as a local "YYYY-MM-DD" - the earliest start date a new task may take. */
@@ -81,6 +131,8 @@ export function TaskForm({ mode, template, instance, onSaved, onCancel }: TaskFo
   const [dependencies, setDependencies] = useState<string[]>([]);
 
   const [scope, setScope] = useState<EditScope | null>(null);
+  const [series, setSeries] = useState<TaskInstance[]>([]);
+  const [includeDetached, setIncludeDetached] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -92,6 +144,23 @@ export function TaskForm({ mode, template, instance, onSaved, onCancel }: TaskFo
   // override) never apply to a single occurrence (design doc §3.10's field table) - the
   // form hides them entirely rather than showing something that would silently no-op.
   const showTemplateOnlyFields = effectiveScope !== 'this_occurrence';
+
+  useEffect(() => {
+    if (!isEdit || !isRecurring) return;
+    let cancelled = false;
+    listInstances({ template_id: template!.id })
+      .then((occurrences) => {
+        if (!cancelled) setSeries(occurrences);
+      })
+      .catch(() => {
+        // Only the skipped-occurrences notice depends on this; the edit itself doesn't.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isEdit, isRecurring, template]);
+
+  const skipped = isEdit && isRecurring && instance ? skippedOccurrences(series, instance) : [];
 
   const handleSubmit = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
@@ -142,7 +211,12 @@ export function TaskForm({ mode, template, instance, onSaved, onCancel }: TaskFo
             ...(pattern === 'monthly' ? { day_of_month: dayOfMonth } : {}),
           },
         };
-        const updated = await patchTemplateThisAndFuture(template!.id, payload);
+        const updated = await patchTemplateThisAndFuture(template!.id, changedFields(payload, template!), {
+          // A one-time task has only its one occurrence; naming it would refuse an edit
+          // once that occurrence is finished, when the template alone is still editable.
+          fromInstanceId: isRecurring ? instance?.id : undefined,
+          includeDetached: skipped.length > 0 && includeDetached,
+        });
         onSaved({ template: updated });
       } else {
         const payload: PatchInstancePayload = {
@@ -172,6 +246,21 @@ export function TaskForm({ mode, template, instance, onSaved, onCancel }: TaskFo
       )}
 
       {isEdit && isRecurring && <ScopePrompt value={scope} onChange={setScope} />}
+
+      {effectiveScope === 'this_and_future' && skipped.length > 0 && (
+        <div className="field" role="note">
+          <p>
+            {skipped.length === 1
+              ? '1 upcoming occurrence has its own changes and won’t be updated: '
+              : `${skipped.length} upcoming occurrences have their own changes and won’t be updated: `}
+            {skipped.map(occurrenceLabel).join(', ')}
+          </p>
+          <label>
+            <input type="checkbox" checked={includeDetached} onChange={(event) => setIncludeDetached(event.target.checked)} />{' '}
+            Apply to all upcoming occurrences, including these
+          </label>
+        </div>
+      )}
 
       <div className="field">
         <label htmlFor="task-name">Name</label>
