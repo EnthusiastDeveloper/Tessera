@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 from sqlalchemy.orm import Session
 
+from app.jobs.interface import NoOpJobScheduler
 from app.settings import service
 
 
@@ -31,7 +32,7 @@ class TestGetOrCreateDefault:
 class TestUpdateSettings:
     def test_partial_update_touches_only_the_given_field(self, db_session: Session) -> None:
         service.get_or_create_default(db_session, default_timezone="UTC")
-        updated = service.update_settings(db_session, patch={"timezone": "Asia/Tokyo"})
+        updated = service.update_settings(db_session, NoOpJobScheduler(), patch={"timezone": "Asia/Tokyo"})
         assert updated.timezone == "Asia/Tokyo"
         assert updated.budget_enforcement == "soft"
         assert updated.first_day_of_week == "monday"
@@ -40,50 +41,50 @@ class TestUpdateSettings:
     def test_rejects_invalid_timezone(self, db_session: Session) -> None:
         service.get_or_create_default(db_session, default_timezone="UTC")
         with pytest.raises(service.SettingsValidationError) as exc_info:
-            service.update_settings(db_session, patch={"timezone": "Not/A/Zone"})
+            service.update_settings(db_session, NoOpJobScheduler(), patch={"timezone": "Not/A/Zone"})
         assert exc_info.value.code == "invalid_timezone"
 
     def test_rejects_active_hours_missing_a_day(self, db_session: Session) -> None:
         service.get_or_create_default(db_session, default_timezone="UTC")
         incomplete = {k: v for k, v in service.DEFAULT_ACTIVE_HOURS.items() if k != "sunday"}
         with pytest.raises(service.SettingsValidationError) as exc_info:
-            service.update_settings(db_session, patch={"active_hours": incomplete})
+            service.update_settings(db_session, NoOpJobScheduler(), patch={"active_hours": incomplete})
         assert exc_info.value.code == "invalid_day_map"
 
     def test_rejects_active_hours_with_an_unexpected_key(self, db_session: Session) -> None:
         service.get_or_create_default(db_session, default_timezone="UTC")
         bad = {**service.DEFAULT_ACTIVE_HOURS, "someday": None}
         with pytest.raises(service.SettingsValidationError) as exc_info:
-            service.update_settings(db_session, patch={"active_hours": bad})
+            service.update_settings(db_session, NoOpJobScheduler(), patch={"active_hours": bad})
         assert exc_info.value.code == "invalid_day_map"
 
     def test_rejects_daily_time_budget_missing_a_day(self, db_session: Session) -> None:
         service.get_or_create_default(db_session, default_timezone="UTC")
         incomplete = {k: v for k, v in service.DEFAULT_DAILY_TIME_BUDGET.items() if k != "monday"}
         with pytest.raises(service.SettingsValidationError) as exc_info:
-            service.update_settings(db_session, patch={"daily_time_budget_minutes": incomplete})
+            service.update_settings(db_session, NoOpJobScheduler(), patch={"daily_time_budget_minutes": incomplete})
         assert exc_info.value.code == "invalid_day_map"
 
     def test_full_valid_active_hours_map_is_accepted(self, db_session: Session) -> None:
         service.get_or_create_default(db_session, default_timezone="UTC")
         new_hours = {**service.DEFAULT_ACTIVE_HOURS, "saturday": None}
-        updated = service.update_settings(db_session, patch={"active_hours": new_hours})
+        updated = service.update_settings(db_session, NoOpJobScheduler(), patch={"active_hours": new_hours})
         assert updated.active_hours["saturday"] is None
         assert updated.active_hours["monday"] == service.DEFAULT_ACTIVE_HOURS["monday"]
 
     def test_full_valid_daily_time_budget_map_is_accepted(self, db_session: Session) -> None:
         service.get_or_create_default(db_session, default_timezone="UTC")
         new_budget = {**service.DEFAULT_DAILY_TIME_BUDGET, "monday": 120}
-        updated = service.update_settings(db_session, patch={"daily_time_budget_minutes": new_budget})
+        updated = service.update_settings(db_session, NoOpJobScheduler(), patch={"daily_time_budget_minutes": new_budget})
         assert updated.daily_time_budget_minutes["monday"] == 120
         assert updated.daily_time_budget_minutes["tuesday"] is None
 
     def test_budget_enforcement_can_be_updated(self, db_session: Session) -> None:
         service.get_or_create_default(db_session, default_timezone="UTC")
-        updated = service.update_settings(db_session, patch={"budget_enforcement": "strict"})
+        updated = service.update_settings(db_session, NoOpJobScheduler(), patch={"budget_enforcement": "strict"})
         assert updated.budget_enforcement == "strict"
 
     def test_raises_when_no_settings_row_exists_yet(self, db_session: Session) -> None:
         with pytest.raises(service.SettingsValidationError) as exc_info:
-            service.update_settings(db_session, patch={"timezone": "UTC"})
+            service.update_settings(db_session, NoOpJobScheduler(), patch={"timezone": "UTC"})
         assert exc_info.value.code == "settings_not_initialized"

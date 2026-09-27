@@ -4,13 +4,15 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.api.dependencies import DB_SESSION
+from app.api.dependencies import DB_SESSION, get_request_job_scheduler
 from app.api.errors import AppError
+from app.db.repositories import ScheduleRepairRepository
 from app.db.schemas import ActiveHoursWindow, BlackoutDate, DayName, UserSettings
+from app.jobs.interface import JobScheduler
 from app.settings import service
 
 router = APIRouter(prefix="/api/v1/settings", tags=["settings"])
@@ -38,8 +40,40 @@ def get_settings_endpoint(db: Session = DB_SESSION) -> UserSettings:
     return service.get_or_create_default(db, default_timezone="UTC")
 
 
+class ScheduleRepairResponse(BaseModel):
+    """Design doc §6.10: progress of the latest background schedule repair."""
+
+    id: str
+    status: Literal["running", "finished"]
+    done: int
+    total: int
+    moved: int
+    unschedulable: int
+
+
+@router.get("/schedule-repair")
+def get_schedule_repair_endpoint(db: Session = DB_SESSION) -> ScheduleRepairResponse | None:
+    """The latest repair, or `null` if there has never been one. Polled by the client
+    after a settings save to drive the "Fixing the calendar (n/total)" overlay."""
+    repair = ScheduleRepairRepository(db).latest()
+    if repair is None:
+        return None
+    return ScheduleRepairResponse(
+        id=repair.id,
+        status="finished" if repair.finished_at is not None else "running",
+        done=repair.done,
+        total=repair.total,
+        moved=repair.moved,
+        unschedulable=repair.unschedulable,
+    )
+
+
 @router.patch("")
-def patch_settings_endpoint(payload: SettingsPatchRequest, db: Session = DB_SESSION) -> UserSettings:
+def patch_settings_endpoint(
+    payload: SettingsPatchRequest,
+    db: Session = DB_SESSION,
+    jobs: JobScheduler = Depends(get_request_job_scheduler),
+) -> UserSettings:
     # Deliberately not payload.model_dump() - that recursively flattens nested models
     # (ActiveHoursWindow, BlackoutDate) to plain dicts, and model_copy(update=...) below
     # does not re-validate, so the domain object would end up holding raw dicts where it
@@ -49,6 +83,6 @@ def patch_settings_endpoint(payload: SettingsPatchRequest, db: Session = DB_SESS
     if patch.get("blackout_dates") is not None:
         patch["blackout_dates"] = tuple(patch["blackout_dates"])
     try:
-        return service.update_settings(db, patch=patch)
+        return service.update_settings(db, jobs, patch=patch)
     except service.SettingsValidationError as exc:
         raise AppError.for_code(exc.code, str(exc)) from exc

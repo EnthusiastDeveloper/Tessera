@@ -11,9 +11,11 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy.orm import Session
 
-from app.db.base import generate_id
+from app.db.base import generate_id, utcnow
 from app.db.repositories import UserSettingsRepository
 from app.db.schemas import ActiveHoursWindow, DayName, UserSettings
+from app.jobs.interface import JobScheduler
+from app.scheduling.repair import start_repair_if_needed
 
 DAY_NAMES: tuple[DayName, ...] = (
     "monday",
@@ -64,8 +66,17 @@ def get_or_create_default(db: Session, *, default_timezone: str) -> UserSettings
     )
 
 
-def update_settings(db: Session, *, patch: dict[str, Any]) -> UserSettings:
+#: Settings that constrain where flexible work may go (§3.7). Changing any of them may
+#: invalidate existing placements, which §6.10 repairs.
+_PLACEMENT_RULES = frozenset({"active_hours", "blackout_dates", "daily_time_budget_minutes", "budget_enforcement"})
+
+
+def update_settings(db: Session, jobs: JobScheduler, *, patch: dict[str, Any]) -> UserSettings:
     """Apply a genuinely partial update - only keys present in `patch` are touched.
+
+    §6.10 (Rev 11): if a placement rule changed and some scheduled flexible task no
+    longer fits, a background repair is recorded and scheduled in the same transaction
+    (`GET /settings/schedule-repair` reports it). The save itself is never blocked.
 
     `patch` values for `active_hours`/`daily_time_budget_minutes`/`blackout_dates` are
     already-validated Pydantic sub-models from the API layer's request schema; this
@@ -100,8 +111,10 @@ def update_settings(db: Session, *, patch: dict[str, Any]) -> UserSettings:
     if "first_day_of_week" in patch:
         updates["first_day_of_week"] = patch["first_day_of_week"]
 
-    updated = current.model_copy(update=updates)
-    return repo.update(updated)
+    saved = repo.update(current.model_copy(update=updates))
+    if _PLACEMENT_RULES & patch.keys():
+        start_repair_if_needed(db, jobs, saved, now=utcnow())
+    return saved
 
 
 def _validate_timezone(tz: str) -> None:

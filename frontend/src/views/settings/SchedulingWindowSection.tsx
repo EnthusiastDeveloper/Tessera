@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { DayOfWeekRows } from '../../components/DayOfWeekRows';
 import { DurationInput } from '../../components/DurationInput';
 import { updateSettings } from '../../api/settings';
+import { announcePossibleScheduleRepair } from '../../lib/scheduleRepairEvents';
 import { ApiError } from '../../api/client';
 import { DAILY_BUDGET_UNITS } from '../../lib/duration';
 import { DAY_LABELS } from '../../lib/days';
@@ -97,6 +98,7 @@ export function SchedulingWindowSection({ settings, onUpdated }: SchedulingWindo
       });
       onUpdated(updated);
       setSuccessMessage('Scheduling window saved.');
+      announcePossibleScheduleRepair();
     } catch (err) {
       setBannerError(err instanceof ApiError ? err.message : 'Could not reach the server.');
     } finally {

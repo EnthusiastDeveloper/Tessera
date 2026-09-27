@@ -51,6 +51,7 @@ from app.scheduling.orchestration import (
     schedule_next_occurrence_boundary,
     schedule_reminder_and_overdue_jobs,
 )
+from app.scheduling.repair import find_invalid_placements
 from app.scheduling_engine.dependencies import cycle_check
 from app.scheduling_engine.feasibility import validate_feasible_duration
 
@@ -518,7 +519,13 @@ def _propagate_to_instance(
     if template.type != "flexible" or updated.status not in ("pending", "scheduled"):
         return updated
 
-    placement_invalidated = "estimated_duration_minutes" in patch or "active_hours_override" in patch
+    # A new override gives a pending occurrence a fresh attempt, but only invalidates a
+    # scheduled one's slot if it no longer covers it (§6.10) - placement is an
+    # incremental fit, so a slot that still fits stays put.
+    placement_invalidated = "estimated_duration_minutes" in patch or (
+        "active_hours_override" in patch
+        and (updated.status == "pending" or bool(find_invalid_placements(db, settings, only={updated.id})))
+    )
     if new_deadline is not None:
         # A pending instance gets a fresh attempt against its new window (a later deadline
         # may now fit, an elapsed one goes to `missed` via §6.7's gate). A scheduled one is

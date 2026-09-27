@@ -43,6 +43,12 @@ A day can be:
 
 There is deliberately no "unrestricted" value. If you want a day fully open, set it explicitly to `00:00`–`23:59`.
 
+### When the rules get stricter, Tessera fixes the calendar
+
+Narrowing active hours, excluding a day, adding a blackout date, or - with budget enforcement set to "respect the budget" - lowering a day's budget can leave flexible tasks sitting where they're no longer allowed. When you save a change like that, Tessera finds every scheduled flexible task that no longer fits and places it again, or tells you in Notifications if there's no room left before its deadline. While it works, the screen shows **"Fixing the calendar (*n*/*total*)…"**; when it's done, you get a summary of how many tasks moved.
+
+It never moves a task that still fits, a task you've already started, or a fixed task. A change that makes the rules looser (a longer window, a removed blackout) doesn't move anything: tasks stay where they are. Changing a single task's own active-hours override does the same check, for that task's occurrences only.
+
 ### Per-task active-hours override
 
 A task template can define its own `active_hours_override`, which **merges** over the global map rather than replacing it wholesale:

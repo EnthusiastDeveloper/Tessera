@@ -229,6 +229,18 @@ class OAuthToken(_Frozen):
     updated_at: datetime
 
 
+class ScheduleRepair(_Frozen):
+    """Progress of a background schedule repair (design doc §6.10, architecture-plan §5.2)."""
+
+    id: str
+    total: int
+    done: int = 0
+    moved: int = 0
+    unschedulable: int = 0
+    requested_at: datetime
+    finished_at: datetime | None = None
+
+
 __all__ = [
     "ActiveHoursWindow",
     "AdminPasswordResetMarker",
@@ -243,6 +255,7 @@ __all__ = [
     "OAuthToken",
     "Priority",
     "Recurrence",
+    "ScheduleRepair",
     "RecurrenceAnchor",
     "RecurrencePattern",
     "StatusHistoryEntry",
