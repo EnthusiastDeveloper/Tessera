@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { getSettings } from '../../api/settings';
 import { getTemplate } from '../../api/taskTemplates';
+import { TimezoneNotice } from '../../components/TimezoneNotice';
 import { listInstances } from '../../api/taskInstances';
 import type { TaskInstance, TaskTemplate } from '../../types/task';
 import { DeleteTaskDialog } from './DeleteTaskDialog';
@@ -22,6 +24,7 @@ export function EditTaskPage(): JSX.Element {
   const [template, setTemplate] = useState<TaskTemplate | null>(null);
   const [instance, setInstance] = useState<TaskInstance | null>(null);
   const [showDelete, setShowDelete] = useState(false);
+  const [settingsTimezone, setSettingsTimezone] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -33,8 +36,12 @@ export function EditTaskPage(): JSX.Element {
           if (!cancelled) setState('error');
           return;
         }
-        const loadedTemplate = await getTemplate(found.template_id);
+        const [loadedTemplate, settings] = await Promise.all([
+          getTemplate(found.template_id),
+          getSettings().catch(() => null), // only the timezone notice needs it
+        ]);
         if (cancelled) return;
+        setSettingsTimezone(settings?.timezone ?? null);
         setInstance(found);
         setTemplate(loadedTemplate);
         setState('ready');
@@ -54,6 +61,7 @@ export function EditTaskPage(): JSX.Element {
   return (
     <div>
       <h2>Edit task</h2>
+      <TimezoneNotice settingsTimezone={settingsTimezone} forTimeEntry />
       {showDelete ? (
         <DeleteTaskDialog
           template={template}

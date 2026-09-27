@@ -130,6 +130,16 @@ input[type='password'] {
   margin-bottom: var(--space-4);
 }
 
+/* Same shape again, `--color-warning`: a standing notice the user should read but
+   need not act on - e.g. the timezone mismatch notice (design doc §14.1, Rev 11). */
+.banner-warning {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
 /* Settings (§8.1 screen 6) - five independently-saved sections, one card each. */
 .settings-section {
   background-color: var(--color-surface);

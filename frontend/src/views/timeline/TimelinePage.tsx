@@ -6,6 +6,7 @@ import timeGridPlugin from '@fullcalendar/timegrid';
 import type { EventClickArg } from '@fullcalendar/core';
 import { ApiError, toApiError } from '../../api/client';
 import { getSettings } from '../../api/settings';
+import { TimezoneNotice } from '../../components/TimezoneNotice';
 import { listExternalEvents } from '../../api/externalEvents';
 import { listInstances } from '../../api/taskInstances';
 import { listProjections } from '../../api/taskTemplates';
@@ -43,6 +44,7 @@ export function TimelinePage(): JSX.Element {
   const [projections, setProjections] = useState<VirtualOccurrence[]>([]);
   const [externalEvents, setExternalEvents] = useState<ExternalEvent[]>([]);
   const [blackoutDates, setBlackoutDates] = useState<BlackoutDate[]>([]);
+  const [settingsTimezone, setSettingsTimezone] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -55,6 +57,7 @@ export function TimelinePage(): JSX.Element {
         setProjections(loadedProjections);
         setExternalEvents(loadedExternalEvents);
         setBlackoutDates(settings.blackout_dates);
+        setSettingsTimezone(settings.timezone);
         setState('ready');
       })
       .catch((err: unknown) => {
@@ -90,6 +93,7 @@ export function TimelinePage(): JSX.Element {
   return (
     <div>
       <h2>Timeline</h2>
+      <TimezoneNotice settingsTimezone={settingsTimezone} />
       {state === 'loading' ? (
         <p style={{ color: 'var(--color-text-muted)' }}>Loading...</p>
       ) : (
