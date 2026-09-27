@@ -56,6 +56,8 @@ class ExtendDeadlineRequest(BaseModel):
 class DeleteResponse(BaseModel):
     deleted_instance_id: str
     unblocked_instance_ids: tuple[str, ...]
+    #: Every instance removed - more than one when a series is ended (§3.8, Rev 11).
+    deleted_instance_ids: tuple[str, ...]
 
 
 @router.get("")
@@ -158,4 +160,8 @@ def delete_instance_endpoint(
         result = service.delete_instance(db, jobs, instance_id, scope=scope)
     except service.InstanceValidationError as exc:
         raise AppError.for_code(exc.code, str(exc), details=exc.details) from exc
-    return DeleteResponse(deleted_instance_id=result.deleted_instance_id, unblocked_instance_ids=result.unblocked_instance_ids)
+    return DeleteResponse(
+        deleted_instance_id=result.deleted_instance_id,
+        unblocked_instance_ids=result.unblocked_instance_ids,
+        deleted_instance_ids=result.deleted_instance_ids,
+    )

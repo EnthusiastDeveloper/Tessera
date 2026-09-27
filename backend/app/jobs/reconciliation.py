@@ -34,11 +34,11 @@ from app.jobs.interface import (
     reminder_job_key,
 )
 from app.scheduling.orchestration import (
+    promote_if_unblocked,
     schedule_dependency_at_risk_job,
     schedule_next_occurrence_boundary,
     schedule_reminder_and_overdue_jobs,
 )
-from app.task_instances.service import promote_if_unblocked
 
 _LIVE_SCHEDULED_STATUSES = ("scheduled", "in_progress")
 

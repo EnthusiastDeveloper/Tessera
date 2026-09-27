@@ -83,7 +83,8 @@ test.describe('recurring task edit and delete scopes against the real backend', 
     await page.getByRole('button', { name: 'Delete task' }).click();
     const dialog = page.getByRole('alertdialog', { name: 'Delete task' });
     await expect(dialog.getByRole('button', { name: 'Delete' })).toBeDisabled();
-    await dialog.getByLabel('This and future occurrences').check();
+    await dialog.getByLabel('The whole series').check();
+    await expect(dialog.getByText('1 open occurrence will be deleted')).toBeVisible();
     await expect(dialog.getByText('This ends the recurring series')).toBeVisible();
     await dialog.getByRole('button', { name: 'Delete' }).click();
     await expect(page).toHaveURL('http://localhost:4173/');

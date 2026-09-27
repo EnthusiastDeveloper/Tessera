@@ -38,6 +38,8 @@ export function patchInstanceThisOccurrence(instanceId: string, patch: PatchInst
 export interface DeleteInstanceResult {
   deleted_instance_id: string;
   unblocked_instance_ids: string[];
+  /** Every instance removed - the whole open series when it is ended (design doc §3.8, Rev 11). */
+  deleted_instance_ids: string[];
 }
 
 /** `scope` is required for a recurring template's instance, ignored/optional for a

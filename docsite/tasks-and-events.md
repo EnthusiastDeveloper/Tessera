@@ -93,7 +93,7 @@ These look similar but mean different things, and Tessera keeps them distinct:
 |---|---|---|
 | **Skip this occurrence** (dismiss) | "This one isn't happening." The routine way to clear a stale recurring occurrence. | Preserved, status becomes `dismissed` (terminal) |
 | **Delete → this occurrence** | "Remove this from my records." Exceptional. | Row destroyed; series continues, next occurrence generated normally |
-| **Delete → this and future occurrences** | "End this series." | Row destroyed, template archived |
+| **Delete → the whole series** | "End this series." | Every open occurrence destroyed - earlier ones and ones you've started included - finished (completed or skipped) ones kept, template archived. The dialog tells you how many will go before you confirm |
 
 Dismissing (and deleting "this occurrence" on a `completion`-anchored template) still generates the successor - otherwise a completion-anchored series would silently die the first time an occurrence was skipped instead of completed.
 
