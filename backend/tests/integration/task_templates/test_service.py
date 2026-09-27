@@ -4,7 +4,7 @@ Worked Examples A, D, L, M.
 
 from __future__ import annotations
 
-from datetime import UTC, timedelta
+from datetime import UTC, date, timedelta
 
 import pytest
 from sqlalchemy.orm import Session
@@ -27,11 +27,12 @@ from app.task_templates.service import (
     get_template,
 )
 from tests.fixtures.jobs import RecordingJobScheduler
-from tests.fixtures.scheduling import ny
+from tests.fixtures.scheduling import local_today, ny
 
 
 def _flexible_draft(**overrides: object) -> TaskTemplateDraft:
     defaults: dict[str, object] = {
+        "start_date": local_today(),
         "name": "Deep clean garage",
         "type": "flexible",
         "recurrence": Recurrence(pattern="one_time", anchor="calendar"),
@@ -45,6 +46,7 @@ def _flexible_draft(**overrides: object) -> TaskTemplateDraft:
 
 def _fixed_draft(**overrides: object) -> TaskTemplateDraft:
     defaults: dict[str, object] = {
+        "start_date": local_today(),
         "name": "Team sync",
         "type": "fixed",
         "fixed_time_of_day": "18:00",
@@ -158,6 +160,58 @@ class TestCreateTemplate:
         with pytest.raises(TemplateValidationError) as exc_info:
             _ensure_no_cycle(db_session, dependency_ids=(b.instance.id,), dependent_id=a.instance.id)
         assert exc_info.value.code == "cycle_detected"
+
+
+@pytest.mark.usefixtures("pinned_now")
+class TestStartDate:
+    """§3.2/§9.1 (Rev 10): the first occurrence comes from `start_date`, which may not be
+    in the past; no flexible occurrence is placed before its own date."""
+
+    def test_a_past_start_date_is_rejected(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        with pytest.raises(TemplateValidationError) as exc_info:
+            create_template(db_session, jobs, _flexible_draft(start_date=date(2026, 3, 1)))
+        assert exc_info.value.code == "invalid_start_date"
+
+    def test_a_window_that_has_already_ended_is_rejected(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        # Counted from Mon 00:00, a 6-hour window closed at 06:00 - it is already 08:00.
+        with pytest.raises(TemplateValidationError) as exc_info:
+            create_template(db_session, jobs, _flexible_draft(deadline_offset_minutes=6 * 60))
+        assert exc_info.value.code == "invalid_start_date"
+
+    def test_a_flexible_task_is_not_placed_before_its_start_date(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        created = create_template(db_session, jobs, _flexible_draft(start_date=date(2026, 3, 5)))
+        db_session.commit()
+        assert created.template.start_date == date(2026, 3, 5)
+        assert created.instance.nominal_date == ny(2026, 3, 5, 0, 0)
+        assert created.instance.scheduled_time == ny(2026, 3, 5, 9, 0), "free on Monday, but it starts Thursday"
+        assert created.instance.deadline == ny(2026, 3, 10, 0, 0)
+
+    def test_the_first_completion_anchored_occurrence_is_held_to_its_date_too(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        created = create_template(
+            db_session,
+            jobs,
+            _flexible_draft(
+                start_date=date(2026, 3, 4), recurrence=Recurrence(pattern="monthly", interval=1, anchor="completion")
+            ),
+        )
+        db_session.commit()
+        assert created.instance.scheduled_time == ny(2026, 3, 4, 9, 0)
+
+    def test_a_calendar_fixed_series_starts_on_the_first_date_its_rule_produces(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        weekly_friday = Recurrence(pattern="weekly", interval=1, day_of_week=4, anchor="calendar")
+        created = create_template(db_session, jobs, _fixed_draft(start_date=date(2026, 3, 2), recurrence=weekly_friday))
+        db_session.commit()
+        assert created.instance.scheduled_time == ny(2026, 3, 6, 18, 0)
 
 
 class TestGetTemplate:
@@ -290,6 +344,8 @@ class TestEditThisAndFuture:
 #: Mon 2026-03-02 08:00 New York - before the default 09:00-17:00 active-hours window
 #: opens, so a flexible placement's first candidate slot is deterministic (09:00).
 _NOW = ny(2026, 3, 2, 8, 0)
+#: The start of `_NOW`'s date - a flexible occurrence's window is counted from here (§9.1).
+_DAY_START = ny(2026, 3, 2, 0, 0)
 
 
 @pytest.fixture
@@ -425,8 +481,8 @@ class TestThisAndFutureDeadlineOffset:
         instance = TaskInstanceRepository(db_session).get(chore.instance.id)
         assert instance is not None
         # Elapsed minutes, not wall-clock days (§14.1): this window crosses the 2026-03-08
-        # DST change, so the deadline lands at 09:00 local rather than 08:00.
-        assert instance.deadline == _NOW.astimezone(UTC) + timedelta(days=7)
+        # DST change, so the deadline lands at 01:00 local rather than midnight.
+        assert instance.deadline == _DAY_START.astimezone(UTC) + timedelta(days=7)
         assert instance.status == "scheduled"
         assert instance.scheduled_time == original_slot, "incremental fit: a still-valid slot is never moved"
 
@@ -439,7 +495,7 @@ class TestThisAndFutureDeadlineOffset:
 
         # Deadline now 08:30 - before the active-hours window even opens, so there is
         # no slot left at all: evicted, persisted as pending, flagged unschedulable.
-        edit_template_this_and_future(db_session, jobs, chore.template.id, patch={"deadline_offset_minutes": 30})
+        edit_template_this_and_future(db_session, jobs, chore.template.id, patch={"deadline_offset_minutes": 8 * 60 + 30})
         db_session.commit()
 
         instance = TaskInstanceRepository(db_session).get(chore.instance.id)
@@ -465,9 +521,12 @@ class TestThisAndFutureDeadlineOffset:
     def test_a_missed_instance_is_left_for_the_user_to_resolve(
         self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
     ) -> None:
-        chore = create_template(db_session, jobs, _flexible_draft(estimated_duration_minutes=30, deadline_offset_minutes=0))
+        chore = create_template(db_session, jobs, _flexible_draft(estimated_duration_minutes=30))
+        edit_template_this_and_future(db_session, jobs, chore.template.id, patch={"deadline_offset_minutes": 60})
         db_session.commit()
-        assert chore.instance.status == "missed"
+        missed = TaskInstanceRepository(db_session).get(chore.instance.id)
+        assert missed is not None
+        assert missed.status == "missed"
 
         edit_template_this_and_future(db_session, jobs, chore.template.id, patch={"deadline_offset_minutes": 60 * 24})
         db_session.commit()
@@ -475,7 +534,7 @@ class TestThisAndFutureDeadlineOffset:
         instance = TaskInstanceRepository(db_session).get(chore.instance.id)
         assert instance is not None
         assert instance.status == "missed"
-        assert instance.deadline == _NOW
+        assert instance.deadline == missed.deadline
 
     def test_a_detached_instance_keeps_its_own_deadline(
         self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
@@ -504,7 +563,7 @@ class TestThisAndFutureEviction:
         # Deadline 10:00, placed 09:00-09:30. At 90 minutes it can't finish by 10:00, so
         # the instance must actually leave `scheduled` in the database - not just in the
         # in-memory copy handed to the placement attempt.
-        chore = create_template(db_session, jobs, _flexible_draft(estimated_duration_minutes=30, deadline_offset_minutes=120))
+        chore = create_template(db_session, jobs, _flexible_draft(estimated_duration_minutes=30, deadline_offset_minutes=10 * 60))
         db_session.commit()
         assert chore.instance.scheduled_time == ny(2026, 3, 2, 9, 0)
 
@@ -533,7 +592,7 @@ class TestSeriesNominalDate:
             _fixed_draft(fixed_time_of_day="09:00", recurrence=Recurrence(pattern="daily", interval=1, anchor="calendar")),
         )
         db_session.commit()
-        assert daily.instance.scheduled_time == ny(2026, 3, 3, 9, 0)
+        assert daily.instance.scheduled_time == ny(2026, 3, 2, 9, 0)
 
         reschedule(db_session, jobs, daily.instance.id, new_scheduled_time=ny(2026, 3, 4, 9, 0))
         db_session.commit()
@@ -541,7 +600,7 @@ class TestSeriesNominalDate:
         moved = TaskInstanceRepository(db_session).get(daily.instance.id)
         assert moved is not None
         following = generate_next_instance(daily.template, predecessor=moved, now=_NOW, timezone=settings.timezone)
-        assert following.scheduled_time == ny(2026, 3, 4, 9, 0), "the day after Tuesday's slot, not after the moved one"
+        assert following.scheduled_time == ny(2026, 3, 3, 9, 0), "the day after Monday's slot, not after the moved one"
 
     def test_a_custom_deadline_on_one_flexible_occurrence_does_not_shift_the_series(
         self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
@@ -563,8 +622,8 @@ class TestSeriesNominalDate:
         edited = TaskInstanceRepository(db_session).get(daily.instance.id)
         assert edited is not None
         following = generate_next_instance(daily.template, predecessor=edited, now=_NOW, timezone=settings.timezone)
-        assert following.nominal_date == ny(2026, 3, 4, 8, 0)
-        assert following.deadline == ny(2026, 3, 5, 8, 0)
+        assert following.nominal_date == ny(2026, 3, 3, 0, 0)
+        assert following.deadline == ny(2026, 3, 4, 0, 0)
 
     def test_a_completion_anchored_successor_is_not_placed_before_its_nominal_date(
         self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
@@ -641,7 +700,7 @@ class TestFixedTaskDisplacesFlexible:
         self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
     ) -> None:
         # Deadline Mon 10:00: the 09:00 slot is the only one that fits.
-        plants_id = self._flexible_at_nine(db_session, jobs, deadline_offset_minutes=120)
+        plants_id = self._flexible_at_nine(db_session, jobs, deadline_offset_minutes=10 * 60)
 
         create_template(db_session, jobs, _fixed_draft(fixed_time_of_day="09:00"))
         db_session.commit()
@@ -690,11 +749,14 @@ class TestFixedTaskDisplacesFlexible:
         sync = create_template(db_session, jobs, _fixed_draft(fixed_time_of_day="12:00"))
         plants_id = self._flexible_at_nine(db_session, jobs)
 
+        # A daily series whose previous occurrence was Sunday: the next lands Mon 09:00.
         generated = generate_and_place_next_instance(
             db_session,
             jobs,
-            template=sync.template.model_copy(update={"fixed_time_of_day": "09:00"}),
-            predecessor=None,
+            template=sync.template.model_copy(
+                update={"fixed_time_of_day": "09:00", "recurrence": Recurrence(pattern="daily", interval=1, anchor="calendar")}
+            ),
+            predecessor=sync.instance.model_copy(update={"nominal_date": ny(2026, 3, 1, 12, 0)}),
             settings=settings,
             now=_NOW,
         )

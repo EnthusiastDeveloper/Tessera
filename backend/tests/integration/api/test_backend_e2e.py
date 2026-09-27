@@ -13,6 +13,7 @@ from app.auth.setup_token import setup_token_store
 from app.db.base import utcnow
 from app.db.repositories import TaskInstanceRepository
 from app.db.session import session_scope
+from tests.fixtures.scheduling import app_today
 
 VALID_PASSWORD = "correcthorsebatterystaple"
 
@@ -56,6 +57,7 @@ class TestCreateWithConflict:
             "fixed_time_of_day": "18:00",
             "recurrence": {"pattern": "one_time", "anchor": "calendar"},
             "priority": "medium",
+            "start_date": app_today().isoformat(),
             "estimated_duration_minutes": 60,
         }
         created = app_client.post("/api/v1/task-templates", json=first)
@@ -78,6 +80,7 @@ class TestCreateFlexibleAndSchedule:
             "type": "flexible",
             "recurrence": {"pattern": "one_time", "anchor": "calendar"},
             "priority": "medium",
+            "start_date": app_today().isoformat(),
             "estimated_duration_minutes": 30,
             "deadline_offset_minutes": 60 * 24 * 5,
         }
@@ -98,6 +101,7 @@ class TestCompleteTask:
             "fixed_time_of_day": "18:00",
             "recurrence": {"pattern": "one_time", "anchor": "calendar"},
             "priority": "medium",
+            "start_date": app_today().isoformat(),
             "estimated_duration_minutes": 60,
         }
         instance = app_client.post("/api/v1/task-templates", json=payload).json()["instance"]
@@ -117,6 +121,7 @@ class TestExtendAMissedDeadline:
             "type": "flexible",
             "recurrence": {"pattern": "one_time", "anchor": "calendar"},
             "priority": "medium",
+            "start_date": app_today().isoformat(),
             "estimated_duration_minutes": 30,
             "deadline_offset_minutes": 60 * 24 * 5,
         }
@@ -148,6 +153,7 @@ class TestEditARecurringTaskBothScopesAndVerifyDetach:
             "fixed_time_of_day": "09:00",
             "recurrence": {"pattern": "daily", "interval": 1, "anchor": "calendar"},
             "priority": "medium",
+            "start_date": app_today().isoformat(),
             "estimated_duration_minutes": 15,
         }
         _login(app_client)

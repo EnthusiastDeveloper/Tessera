@@ -276,9 +276,7 @@ def dismiss(db: Session, jobs: JobScheduler, instance_id: str) -> TaskInstance:
     if template.recurrence.anchor == "completion" and not template.archived:
         # §3.8 "Re-anchoring on this_occurrence": dismissing isn't completing, so there is
         # no completed_at to anchor against - the successor's nominal date is
-        # `now + cadence`. `predecessor=None` is exactly that: the same "advance the rule
-        # from now" path `generate_next_instance` already uses for a template's very
-        # first instance (see its module docstring's `_next_nominal_instant`).
+        # `now + cadence`, which is what `predecessor=None` asks for.
         settings = require_settings(db)
         generate_and_place_next_instance(db, jobs, template=template, predecessor=None, settings=settings, now=now)
 

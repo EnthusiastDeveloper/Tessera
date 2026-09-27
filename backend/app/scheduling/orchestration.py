@@ -160,7 +160,15 @@ def generate_and_place_next_instance(
     against for a missed generation call. Instead it is persisted and flagged with a
     `creation_conflict` Notification so the user notices and reschedules it manually.
     """
-    generated = generate_next_instance(template, predecessor=predecessor, now=now, timezone=settings.timezone)
+    # No predecessor here means a completion-anchored successor with nothing completed to
+    # anchor against (§3.8's dismiss / this-occurrence delete): it re-anchors at now.
+    generated = generate_next_instance(
+        template,
+        predecessor=predecessor,
+        now=now,
+        timezone=settings.timezone,
+        reanchor_at=now if predecessor is None else None,
+    )
     status: TaskInstanceStatus = "scheduled" if template.type == "fixed" else "pending"
     instance = TaskInstanceRepository(db).create(
         TaskInstance(

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Query
@@ -42,6 +42,9 @@ class CreateTemplateRequest(BaseModel):
     recurrence: RecurrenceIn
     priority: Priority
     estimated_duration_minutes: int
+    # Required (§3.2, Rev 10): a local "YYYY-MM-DD" in the user's timezone. Not accepted on
+    # PATCH - the series' dates come from its occurrences once it exists.
+    start_date: date
     description: str | None = None
     location: str | None = None
     fixed_time_of_day: str | None = None
@@ -135,6 +138,7 @@ def create_template_endpoint(
         recurrence=Recurrence(**payload.recurrence.model_dump()),
         priority=payload.priority,
         estimated_duration_minutes=payload.estimated_duration_minutes,
+        start_date=payload.start_date,
         description=payload.description,
         location=payload.location,
         fixed_time_of_day=payload.fixed_time_of_day,

@@ -118,7 +118,7 @@ Maps directly to Section 3 of the design doc:
     - `include_detached` (boolean, default `false`) is the edit dialog's checkbox. `false` skips later occurrences that are `detached`; `true` updates them too and clears their flag. The `from_instance` occurrence is updated, and its flag cleared, either way.
     - All-or-nothing: if any reached occurrence fails validation (`creation_conflict`, `infeasible_duration`), the request fails with that code and names the occurrence in `details`; nothing is written.
   - `GET /task-instances?template_id={id}` - lists a series' occurrences. The edit dialog uses it, with each row's `nominal_date`, `status` and `detached`, to name the occurrences a "this and future" edit would skip (design doc 8.1) - no separate preview endpoint.
-  - `POST /task-templates` requires `start_date` (a local `YYYY-MM-DD`, design doc 3.2). A date before today in the user's timezone is rejected with `invalid_start_date` (`422`).
+  - `POST /task-templates` requires `start_date` (a local `YYYY-MM-DD`, design doc 3.2). A date before today in the user's timezone is rejected with `invalid_start_date` (`422`), and so is a flexible template whose first occurrence's deadline has already passed - it would otherwise be created `missed`.
   - A one-time (`recurrence: one_time`) template has no scope choice - `PATCH /task-templates/{id}` with no `scope` param is unambiguous, since there's only ever one instance.
 - **(Added Rev 3, design doc 3.8)** Deletion scope mirrors edit scope, and is likewise explicit rather than inferred:
   - `DELETE /task-instances/{id}?scope=this_occurrence` - removes this instance; the series continues and its successor is generated per design doc 9.1.
@@ -140,7 +140,7 @@ Consistent shape across all endpoints: HTTP status code + machine-readable error
 | `creation_conflict` | A fixed task's time collides with an existing fixed task or external busy-block | design doc 6.5 |
 | `infeasible_duration` | The duration cannot fit any day's effective active-hours window | design doc 6.8 |
 | `invalid_recurrence_anchor` *(Rev 3)* | `anchor: "completion"` was submitted on a `fixed` template | design doc 3.2 |
-| `invalid_start_date` *(Rev 4)* | A template's `start_date` is before today in the user's timezone | design doc 3.2 |
+| `invalid_start_date` *(Rev 4)* | A template's `start_date` is before today in the user's timezone, or a flexible template's first window (`start_date` + `deadline_offset_minutes`) has already ended | design doc 3.2 |
 | `session_expired` *(Rev 3)* | Distinct from a generic `401`, so the client redirects to login rather than surfacing an error | design doc 3.6 |
 | `conflict` *(Rev 3)* | Optimistic-lock failure; the body **must name the conflicting fields and their current server-side values** so the UI can show a specific conflict rather than a generic reload prompt | 5.1 |
 | generic validation error | Field-level validation | - |

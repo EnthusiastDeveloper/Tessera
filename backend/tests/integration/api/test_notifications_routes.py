@@ -5,9 +5,12 @@ proves the wiring: auth guard and response shape.
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from fastapi.testclient import TestClient
 
 from app.auth.setup_token import setup_token_store
+from tests.fixtures.scheduling import app_today
 
 VALID_PASSWORD = "correcthorsebatterystaple"
 
@@ -32,6 +35,9 @@ def _create_unschedulable_notification(client: TestClient) -> str:
         "type": "flexible",
         "recurrence": {"pattern": "one_time", "anchor": "calendar"},
         "priority": "medium",
+        # Tomorrow, so the 1-minute window (counted from the start of the date, §9.1)
+        # hasn't already ended - it just can't hold an hour.
+        "start_date": (app_today() + timedelta(days=1)).isoformat(),
         "estimated_duration_minutes": 60,
         "deadline_offset_minutes": 1,
     }

@@ -30,11 +30,12 @@ from app.task_templates.service import (
     edit_template_this_and_future,
 )
 from tests.fixtures.jobs import RecordingJobScheduler
-from tests.fixtures.scheduling import ny
+from tests.fixtures.scheduling import local_today, ny
 
 
 def _flexible_draft(**overrides: object) -> TaskTemplateDraft:
     defaults: dict[str, object] = {
+        "start_date": local_today(),
         "name": "Water plants",
         "type": "flexible",
         "recurrence": Recurrence(pattern="one_time", anchor="calendar"),
@@ -48,6 +49,7 @@ def _flexible_draft(**overrides: object) -> TaskTemplateDraft:
 
 def _fixed_draft(**overrides: object) -> TaskTemplateDraft:
     defaults: dict[str, object] = {
+        "start_date": local_today(),
         "name": "Team sync",
         "type": "fixed",
         "fixed_time_of_day": "09:00",
@@ -288,7 +290,7 @@ class TestEditThisAndFuture:
         assert chore.instance.status == "scheduled"
 
         # Deadline 08:30 - no slot left, so the instance stays pending after eviction.
-        edit_template_this_and_future(db_session, jobs, chore.template.id, patch={"deadline_offset_minutes": 30})
+        edit_template_this_and_future(db_session, jobs, chore.template.id, patch={"deadline_offset_minutes": 8 * 60 + 30})
         db_session.commit()
 
         assert overdue_job_key(chore.instance.id) in jobs.cancelled
@@ -306,7 +308,8 @@ class TestEditThisAndFuture:
         edit_template_this_and_future(db_session, jobs, inspection.template.id, patch={"deadline_offset_minutes": 60 * 24 * 10})
         db_session.commit()
 
-        new_deadline = _NOW.astimezone(UTC) + timedelta(days=10)
+        # Counted from the start of the occurrence's date (§9.1), in elapsed minutes.
+        new_deadline = ny(2026, 3, 2, 0, 0).astimezone(UTC) + timedelta(days=10)
         assert (dependency_at_risk_job_key(inspection.instance.id), new_deadline - timedelta(days=3)) in jobs.scheduled
 
     def test_the_boundary_job_is_re_pointed_even_with_no_live_instance(

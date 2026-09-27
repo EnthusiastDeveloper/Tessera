@@ -56,14 +56,25 @@ def generate_next_instance(
     predecessor: TaskInstance | None,
     now: datetime,
     timezone: str,
+    reanchor_at: datetime | None = None,
 ) -> GeneratedInstanceFields:
     """`predecessor` is the template's most recent instance - for `anchor: "completion"`
     it must be `completed` (its `completed_at` anchors the next nominal date); for
     `anchor: "calendar"` any terminal or non-terminal instance works, since only its
-    nominal date is read. `None` only for a template's very first instance, at creation.
+    nominal date is read. `None` only for a template's very first instance, at creation,
+    which is derived from the template's `start_date` instead (§9.1, Rev 10).
+
+    `reanchor_at` replaces the predecessor for a completion-anchored successor that has
+    no `completed_at` to anchor against (dismissed or deleted with `this_occurrence`
+    scope, §3.8): its nominal date is `reanchor_at + cadence`.
     """
     tz = ZoneInfo(timezone)
-    nominal = _next_nominal_instant(template, predecessor=predecessor, now=now, tz=tz)
+    if reanchor_at is not None:
+        nominal = _advance(template.recurrence.pattern, template, after=reanchor_at.astimezone(tz), tz=tz)
+    elif predecessor is None:
+        nominal = _first_nominal_instant(template, now=now, tz=tz)
+    else:
+        nominal = _next_nominal_instant(template, predecessor=predecessor, tz=tz)
 
     scheduled_time: datetime | None = None
     deadline: datetime | None = None
@@ -85,15 +96,49 @@ def generate_next_instance(
     )
 
 
-def _next_nominal_instant(template: TaskTemplate, *, predecessor: TaskInstance | None, now: datetime, tz: ZoneInfo) -> datetime:
-    pattern = template.recurrence.pattern
+def _first_nominal_instant(template: TaskTemplate, *, now: datetime, tz: ZoneInfo) -> datetime:
+    """§9.1 "The first occurrence" (Rev 10), from the template's `start_date`:
 
-    if predecessor is None:
-        # The template's very first instance: project the rule forward from "now".
-        # one_time has no rule to project - it simply starts now.
-        if pattern == "one_time":
-            return now.astimezone(tz)
-        return _advance(pattern, template, after=now.astimezone(tz), tz=tz)
+    - `one_time` (either type) and `anchor: "completion"`: the start of `start_date`.
+    - `anchor: "calendar"`, flexible: the start of the first date on or after
+      `start_date` that the recurrence rule produces.
+    - `anchor: "calendar"`, fixed: that date at `fixed_time_of_day`, moved on to the
+      rule's next date while that time has already passed.
+    """
+    if template.start_date is None:
+        raise ValueError(f"template {template.id} has no start_date to generate its first occurrence from")
+    start_of_day = datetime.combine(template.start_date, time(0, 0), tzinfo=tz)
+    pattern = template.recurrence.pattern
+    if pattern == "one_time" or template.recurrence.anchor == "completion":
+        return start_of_day
+
+    first_date = _first_rule_date_on_or_after(template, template.start_date)
+    if template.type != "fixed":
+        return datetime.combine(first_date, time(0, 0), tzinfo=tz)
+    nominal = project_fixed_time(first_date, template=template, tz=tz)
+    while nominal <= now:
+        nominal = _advance(pattern, template, after=nominal, tz=tz)
+    return nominal
+
+
+def _first_rule_date_on_or_after(template: TaskTemplate, day: date) -> date:
+    """The first date on or after `day` that the recurrence rule produces. A rule with no
+    weekday or day-of-month pinned produces every date, so the series starts on `day`."""
+    recurrence = template.recurrence
+    if recurrence.pattern == "weekly" and recurrence.day_of_week is not None:
+        return day + timedelta(days=(recurrence.day_of_week - day.weekday()) % 7)
+    if recurrence.pattern == "monthly" and recurrence.day_of_month is not None:
+        year, month = day.year, day.month
+        candidate = date(year, month, min(recurrence.day_of_month, monthrange(year, month)[1]))
+        if candidate >= day:
+            return candidate
+        year, month = (year + 1, 1) if month == 12 else (year, month + 1)
+        return date(year, month, min(recurrence.day_of_month, monthrange(year, month)[1]))
+    return day
+
+
+def _next_nominal_instant(template: TaskTemplate, *, predecessor: TaskInstance, tz: ZoneInfo) -> datetime:
+    pattern = template.recurrence.pattern
 
     if template.recurrence.anchor == "completion":
         if predecessor.completed_at is None:

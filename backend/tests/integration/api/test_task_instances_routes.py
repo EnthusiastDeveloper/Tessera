@@ -12,6 +12,7 @@ from app.auth.setup_token import setup_token_store
 from app.jobs.interface import set_job_scheduler
 from app.task_instances import service as task_instances_service
 from tests.fixtures.jobs import RecordingJobScheduler
+from tests.fixtures.scheduling import app_today
 
 VALID_PASSWORD = "correcthorsebatterystaple"
 
@@ -34,6 +35,7 @@ def _create_fixed(client: TestClient) -> dict[str, object]:
         "fixed_time_of_day": "18:00",
         "recurrence": {"pattern": "one_time", "anchor": "calendar"},
         "priority": "medium",
+        "start_date": app_today().isoformat(),
         "estimated_duration_minutes": 60,
     }
     return client.post("/api/v1/task-templates", json=payload).json()["instance"]  # type: ignore[no-any-return]
@@ -46,6 +48,7 @@ def _create_recurring_fixed(client: TestClient) -> dict[str, object]:
         "fixed_time_of_day": "09:00",
         "recurrence": {"pattern": "daily", "interval": 1, "anchor": "calendar"},
         "priority": "medium",
+        "start_date": app_today().isoformat(),
         "estimated_duration_minutes": 15,
     }
     return client.post("/api/v1/task-templates", json=payload).json()["instance"]  # type: ignore[no-any-return]

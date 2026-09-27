@@ -8,10 +8,10 @@ not a schema-level constraint - see architecture-plan §2 / implementation-plan 
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, Enum, Integer, String
+from sqlalchemy import JSON, Boolean, Date, Enum, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, UTCDateTime, generate_id, utcnow
@@ -45,6 +45,10 @@ class TaskTemplateORM(Base):
     recurrence_anchor: Mapped[str] = mapped_column(
         Enum("calendar", "completion", name="recurrence_anchor", create_constraint=True), nullable=False
     )
+
+    # Local "YYYY-MM-DD" the first occurrence is derived from (§3.2, §9.1, Rev 10). Nullable
+    # only for templates created before it existed; the API requires it on create.
+    start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     # --- Fixed-type scheduling ---
     fixed_time_of_day: Mapped[str | None] = mapped_column(String, nullable=True)  # wall-clock "HH:MM", §14.1

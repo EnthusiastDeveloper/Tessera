@@ -5,9 +5,12 @@ this file only proves the wiring: auth guard, request/response shape, and error-
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from fastapi.testclient import TestClient
 
 from app.auth.setup_token import setup_token_store
+from tests.fixtures.scheduling import app_today
 
 VALID_PASSWORD = "correcthorsebatterystaple"
 
@@ -29,6 +32,7 @@ def _flexible_payload(**overrides: object) -> dict[str, object]:
         "type": "flexible",
         "recurrence": {"pattern": "one_time", "anchor": "calendar"},
         "priority": "medium",
+        "start_date": app_today().isoformat(),
         "estimated_duration_minutes": 60,
         "deadline_offset_minutes": 60 * 24 * 5,
     }
@@ -60,6 +64,22 @@ class TestCreateTemplate:
         body = response.json()
         assert body["template"]["name"] == "Deep clean garage"
         assert body["instance"]["template_id"] == body["template"]["id"]
+
+    def test_start_date_is_required_and_echoed_back(self, app_client: TestClient) -> None:
+        _login(app_client)
+        payload = _flexible_payload()
+        del payload["start_date"]
+        assert app_client.post("/api/v1/task-templates", json=payload).status_code == 422
+
+        created = app_client.post("/api/v1/task-templates", json=_flexible_payload())
+        assert created.json()["template"]["start_date"] == app_today().isoformat()
+
+    def test_a_past_start_date_is_rejected_with_its_own_code(self, app_client: TestClient) -> None:
+        _login(app_client)
+        yesterday = (app_today() - timedelta(days=1)).isoformat()
+        response = app_client.post("/api/v1/task-templates", json=_flexible_payload(start_date=yesterday))
+        assert response.status_code == 422
+        assert response.json()["code"] == "invalid_start_date"
 
 
 class TestPatchTemplate:
@@ -110,6 +130,7 @@ def _weekly_fixed_payload(**overrides: object) -> dict[str, object]:
         "type": "fixed",
         "recurrence": {"pattern": "weekly", "interval": 1, "day_of_week": 0, "anchor": "calendar"},
         "priority": "medium",
+        "start_date": app_today().isoformat(),
         "estimated_duration_minutes": 30,
         "fixed_time_of_day": "09:00",
     }

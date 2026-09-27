@@ -38,6 +38,11 @@ function fromDatetimeLocal(value: string): string {
   return new Date(value).toISOString();
 }
 
+/** Today as a local "YYYY-MM-DD" - the earliest start date a new task may take. */
+function todayLocalDate(): string {
+  return toDatetimeLocal(new Date().toISOString()).slice(0, 10);
+}
+
 interface TaskFormProps {
   mode: 'create' | 'edit';
   /** Required when `mode === 'edit'`. */
@@ -63,6 +68,7 @@ export function TaskForm({ mode, template, instance, onSaved, onCancel }: TaskFo
   const [dayOfWeek, setDayOfWeek] = useState(template?.recurrence.day_of_week ?? 0);
   const [dayOfMonth, setDayOfMonth] = useState(template?.recurrence.day_of_month ?? 1);
   const [anchor, setAnchor] = useState<RecurrenceAnchor>(template?.recurrence.anchor ?? 'calendar');
+  const [startDate, setStartDate] = useState(todayLocalDate);
   const [fixedTimeOfDay, setFixedTimeOfDay] = useState(template?.fixed_time_of_day ?? '09:00');
   const [priority, setPriority] = useState<Priority>(template?.priority ?? 'medium');
   const [estimatedDurationMinutes, setEstimatedDurationMinutes] = useState(template?.estimated_duration_minutes ?? 30);
@@ -106,6 +112,7 @@ export function TaskForm({ mode, template, instance, onSaved, onCancel }: TaskFo
           },
           priority,
           estimated_duration_minutes: estimatedDurationMinutes,
+          start_date: startDate,
           description: description || undefined,
           location: location || undefined,
           fixed_time_of_day: type === 'fixed' ? fixedTimeOfDay : undefined,
@@ -191,6 +198,21 @@ export function TaskForm({ mode, template, instance, onSaved, onCancel }: TaskFo
             <input type="radio" name="task-type" checked={type === 'fixed'} onChange={() => setType('fixed')} /> Fixed
           </label>
         </fieldset>
+      )}
+
+      {!isEdit && (
+        <div className="field">
+          <label htmlFor="task-start-date">Starts on</label>
+          <input
+            id="task-start-date"
+            type="date"
+            value={startDate}
+            min={todayLocalDate()}
+            onChange={(event) => setStartDate(event.target.value)}
+            required
+          />
+          {error?.code === 'invalid_start_date' && <p className="field-error">{error.message}</p>}
+        </div>
       )}
 
       {showTemplateOnlyFields && (
@@ -299,6 +321,11 @@ export function TaskForm({ mode, template, instance, onSaved, onCancel }: TaskFo
           onChange={setDeadlineOffsetMinutes}
           min={1}
         />
+      )}
+      {type === 'flexible' && showTemplateOnlyFields && (
+        <p style={{ color: 'var(--color-text-muted)', fontSize: 'var(--font-size-sm)' }}>
+          How long each occurrence may take to get done, counted from the start of its date.
+        </p>
       )}
 
       {type === 'flexible' && !showTemplateOnlyFields && (

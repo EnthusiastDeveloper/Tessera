@@ -5,7 +5,7 @@ Pure function, no DB - builds TaskTemplate/TaskInstance domain objects directly.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 from app.db.base import generate_id
@@ -170,24 +170,73 @@ class TestDetachedOverridesNeverLeak:
 
 
 class TestFirstInstanceAtCreation:
-    def test_one_time_template_nominal_date_is_now(self) -> None:
-        template = _template(recurrence=Recurrence(pattern="one_time", anchor="calendar"))
-        now = datetime(2026, 5, 1, 10, 0, tzinfo=NY)
+    """§9.1 "The first occurrence" (Rev 10): derived from `start_date`, never from now."""
 
-        result = generate_next_instance(template, predecessor=None, now=now, timezone="America/New_York")
+    _NOW = datetime(2026, 3, 3, 10, 0, tzinfo=NY)  # a Tuesday
 
-        assert result.nominal_date == now
+    def _first(self, **overrides: object) -> datetime:
+        result = generate_next_instance(_template(**overrides), predecessor=None, now=self._NOW, timezone="America/New_York")
+        return result.nominal_date
 
-    def test_weekly_fixed_template_projects_the_next_occurrence_of_day_of_week(self) -> None:
+    def test_one_time_starts_at_the_start_of_its_start_date(self) -> None:
+        nominal = self._first(recurrence=Recurrence(pattern="one_time", anchor="calendar"), start_date=date(2026, 3, 5))
+        assert nominal == datetime(2026, 3, 5, 0, 0, tzinfo=NY)
+
+    def test_a_flexible_deadline_is_counted_from_the_start_of_the_date(self) -> None:
+        template = _template(
+            recurrence=Recurrence(pattern="one_time", anchor="calendar"),
+            start_date=date(2026, 3, 9),  # Monday
+            deadline_offset_minutes=3 * 24 * 60,
+        )
+        result = generate_next_instance(template, predecessor=None, now=self._NOW, timezone="America/New_York")
+        assert result.deadline == datetime(2026, 3, 12, 0, 0, tzinfo=NY)  # the end of Wednesday
+
+    def test_completion_anchor_starts_on_its_start_date_not_a_cadence_later(self) -> None:
+        nominal = self._first(start_date=date(2026, 3, 3))
+        assert nominal == datetime(2026, 3, 3, 0, 0, tzinfo=NY)
+
+    def test_calendar_flexible_starts_on_the_first_date_the_rule_produces(self) -> None:
+        weekly_monday = Recurrence(pattern="weekly", interval=1, day_of_week=0, anchor="calendar")
+        nominal = self._first(recurrence=weekly_monday, start_date=date(2026, 3, 3))
+        assert nominal == datetime(2026, 3, 9, 0, 0, tzinfo=NY)
+
+    def test_calendar_daily_starts_on_the_start_date_itself(self) -> None:
+        nominal = self._first(recurrence=Recurrence(pattern="daily", interval=1, anchor="calendar"), start_date=date(2026, 3, 3))
+        assert nominal == datetime(2026, 3, 3, 0, 0, tzinfo=NY)
+
+    def test_monthly_rolls_to_next_month_when_the_day_has_passed_and_clamps_to_month_end(self) -> None:
+        monthly_31st = Recurrence(pattern="monthly", interval=1, day_of_month=31, anchor="calendar")
+        assert self._first(recurrence=monthly_31st, start_date=date(2026, 3, 3)) == datetime(2026, 3, 31, 0, 0, tzinfo=NY)
+        monthly_2nd = Recurrence(pattern="monthly", interval=1, day_of_month=2, anchor="calendar")
+        assert self._first(recurrence=monthly_2nd, start_date=date(2026, 3, 3)) == datetime(2026, 4, 2, 0, 0, tzinfo=NY)
+
+    def test_calendar_fixed_lands_on_its_start_date_at_its_time(self) -> None:
         template = _template(
             type="fixed",
-            fixed_time_of_day="09:00",
-            recurrence=Recurrence(pattern="weekly", interval=1, day_of_week=0, anchor="calendar"),  # Monday
+            fixed_time_of_day="18:00",
+            deadline_offset_minutes=None,
+            recurrence=Recurrence(pattern="weekly", interval=1, day_of_week=1, anchor="calendar"),  # Tuesday
+            start_date=date(2026, 3, 3),
         )
-        now = datetime(2026, 3, 3, 10, 0, tzinfo=NY)  # a Tuesday
+        result = generate_next_instance(template, predecessor=None, now=self._NOW, timezone="America/New_York")
+        assert result.scheduled_time == datetime(2026, 3, 3, 18, 0, tzinfo=NY)
 
-        result = generate_next_instance(template, predecessor=None, now=now, timezone="America/New_York")
+    def test_calendar_fixed_skips_to_the_next_date_when_todays_time_has_passed(self) -> None:
+        template = _template(
+            type="fixed",
+            fixed_time_of_day="09:00",  # already past at 10:00
+            deadline_offset_minutes=None,
+            recurrence=Recurrence(pattern="weekly", interval=1, day_of_week=1, anchor="calendar"),
+            start_date=date(2026, 3, 3),
+        )
+        result = generate_next_instance(template, predecessor=None, now=self._NOW, timezone="America/New_York")
+        assert result.scheduled_time == datetime(2026, 3, 10, 9, 0, tzinfo=NY)
 
-        assert result.scheduled_time is not None
-        assert result.scheduled_time.weekday() == 0
-        assert result.scheduled_time.date() >= now.date()
+    def test_reanchoring_advances_the_rule_from_the_given_moment(self) -> None:
+        """§3.8: a dismissed completion-anchored occurrence has no `completed_at` - the
+        successor is due a cadence after the dismissal."""
+        template = _template(recurrence=Recurrence(pattern="daily", interval=2, anchor="completion"), start_date=date(2026, 3, 1))
+        result = generate_next_instance(
+            template, predecessor=None, now=self._NOW, timezone="America/New_York", reanchor_at=self._NOW
+        )
+        assert result.nominal_date == datetime(2026, 3, 5, 10, 0, tzinfo=NY)

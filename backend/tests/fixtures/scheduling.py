@@ -42,3 +42,21 @@ def every_day(start: str, end: str) -> ActiveHoursMap:
 def no_budget() -> dict[str, int | None]:
     """A daily_time_budget_minutes map with every day unlimited."""
     return dict.fromkeys(DAY_NAMES, None)
+
+
+def local_today(timezone: str = "America/New_York") -> date:
+    """Today in `timezone` by the template service's clock - the earliest `start_date` a
+    template may take (§3.2). Reads the clock through the service module so a test that
+    pins `utcnow` there gets its pinned day."""
+    from app.task_templates import service
+
+    return service.utcnow().astimezone(ZoneInfo(timezone)).date()
+
+
+def app_today() -> date:
+    """Today in the timezone the API tests' app seeds its settings with (the `TZ` env)."""
+    import os
+
+    from app.settings.service import default_timezone_from_env
+
+    return local_today(default_timezone_from_env(os.getenv("TZ")))

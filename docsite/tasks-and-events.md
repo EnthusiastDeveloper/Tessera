@@ -10,7 +10,7 @@ The template holds recurrence rules and defaults (name, priority, duration, dead
 
 | | Fixed | Flexible |
 |---|---|---|
-| You specify | An exact time (`fixed_time_of_day`) | A deadline offset |
+| You specify | A start date and an exact time (`fixed_time_of_day`) | A start date and a deadline offset |
 | Tessera specifies | Nothing - it's exactly where you put it | The scheduled time, via the placement algorithm |
 | Conflict with something else | **Hard-blocked at creation** if it collides with another fixed task, a busy external event or a flexible task you've already started - save is rejected (`creation_conflict`), nothing is created. A flexible task that's only *scheduled* there isn't a conflict: it moves out of the way | Moved automatically when its slot is taken - to another free slot before its deadline, or reported `unschedulable` |
 | Bound by active hours / budget | No - never constrained by your scheduling window | Yes - the whole point of the setting |
@@ -20,12 +20,20 @@ The template holds recurrence rules and defaults (name, priority, duration, dead
 
 Templates support five patterns: `one_time`, `daily`, `weekly`, `monthly`, and `custom` (interval-based, e.g. every 2 weeks; weekly/monthly patterns also take a day-of-week or day-of-month).
 
+### Start date
+
+Every new task asks **Starts on** - the date its first occurrence belongs to. It can't be in the past, and it's set once: after that, the series' dates come from its occurrences.
+
+- A one-time task, or a flexible task that repeats on completion, starts on that date.
+- A task that repeats on the calendar starts on the first date on or after it that the rule produces - a weekly-on-Friday task started on a Monday first occurs that Friday. For a fixed task, if that day's time has already passed, it starts on the rule's next date.
+- A flexible occurrence is never scheduled before its date. Its **deadline** is how long it may take to get done, counted from the start of that date: a task dated Monday with a 3-day deadline is due by the end of Wednesday. That also means a short deadline on a task starting today can already be over - Tessera refuses to save one rather than create it already missed; pick a later start date or a longer deadline.
+
 ### Anchoring: `calendar` vs. `completion`
 
 Every non-one-time template picks an **anchor**, which decides where the *next* occurrence lands:
 
 - **`calendar`** - the next occurrence is generated at the next date the recurrence rule produces, full stop, independent of whether the previous occurrence was ever completed. Use this for rigid commitments like a weekly meeting - if you missed last Monday's, next Monday's still shows up on schedule, and you clear the stale one with **skip this occurrence** (below).
-- **`completion`** - the next occurrence is generated at `completed_at + cadence`, i.e. relative to when you actually finished the previous one. Use this for upkeep work that should shift with reality ("replace the filter a month after I actually did it last," not a month after some date I never got to). The new occurrence isn't scheduled before that date - finish the filter on 7 March and the next one is placed on or after 7 April, not the same afternoon. The very first occurrence of a new template is the exception: it's scheduled as soon as it fits.
+- **`completion`** - the next occurrence is generated at `completed_at + cadence`, i.e. relative to when you actually finished the previous one. Use this for upkeep work that should shift with reality ("replace the filter a month after I actually did it last," not a month after some date I never got to). The new occurrence isn't scheduled before that date - finish the filter on 7 March and the next one is placed on or after 7 April, not the same afternoon. The first occurrence follows the same rule: it isn't scheduled before its start date.
 
 `anchor: completion` is **only valid on flexible templates** - saving it on a fixed template is rejected with `invalid_recurrence_anchor`. The reason is structural: completion-anchoring means "this occurrence can slide within a window," and that window is the deadline offset a flexible task has and a fixed task doesn't.
 

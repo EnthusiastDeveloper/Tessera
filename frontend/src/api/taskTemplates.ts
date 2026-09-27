@@ -8,6 +8,8 @@ export interface CreateTemplatePayload {
   recurrence: Recurrence;
   priority: Priority;
   estimated_duration_minutes: number;
+  /** Local "YYYY-MM-DD", required (design doc §3.2, Rev 10). */
+  start_date: string;
   description?: string;
   location?: string;
   fixed_time_of_day?: string;
@@ -25,7 +27,7 @@ export interface CreateTemplateResult {
 /** Genuinely partial (architecture-plan §5.1) - only include the fields actually
  * changed. All fields optional on the wire; `undefined` means "don't touch this field",
  * matching the backend's `model_fields_set` handling. */
-export type PatchTemplatePayload = Partial<Omit<CreateTemplatePayload, 'dependencies' | 'type'>>;
+export type PatchTemplatePayload = Partial<Omit<CreateTemplatePayload, 'dependencies' | 'type' | 'start_date'>>;
 
 export function createTemplate(payload: CreateTemplatePayload): Promise<CreateTemplateResult> {
   return apiClient.post<CreateTemplateResult>('/task-templates', payload);

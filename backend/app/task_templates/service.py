@@ -6,7 +6,7 @@ Stage 6 wires the real adapter behind the same interface without touching call s
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import cast
 from zoneinfo import ZoneInfo
 
@@ -72,6 +72,7 @@ class TaskTemplateDraft:
     recurrence: Recurrence
     priority: Priority
     estimated_duration_minutes: int
+    start_date: date
     description: str | None = None
     location: str | None = None
     fixed_time_of_day: str | None = None
@@ -133,6 +134,9 @@ def create_template(db: Session, jobs: JobScheduler, draft: TaskTemplateDraft) -
 
     settings = require_settings(db)
 
+    if draft.start_date < now.astimezone(ZoneInfo(settings.timezone)).date():
+        raise TemplateValidationError("invalid_start_date", "The start date can't be in the past.")
+
     if draft.dependencies:
         _ensure_no_cycle(db, dependency_ids=draft.dependencies)
 
@@ -152,6 +156,7 @@ def create_template(db: Session, jobs: JobScheduler, draft: TaskTemplateDraft) -
             location=draft.location,
             type=draft.type,
             recurrence=draft.recurrence,
+            start_date=draft.start_date,
             fixed_time_of_day=draft.fixed_time_of_day,
             deadline_offset_minutes=draft.deadline_offset_minutes,
             priority=draft.priority,
@@ -166,6 +171,15 @@ def create_template(db: Session, jobs: JobScheduler, draft: TaskTemplateDraft) -
     )
 
     generated = generate_next_instance(template, predecessor=None, now=now, timezone=settings.timezone)
+    if generated.deadline is not None and generated.deadline <= now:
+        # The window is counted from the start of the occurrence's date (§9.1), so a
+        # short one on a start date of today can already be over. Saving it would make it
+        # `missed` on arrival.
+        raise TemplateValidationError(
+            "invalid_start_date",
+            "This task's window has already ended - its deadline is counted from the start of its start date. "
+            "Choose a later start date or a longer deadline.",
+        )
     blocked = bool(draft.dependencies)
 
     if template.type == "fixed":

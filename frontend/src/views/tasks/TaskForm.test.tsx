@@ -76,7 +76,24 @@ describe('TaskForm', () => {
       expect(payload.name).toBe('Water the plants');
       expect(payload.type).toBe('flexible');
       expect(payload.recurrence.pattern).toBe('one_time');
+      expect(payload.start_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
       expect(onSaved).toHaveBeenCalledWith({ template: BASE_TEMPLATE, instance: BASE_INSTANCE });
+    });
+
+    it('asks for a start date, sends the chosen one, and shows invalid_start_date beside it', async () => {
+      mockedTemplates.createTemplate.mockRejectedValue(new ApiError(422, 'invalid_start_date', "The start date can't be in the past."));
+      render(<TaskForm mode="create" onSaved={vi.fn()} onCancel={vi.fn()} />);
+
+      await userEvent.type(screen.getByLabelText('Name'), 'Renew passport');
+      const startDate = screen.getByLabelText('Starts on');
+      await userEvent.clear(startDate);
+      await userEvent.type(startDate, '2099-05-04');
+      await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+      await waitFor(() => expect(mockedTemplates.createTemplate).toHaveBeenCalled());
+      expect(mockedTemplates.createTemplate.mock.calls[0][0].start_date).toBe('2099-05-04');
+      const matches = await screen.findAllByText("The start date can't be in the past.");
+      expect(matches.length).toBe(2);
     });
 
     it('shows the active-hours override and dependencies inputs', async () => {
