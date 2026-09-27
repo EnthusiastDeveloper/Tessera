@@ -75,7 +75,35 @@ If you're locked out, set `RESET_ADMIN_PASSWORD` in `.env` (or a mounted secret)
 
 ## Updating
 
-Pull the new image/tag (or rebuild from a newer checkout) and restart the container. The SQLite database on the mounted volume is untouched by a rebuild - back it up before any update you're unsure about, the same as you would for any single-file database.
+Pull the new image/tag (or rebuild from a newer checkout) and restart the container. The SQLite database on the mounted volume is untouched by a rebuild - [back it up](#backing-up-and-restoring) before any update you're unsure about.
+
+## Backing up and restoring
+
+Everything Tessera stores - tasks, history, settings, scheduled reminders and your calendar connections - lives in the `/app/data` volume. Back it up as a whole, with the container stopped, so the files in it are consistent with each other. These commands use the container name from the provided compose file (`tessera`); substitute `podman` for `docker` if that's what you run.
+
+**Back up:**
+
+```bash
+docker compose stop tessera
+docker run --rm --volumes-from tessera -v "$PWD":/backup alpine \
+  tar czf /backup/tessera-backup-$(date +%F).tar.gz -C /app/data .
+docker compose start tessera
+```
+
+**Restore** (this replaces everything currently in the volume):
+
+```bash
+docker compose stop tessera
+docker run --rm --volumes-from tessera -v "$PWD":/backup alpine \
+  sh -c 'rm -rf /app/data/* /app/data/.[!.]* && tar xzf /backup/tessera-backup-2026-01-31.tar.gz -C /app/data'
+docker compose start tessera
+```
+
+Keep your `.env` alongside the backup. A restore needs the **same `SECRET_KEY`**: your calendar connections' tokens are encrypted with it, and with a different key you'd have to reconnect each calendar.
+
+## Running more than one copy
+
+Don't. Tessera runs its reminders and scheduling inside its single process, so two copies against the same data would send every reminder twice. It refuses to start if another copy is already running on the same data, and says so in the log.
 
 ## Building the image directly
 

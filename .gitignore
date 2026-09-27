@@ -23,3 +23,6 @@ blob-report/
 
 # MkDocs build output
 /site/
+
+# Single-process guard (backend/app/jobs/process_lock.py)
+*.scheduler.lock

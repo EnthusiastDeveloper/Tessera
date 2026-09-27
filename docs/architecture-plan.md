@@ -1,7 +1,7 @@
 # Tessera - Architecture & Implementation Plan
 ### Revision 4 - companion to: Tessera - Design Document (POC), Revision 10
 
-> **Open review:** `docs/implementation-readiness-review-2.md` (IRR-2) is the findings register behind Revisions 9 and 3. Its findings gating Stages 1, 2 and 3 are now drafted into these documents. **Still undecided and open against this revision:** H9 (no job misfire policy), H14 (the single-worker constraint is unenforced), M11 (field validation rules), M12 (SQLite WAL and `busy_timeout`), M13 (backup/restore guidance). Resolve those before the stage that consumes them - IRR-2 Section 6 says which.
+> **Open review:** `docs/implementation-readiness-review-2.md` (IRR-2) is the findings register behind Revisions 9 and 3. Its findings gating Stages 1, 2 and 3 are now drafted into these documents. **Still undecided and open against this revision:** H9 (no job misfire policy), M11 (field validation rules), M12 (SQLite WAL and `busy_timeout`). H14 and M13 are resolved in Section 7. Resolve those before the stage that consumes them - IRR-2 Section 6 says which.
 
 ## 0. Purpose of this document
 
@@ -309,7 +309,8 @@ Design doc 14.2 requires a guard around the entire app and 14.2 now enumerates t
 
 ## 7. Deployment & Configuration
 
-- **Single container, single process** - matches the design doc's "single self-hosted app/container" requirement.
+- **Single container, single process** - matches the design doc's "single self-hosted app/container" requirement. **Enforced, not assumed (IRR-2 H14):** the in-process job scheduler fires every job in whichever process runs it, so a second process against the same database (uvicorn `--workers 2`, or two containers on one volume) would fire every job twice. The entrypoint starts exactly one uvicorn process, and startup takes an exclusive, non-blocking `flock` on `<database>.scheduler.lock` beside the database, refusing to start if another process holds it. The OS releases it when the process exits, so a crash never leaves a stale lock.
+- **Backup and restore (IRR-2 M13):** everything lives in the data volume - the app database, the job-store database beside it, and SQLite's `-wal`/`-shm` side files - and is copied as one unit with the container stopped, so the files are consistent with each other. A restore also needs the same `SECRET_KEY`, which encrypts the stored calendar OAuth tokens. The operator steps are in the user docs (Getting Started, "Backing up and restoring"). The compose file keeps its named volume rather than switching to a bind mount: changing it would silently start existing installations on an empty database.
 - **Frontend serving:** React builds to static assets; FastAPI serves them directly (`StaticFiles`). Keeps the app same-origin, which avoids CORS entirely and is what makes the session-cookie auth approach (Section 3) simple rather than fraught.
 - **Data persistence:** the SQLite file must live on a mounted Docker volume, never inside the container's writable layer - otherwise all data (tasks, history, credentials) is lost the moment the container is recreated. This must be explicit in the compose file, not assumed.
 - **Container health check** included, standard practice for anything running under Docker/Compose/orchestration.
