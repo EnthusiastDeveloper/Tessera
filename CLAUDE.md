@@ -7,9 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Tessera** is a self-hosted task scheduling application that auto-places flexible tasks into your calendar while respecting fixed commitments, deadlines, and priorities. It's a Python FastAPI backend + React frontend, single-user, containerized.
 
 ### Key References
-- **Product specification:** `docs/design-doc.md` (Revision 10) - this is the authoritative source for what the system *does*
-- **Implementation plan:** `docs/architecture-plan.md` (Revision 4) - defines how it's structured and built
-- **Findings register / decision log:** `docs/implementation-readiness-review-2.md` (IRR-2) - why Revisions 9 and 3 say what they say (Revision 10's decisions are recorded in design-doc Section 11), plus the findings still open (H2 onward, gating Stage 5+)
+- **Product specification:** `docs/design-doc.md` (Revision 11) - this is the authoritative source for what the system *does*
+- **Implementation plan:** `docs/architecture-plan.md` (Revision 5) - defines how it's structured and built
+- **Findings register / decision log:** `docs/implementation-readiness-review-2.md` (IRR-2) - why Revisions 9 and 3 say what they say (Revision 10's and 11's decisions are recorded in design-doc Section 11), plus the findings still open (H2 onward, gating Stage 5+)
 - **Architecture enforcement:** `backend/pyproject.toml` has an `import-linter` configuration that blocks layering violations at CI
 
 ### Common Commands
@@ -41,6 +41,7 @@ This is the high-risk piece. It's a greedy two-pass algorithm:
 - **Obstacles = every instance in `scheduled` or `in_progress`, both types**, plus intra-pass placements, plus filtered external events
 - **A scheduled flexible task gives way to a fixed one** (design-doc 6.5, Rev 10): it is not a creation conflict; the fixed task is saved and the flexible task is placed again or flagged `unschedulable`. There is no manual move for flexible tasks
 - **Start times land on a 15-minute grid** aligned to the hour in local wall-clock. **Durations are never quantised**
+- **Stricter rules repair, never block** (design-doc 6.10, Rev 11): narrowing active hours, adding blackout dates or tightening a strict budget re-places every scheduled flexible occurrence that no longer fits, in a background job with visible progress. Valid placements are still never moved
 - **No topological sort.** The `blocked` gate already guarantees every candidate's dependencies are `completed`. Do not build one
 - All dates/times computed in the user's IANA timezone, never UTC offsets (design-doc 14.1)
 
@@ -52,7 +53,7 @@ This is the high-risk piece. It's a greedy two-pass algorithm:
 - **Auto-resolution** (design-doc 3.9): when the underlying condition clears, set `resolved_at` - except `budget_exceeded` (informational only, dismissed like a notice)
 
 ### Binding Design Decisions (design-doc Section 14)
-- **14.1 Timezone & DST:** All persisted timestamps in UTC; user timezone as IANA name; use timezone-aware library (Python `zoneinfo` or `pytz`). Fixed tasks re-project on timezone change unless `detached`. DST edge cases handled by the library, not custom code.
+- **14.1 Timezone & DST:** All persisted timestamps in UTC; user timezone as IANA name; use timezone-aware library (Python `zoneinfo` or `pytz`). **A timezone change moves nothing** (Rev 11): existing occurrences keep their instants, later ones are generated in the new zone, and the UI flags a device/setting timezone mismatch. DST edge cases handled by the library, not custom code.
 - **14.2 Authentication:** Mandatory for all deployments (no anon mode), even LAN-local single-user. First-run account creation is a **setup wizard** (`POST /auth/setup`), not an env var. `RESET_ADMIN_PASSWORD` is **recovery only**, one-time, and its marker lives in the **database** (not a file, which a container recreate would erase). Sessions: 30-day absolute TTL, rotate on login, all revoked on password change. The auth guard is **middleware with an explicit public allowlist** - see design-doc 14.2 for the enumerated public routes.
 
 ---
@@ -89,7 +90,8 @@ Background job wiring and reconciliation rules: see `backend/CLAUDE.md`.
 - `POST /api/v1/auth/login`, `/logout` - session-based auth
 - `POST /api/v1/task-instances/{id}/dismiss` - "skip this occurrence"; terminal, preserves the row, and for a completion-anchored template **must generate the successor** or the series silently ends
 - `POST /api/v1/auth/setup` - first-run account creation; requires the setup token logged at startup; `410 Gone` once a user exists
-- `DELETE /api/v1/task-instances/{id}?scope=this_occurrence|this_and_future` - deletion scope mirrors edit scope (design-doc 3.8); required for recurring templates
+- `DELETE /api/v1/task-instances/{id}?scope=this_occurrence|this_and_future` - deletion scope mirrors edit scope (design-doc 3.8); required for recurring templates. `this_and_future` ends the series: **every open occurrence is deleted** (in-progress included), finished ones kept, template archived (Rev 11)
+- `GET /api/v1/settings/schedule-repair` - progress of the background repair a stricter settings save starts (design-doc 6.10)
 - `GET /api/v1/task-instances?view=backlog` - the Backlog view is a filter, not its own resource
 
 ### Error Envelope

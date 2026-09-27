@@ -1,5 +1,5 @@
 # Tessera - Architecture & Implementation Plan
-### Revision 4 - companion to: Tessera - Design Document (POC), Revision 10
+### Revision 5 - companion to: Tessera - Design Document (POC), Revision 11
 
 > **Open review:** `docs/implementation-readiness-review-2.md` (IRR-2) is the findings register behind Revisions 9 and 3. Its findings gating Stages 1, 2 and 3 are now drafted into these documents. **Still undecided and open against this revision:** H9 (no job misfire policy), M11 (field validation rules), M12 (SQLite WAL and `busy_timeout`). H14 and M13 are resolved in Section 7. Resolve those before the stage that consumes them - IRR-2 Section 6 says which.
 
@@ -19,6 +19,7 @@ Whoever (human or LLM) implements against this repo should treat the design doc 
 | 2 | Sync with design doc Revision 7 (Section 3.10, Edit Scope & Propagation), which reversed the "edit always targets the template" assumption several decisions here were built on. Section 3 gained the edit-scope API shape; Section 4/4.1 split instance edits from template edits as job-rewiring triggers; **Section 5.1 was substantively rewritten**; Section 8 gained edit-scope/detach coverage |
 | 3 | Sync with design doc Revision 9 - see below |
 | 4 | Sync with design doc Revision 10 (recurring-series rules). Section 3: templates take `start_date`; a "this and future" edit names the occurrence it starts from and whether to include individually edited ones; `GET /task-instances` filters by template. Section 4.1: the "this and future" path fans out to every open occurrence from the edited one onward. Section 4.1: fixed-task paths displace overlapping flexible work; blocked fixed instances hold their slot and keep their jobs. Section 8: coverage for both |
+| 5 | Sync with design doc Revision 11. Section 3: `DELETE ...?scope=this_and_future` deletes every open occurrence of the series; `GET /settings/schedule-repair` reports a running repair. Section 4: a one-off `schedule_repair` job and its reconciliation. Section 5: the `ScheduleRepair` row. Section 8: coverage |
 
 ### 0.2 Revision 3 changes - sync with Design Doc Revision 9
 
@@ -122,8 +123,9 @@ Maps directly to Section 3 of the design doc:
   - A one-time (`recurrence: one_time`) template has no scope choice - `PATCH /task-templates/{id}` with no `scope` param is unambiguous, since there's only ever one instance.
 - **(Added Rev 3, design doc 3.8)** Deletion scope mirrors edit scope, and is likewise explicit rather than inferred:
   - `DELETE /task-instances/{id}?scope=this_occurrence` - removes this instance; the series continues and its successor is generated per design doc 9.1.
-  - `DELETE /task-instances/{id}?scope=this_and_future` - removes this instance and archives the template, ending the series.
+  - `DELETE /task-instances/{id}?scope=this_and_future` - ends the series: archives the template and **(Rev 5, design doc 3.8 Rev 11) deletes every open occurrence of it**, whatever its date or status (`in_progress` included), keeping completed and dismissed ones. `DELETE /task-templates/{id}` does the same. The response lists every deleted instance and every dependent it unblocked.
   - The parameter is **required** when the instance's template is recurring, and rejected as meaningless when it is `one_time`. Defaulting it would silently pick one of two destructive outcomes on the user's behalf.
+- **(Added Rev 5, design doc 6.10)** `GET /settings/schedule-repair` - the latest schedule repair: `{id, status: "running" | "finished", done, total, moved, unschedulable}`, or `null` if there has never been one. The client polls it after saving settings and, while `status` is `running`, shows the progress overlay. `PATCH /settings` is unchanged; the repair it may start is visible only here, so the save response stays the settings object.
 - **(Added Rev 3)** `POST /api/v1/task-instances/{id}/dismiss` - "skip this occurrence" (design doc 3.8). Transitions to the terminal `dismissed` status, preserving the row. A sub-resource action rather than a `PATCH` on `status`, matching `/complete` - status transitions with side effects are never plain field writes.
 - **(Added Rev 3)** `POST /api/v1/auth/setup` - first-run account creation (design doc 3.6). Available only while zero `User` rows exist; `410 Gone` afterwards, not `401` or `403`, because the resource is permanently gone rather than access-controlled. **Requires the setup token** (Section 6).
 - **(Added Rev 3)** `GET /task-instances?view=backlog` - the Backlog view (design doc 8.1) is a **filter on the existing collection**, not its own resource. It returns instances in `blocked` or `missed` status, plus `pending` instances carrying an active `unschedulable` notification. Modelling it as `/backlog` would imply an entity that does not exist and cannot be mutated independently.
@@ -165,6 +167,7 @@ Of the job types identified in the design doc's Section 9, most are event-driven
 | Recurring-instance generation, **`completion` anchor** | **Pure event hook** - fires directly off an instance transitioning to `completed`, not time-based at all |
 | Recurring-instance generation, **`calendar` anchor** *(added Rev 3)* | **Event-driven / precisely scheduled** - a one-off job at the next occurrence's nominal time. Generation here is *not* gated on the predecessor completing (design doc 9.1), so there is no completion event to hang it off. On firing it generates the instance and schedules the next boundary job |
 | Deadline-elapsed (`missed` transition, design doc 6.7) | **Event-driven / precisely scheduled** - schedule a one-off check at `deadline`, mirroring the overdue job's pattern; also checked inline at the points listed in design doc 6.7 |
+| Schedule repair *(added Rev 5, design doc 6.10)* | **Event-driven, one-off, run now** - `PATCH /settings` writes the settings and, if they got stricter and some scheduled flexible occurrence no longer fits, a `ScheduleRepair` row and a `schedule_repair:{id}` job due immediately, in the same transaction. The job re-computes the invalid set (settings may have changed again), then handles one occurrence per commit - return to `pending`, re-run 6.2 - updating the row's `done` counter each time, so progress is durable and visible. Running it in the save request instead would block the save on an unbounded amount of work and leave nothing to show progress against |
 | Dependency unblock → placement *(added Rev 3)* | **Pure event hook, no job at all** - when the last dependency of an instance reaches `completed`, design doc 6.9 requires that instance to be placed **in the same service method and transaction as that completion**. Deferring it to a job would open a window in which an unblocked task is neither blocked nor scheduled |
 
 **Revision 3 note on the generation split.** Revision 2's single "fires off a `completed` transition" row was correct only for what is now the `completion` anchor. A calendar-anchored template whose instance is never ticked off must still generate its successor, and under the old rule it silently never would - the single highest-impact defect IRR-2 found. The two rows above are genuinely different mechanisms, not a stylistic distinction.
@@ -195,7 +198,8 @@ The event-driven design in the table above is only correct if every mutation pat
 1. For every `TaskInstance` with status `scheduled` (fixed or flexible), or with future reminder offsets, confirm a matching active job exists in the APScheduler store for each expected fire time (reminders, the overdue check, and - per 4's new row - the deadline-elapsed check for flexible instances). Recreate any that are missing.
 2. For every `pending`/`blocked`/`missed`/`dismissed` instance, confirm no *stale* scheduled-fire job lingers from a prior `scheduled` state. Cancel any orphans. *(Rev 3: `dismissed` added - it is terminal, so any surviving job is by definition an orphan.)*
 3. **(Added Rev 3)** For every non-archived template with `recurrence.anchor == "calendar"` and a pattern other than `one_time`, confirm exactly one pending occurrence-boundary job exists (Section 4). Recreate it if missing, **and fire it immediately if its nominal time has already passed while the process was down** - otherwise a container that was off over a weekend silently skips those occurrences. Cancel any such job belonging to an archived template.
-4. **(Added Rev 3)** For every `blocked` instance whose dependencies have *all* since reached `completed`, run the 6.9 unblock path. This is the reconciliation counterpart to the new event hook: if the process died between writing a dependency's completion and placing its dependent, nothing else will ever notice, because the triggering event has already been consumed.
+4. **(Added Rev 3)** For every `blocked` instance whose dependencies have *all* since reached `completed`, run the 6.9 unblock path.
+5. **(Added Rev 5)** If the latest `ScheduleRepair` row is unfinished, re-schedule its job to run now. The job recomputes what still needs fixing, so resuming after a crash repeats nothing already done. This is the reconciliation counterpart to the new event hook: if the process died between writing a dependency's completion and placing its dependent, nothing else will ever notice, because the triggering event has already been consumed.
 
 This is a single pass at boot, low cost, and directly closes the failure mode above. It's a robustness addition consistent with the job-wiring philosophy already established in 4.1, not a behavior change - not flagged as needing product sign-off.
 
@@ -249,6 +253,11 @@ Fields nobody is writing are preserved, so a concurrent job's `status` change su
 **Sign-off status:** the intent - do not interrupt the user when the concurrent write did not touch what they are editing - has been stable since Revision 1; only the mechanism has changed. The `expected` field is additive, so if this proves to be more machinery than the POC needs, it degrades to a plain version check without an API break.
 
 ---
+
+
+### 5.2 `ScheduleRepair` (added Rev 5)
+
+Design doc 6.10's repair runs in the background, so its progress needs somewhere to live that the API can read and that survives a restart: one row per repair - `id`, `total`, `done`, `moved`, `unschedulable`, `requested_at`, `finished_at`. It is operational state, not a product entity, which is why it is specified here and not in design doc Section 3. Only the latest row matters; older ones are kept as a log and are never read by the UI.
 
 ## 6. Authentication & Secrets
 
@@ -364,7 +373,8 @@ The design doc's **Worked Examples (Section 10)** are the initial acceptance-tes
 | Test type | Scope |
 |---|---|
 | **Recurrence-anchor tests** | Both anchors, both failure modes: a `calendar` template generates its successor even when the predecessor was never completed (design doc Example P); a `completion` template generates **nothing** when its instance is never completed, and that is asserted as correct rather than as a bug (design doc 9.1). Plus the save-time rejection of `anchor: "completion"` on a `fixed` template |
-| **Deletion-scope tests** | Both scopes, and specifically that `this_and_future` cancels a calendar-anchored template's pending occurrence-boundary job (4.1) - an orphan there resurrects a series the user ended |
+| **Deletion-scope tests** | Both scopes, and specifically that `this_and_future` cancels a calendar-anchored template's pending occurrence-boundary job (4.1) - an orphan there resurrects a series the user ended. **(Rev 5)** `this_and_future` deletes every open occurrence - earlier ones and an `in_progress` one included - cancels their jobs and unlinks their dependents, and keeps completed and dismissed ones |
+| **Schedule-repair tests** *(Rev 5)* | The engine's invalid-placement check per rule (window, excluded day, blackout, strict budget with its eviction order; soft budget moves nothing); the settings save starting a repair only when something no longer fits; the job moving exactly those occurrences, never `in_progress` or fixed ones, flagging `unschedulable` when nothing fits, and counting progress; resuming an unfinished repair at startup |
 | **Missed-event reconciliation tests** | 4.2 items 3 and 4: occurrence boundaries that elapsed while the process was down, and dependents whose last dependency completed in the same window. Distinct from the existing job-store reconciliation tests, because there is no stale job to find - the event is simply gone |
 | **Concurrency tests** | The 5.1 contract: a partial `PATCH` succeeds while a concurrent job writes an untouched field; the same `PATCH` `409`s when the job wrote the field being edited; the `409` body names the field and its current value; a whole-object `PATCH` is rejected or fails, so requirement 1 of 5.1 cannot regress silently |
 | **Auth-boundary test** | Enumerate every registered route; assert each is either in the public allowlist or behind the guard (6.3) |

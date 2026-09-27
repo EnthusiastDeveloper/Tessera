@@ -1,6 +1,8 @@
 # Tessera - Design Document (POC)
-### Revision 10
+### Revision 11
 
+> **Revision 11 settles three open IRR-2 findings** - what deleting a series does to its open occurrences (H5), what a timezone change moves (H12), and what happens to scheduled work when the user's scheduling rules get stricter (H13) (Section 11 items 15-17). Everything below about Revisions 9 and 10 still stands unless this revision says otherwise.
+>
 > **Revision 10 settles four scheduling questions** - when a series starts, what "this and future" reaches, who moves a flexible task whose slot is taken, and what happens to a fixed task still waiting on a prerequisite (Section 11 items 10-14). Everything below about Revision 9 still stands.
 >
 > **Revision 9 resolves the second implementation-readiness review.** `docs/implementation-readiness-review-2.md` (IRR-2) is the findings register and the reasoning trail behind the changes below; this document is authoritative for *what the system does*, IRR-2 for *why it says so*. Every IRR-2 finding gating Stages 1, 2 and 3 has been drafted in here, and Section 11 has no open items. Findings gating Stage 5 and later (H2, H5, H6, H7, H9–H14, and the remaining Medium items) are **not yet resolved** and remain open against this revision - IRR-2 Section 6 lists which gates which stage.
@@ -60,6 +62,12 @@ Full diffs are in git; IRR-2 (`docs/implementation-readiness-review-2.md`) holds
 - **The first-run setup wizard is guarded by a setup token** (3.6), generated at startup while zero users exist, logged at `WARNING`, held in memory only.
 
 *Status:* **Section 11 has no open items at Revision 9.** IRR-2 findings gating Stage 5 and later remain open against this revision and are tracked there.
+
+**Revision 11 changelog.** Stakeholder decisions taken 2026-09-27 (Section 11 items 15-17).
+
+- **Deleting a series removes every open occurrence** (3.8) - `pending`, `scheduled`, `in_progress`, `blocked` and `missed`, whatever their date - and archives the template. Completed and skipped occurrences are kept as history (IRR-2 H5).
+- **Changing the timezone setting moves nothing** (14.1). Revision 6's re-projection of fixed occurrences is withdrawn. Instead, when the device's timezone differs from the setting, the Timeline and the create/edit form say so plainly (8.1) (IRR-2 H12).
+- **Stricter scheduling rules repair the schedule** (6.10). Narrowing active hours (global or a task's own), adding blackout dates, or tightening a strict daily budget re-places every scheduled flexible occurrence that no longer fits, with a progress overlay while it runs (IRR-2 H13).
 
 **Revision 10 changelog.** Stakeholder decisions taken 2026-09-25 and 2026-09-26 (Section 11 items 10-14).
 
@@ -404,14 +412,14 @@ A per-day `null` in `active_hours` means **that day is fully excluded**, and the
 ### 3.8 Deletion & archival rules
 
 - **Deleting a `TaskInstance` that other instances depend on:** the dependency link is simply removed from the dependent instance(s)' `dependencies` array. The dependent instance(s) are otherwise untouched. If this removal leaves a `blocked` instance with zero remaining dependencies, it transitions to `pending` per the normal state machine (Section 4) and becomes eligible for the next scheduling pass. **No cascading delete.**
-- **Deleting a `TaskTemplate` with incomplete instances:** the UI must show a confirmation dialog explaining the implications (which incomplete instances exist and what happens to them) before proceeding. On confirmation, the template is **archived**, not hard-deleted (`archived = true`) - this keeps `template_id` references on historical/completed instances valid rather than dangling, and preserves history availability.
+- **Deleting a `TaskTemplate` with incomplete instances:** the UI must show a confirmation dialog explaining the implications (which incomplete instances exist and what happens to them) before proceeding. On confirmation, the template is **archived**, not hard-deleted (`archived = true`) - this keeps `template_id` references on historical/completed instances valid rather than dangling, and preserves history availability. **(Rev 11)** Every **open** instance of the template - `pending`, `scheduled`, `in_progress`, `blocked` or `missed`, whatever its date, including one the user has started - is **deleted** in the same operation, with its jobs cancelled and its dependents unlinked per the rule above. Completed and dismissed instances are kept: they are the history archiving exists to preserve. Revision 9 left the open instances' fate unstated (IRR-2 H5); left in place, they would keep firing reminders for a task the user had just deleted.
 
 **Deletion scope for recurring tasks.** Deleting an instance must say what happens to its *series*, not only to its dependents. Deletion **prompts for scope**, mirroring 3.10's edit-scope prompt rather than inventing a second mental model:
 
 | Scope | Effect |
 |---|---|
 | **`this_occurrence`** | Delete this instance only. The series continues and its successor is generated per 9.1. |
-| **`this_and_future`** | Delete this instance **and end the series** - the template is `archived` (per the rule above). |
+| **`this_and_future`** | **End the series** (Rev 11): the template is `archived` and **every open occurrence of the series is deleted**, not only this one and later ones (per the rule above). The dialog labels this choice "The whole series" and names what will go - how many open occurrences, and whether any is in progress. |
 
 This applies to both task types and both recurrence anchors. For a `one_time` template the prompt is skipped, since the two scopes are equivalent. The dependency-unlink rule above is unchanged and applies to whichever instances are removed.
 
@@ -425,7 +433,7 @@ This applies to both task types and both recurrence anchors. For a `one_time` te
 |---|---|---|
 | **Skip this occurrence** (`dismiss`) | "This one is not going to happen." Routine; the expected way to clear a stale predecessor (9.1) | Preserved, terminal |
 | **Delete, `this_occurrence`** | "Remove this from my records." Exceptional | Destroyed |
-| **Delete, `this_and_future`** | "End this series." | Instance destroyed, template archived |
+| **Delete, `this_and_future`** | "End this series." | Every open occurrence destroyed, finished ones kept, template archived (Rev 11) |
 
 Side effects of a dismiss, all in the same service method:
 - **Cancel every job** for that instance - reminder, overdue, deadline-elapsed.
@@ -812,6 +820,23 @@ Point 4 is a real path, not a corner case: **a deadline is a fixed point in time
 
 ---
 
+
+### 6.10 Schedule repair when scheduling rules get stricter (added Revision 11)
+
+Placement is an incremental fit (6.2): a valid placement is never moved. But a placement can **stop being valid** when the rules it was made under get stricter - and before Revision 11 nothing re-checked it (IRR-2 H13). A flexible task placed at 19:00 would stay there after the user shortened their evenings to 18:00.
+
+**Triggers.** Any settings or template change that can only shrink where flexible work may go:
+- `active_hours` (3.7) or a template's `active_hours_override` (3.2) narrowed, or a day excluded;
+- a `blackout_dates` range added or widened;
+- a `daily_time_budget_minutes` value lowered, or `budget_enforcement` switched to `"strict"` - **only while enforcement is `"strict"`**, since a soft budget is not a rule a placement can break (6.2 Pass 2 may exceed it).
+
+**What is checked.** Every `scheduled` flexible occurrence (for a template change: every such occurrence of that template). It no longer fits if its slot is not entirely inside its day's effective active-hours window, or its day is blacked out, or - strict budget only - its day's committed minutes (counted exactly as 6.2 counts them, fixed tasks and external events included) exceed the day's budget. On an over-budget day, occurrences are taken off in the reverse of 6.2's placement order - latest deadline first, then lowest priority - until the day is within budget.
+
+**What is not touched.** `in_progress` occurrences (the user has started them), fixed occurrences (never constrained by these rules, 3.7), and every placement that still fits - this is a repair, not a reflow.
+
+**The repair.** Each occurrence that no longer fits returns to `pending` and is placed again by 6.2 under the new rules - an added entry point into 6.2, not a new mechanism - or is flagged `unschedulable` if nothing fits before its deadline. A task whose duration no longer fits *any* day (6.8) ends up `unschedulable` this way rather than being rejected: the settings change is legitimate and is never blocked.
+
+**Progress is visible (8.1).** A repair can touch many occurrences, so it runs in the background after the settings are saved rather than inside the save. While it runs, the UI covers the screen with an overlay reading "Fixing the calendar (*n*/*total*)…", updated as each occurrence is handled, so the user can see the system is working and not stuck; when it ends, the overlay closes with a summary (how many were moved, how many could not be placed - those are in Notifications). A settings change that invalidates nothing shows no overlay. A template's own override change repairs its occurrences as part of the edit itself (3.10), since there are at most a handful.
 ## 7. External Calendar Integration (POC scope)
 
 Read-only, polling-based (webhooks require a publicly reachable endpoint, conflicting with LAN-only self-hosting - deferred, Backlog 12.5). Configured per-provider in Settings: connect account (OAuth), set `refresh_interval_minutes`. Staleness between polls should be visible to the user (e.g. "Calendar last synced: 4 minutes ago"), not hidden.
@@ -835,8 +860,11 @@ WebUI only (Backlog 12.2 for IM bot).
 0. **First-run setup screen (added Rev 9)** - shown only while zero `User` rows exist (3.6). Takes the **setup token** printed in the container log, and sets the admin password (minimum 12 characters, confirmed twice). The screen must say where to find the token. Unreachable once an account exists; every other screen redirects here until one does.
 1. **Login screen** - username/password (see 3.6, 14.2).
 2. **Timeline / Task list view** - calendar-style view of `scheduled` instances and **(Rev 10) `blocked` fixed instances**, plus **display-only virtual/"ghost" projections of upcoming recurring occurrences (9.2, added Revision 6)**, external busy-blocks overlaid read-only and visually distinguished (post-filtering per Section 7), blackout dates visibly marked.
+   - **(Rev 11) Timezone mismatch notice** (14.1): when the device's timezone differs from the timezone setting, a persistent label says so, naming both.
    - **(Rev 10) Waiting fixed tasks are shown, not hidden.** A `blocked` fixed instance holds its time while it waits (6.5), so leaving it off would make that slot look free. It is drawn at its time but visibly distinct from a ready task - a dashed border on a half-transparent fill - and labelled with what it is waiting on. Like any Timeline item it opens the task detail view. It is also listed in the Backlog view (5a).
 3. **Task creation/edit form** - for a new task, or when editing a one-time (`recurrence: one_time`) template, edits the `TaskTemplate` directly as in Revision 6. **(Rev 10)** Creation asks for the **start date** (`start_date`, 3.2) with the other parameters, and for a flexible task presents `deadline_offset_minutes` as how long each occurrence may take to get done, counted from its date. **(Rev 7)** For an existing recurring task, first prompts for edit scope - **"this occurrence"** vs. **"this and future occurrences"** (3.10) - before applying the edit; includes the optional active-hours override (3.2); surfaces the archival/deletion warning (3.8); surfaces the feasibility validation error on save if applicable (6.8, added Revision 6).
+   - **(Rev 11)** Shows the same timezone mismatch notice as the Timeline (14.1), since a time of day entered here is read in the setting's timezone.
+   - **(Rev 11) Deleting a recurring task** offers "This occurrence only" and "The whole series" (3.8). The second names what it removes - how many open occurrences, and that any in progress go too - before the user confirms.
    - **(Rev 10) Skipped occurrences are announced, not discovered.** When "this and future" would skip later occurrences that were edited on their own (3.10), the form says so before saving and names them - e.g. "2 upcoming occurrences have their own changes and won't be updated: Wed 1 Oct, Fri 3 Oct". Next to that message it offers an unticked checkbox, **"Apply to all upcoming occurrences, including these"**. Ticked, the edit reaches every open occurrence from the edited one onward with no exceptions; past occurrences are still never changed. When nothing would be skipped, neither the message nor the checkbox is shown.
 4. **Task detail view** - single `TaskInstance`. **(Rev 10)** There is deliberately no "move" or "reschedule" action for a **flexible** instance: Tessera moves flexible work itself whenever its slot is taken (6.4, 6.5), and the user shapes placement through the task's window - its date and deadline - and duration. Fields: status, status history, dependencies (with current status), a visible **`detached` indicator** when applicable (3.10, added Rev 7), actions: mark complete (from any non-terminal status, 3.3), mark in-progress, **skip this occurrence (Rev 9 - transitions to `dismissed`, 3.8; the primary action on a stale recurring occurrence)**, reschedule (for `sync_conflict`/`overdue` fixed tasks - a "this occurrence" edit per 3.10/6.6), extend deadline (for `missed` flexible tasks, 6.7 - also a "this occurrence" edit per 3.10).
 5. **Notifications panel** - undismissed/unresolved `Notification` rows; auto-resolved ones show the "already resolved" state if opened (3.9).
@@ -849,6 +877,7 @@ WebUI only (Backlog 12.2 for IM bot).
    - Scheduling window: global active-hours per day of week, blackout dates list, daily time-budget cap per day of week, and a budget-enforcement toggle ("respect the budget" / "meet the deadline") controlling whether the last-resort override in 6.2 is allowed at all.
    - Timezone: select IANA timezone, defaulted from container `TZ`.
    - Display: first day of the week (for Timeline layout and Settings ordering).
+   - **(Rev 11)** Saving a stricter scheduling window (active hours, blackout dates, a strict budget) may start a schedule repair (6.10); while it runs, a full-screen overlay reads "Fixing the calendar (*n*/*total*)…" and closes with a summary.
 
 ### 8.1a Duration entry (added Revision 9)
 
@@ -1154,7 +1183,7 @@ This is the case that makes 9.1's occurrence-boundary rule necessary: gating gen
 
 ## 11. Open Questions Requiring Stakeholder Sign-off
 
-**Status as of Revision 10: no open items.** See the closing note below for why that is not the same as "the document is fully verified".
+**Status as of Revision 11: no open items.** See the closing note below for why that is not the same as "the document is fully verified".
 
 Items 1–7 were raised by the first readiness review and resolved in Revisions 7 and 8; their outcomes are stated in the body of this document rather than restated here, and the full text is in git history. One is worth naming, because it was a **reversal** and a future reader is otherwise liable to reinstate the original position:
 
@@ -1176,7 +1205,13 @@ Revision 9 resolved eighteen findings from a second review (IRR-2). Two of them 
 
 14. ~~**Should a fixed task waiting on a dependency be warned about and shown like any other task?**~~ **RESOLVED - Revision 10 (IRR-2 H10).** Yes on both counts: fixed and flexible tasks should not differ here. A waiting fixed task gets the same `dependency_at_risk` warning as a flexible one, 3 days ahead, measured against its time rather than a deadline (6.3). And it appears on the Timeline at its time, drawn distinctly - dashed border, half-transparent fill, "waiting on" label - so a slot it holds never looks free (8.1). Before this, it was visible only in the Backlog and was never warned about.
 
-**Section 11 has no open items at Revision 10.** Note this is narrower than Revision 8's claim that the document was "fully locked": IRR-2 findings gating Stage 5 and later (H2, H5–H7, H9–H14, and several Medium items) remain **open against this revision** and are tracked in that register, not here. Section 11 tracks decisions awaiting confirmation; IRR-2 tracks findings awaiting a decision.
+15. ~~**What happens to a series' open occurrences when the series is deleted?**~~ **RESOLVED - Revision 11 (IRR-2 H5).** They are deleted - every open one, whatever its date, including one in progress - and the template is archived. Completed and skipped occurrences are kept as history (3.8).
+
+16. ~~**What moves when the user changes their timezone setting?**~~ **RESOLVED - Revision 11 (IRR-2 H12).** Nothing. Occurrences keep their instants; later ones are generated in the new timezone. When the device's timezone differs from the setting, the Timeline and create/edit form say so (14.1, 8.1).
+
+17. ~~**What happens to scheduled work when the scheduling rules get stricter?**~~ **RESOLVED - Revision 11 (IRR-2 H13).** Every scheduled flexible occurrence that no longer fits is placed again, or flagged `unschedulable`; the change itself is never blocked. It runs in the background behind a progress overlay (6.10).
+
+**Section 11 has no open items at Revision 11.** Note this is narrower than Revision 8's claim that the document was "fully locked": IRR-2 findings gating Stage 5 and later (H2, H5–H7, H9–H14, and several Medium items) remain **open against this revision** and are tracked in that register, not here. Section 11 tracks decisions awaiting confirmation; IRR-2 tracks findings awaiting a decision.
 
 Two related items were resolved **without** flagging, since they don't change load-bearing behavior and follow directly from rules already on the books:
 - Instances may be marked `completed` directly without first being `scheduled` (3.3/4) - this is a natural reading of "the user did the task," not a new mechanism.
@@ -1243,7 +1278,9 @@ This is **not** a feature ticket, it's a constraint on how the entire codebase h
 - DST transitions are then handled correctly "for free" by the library. If any part of the implementation takes a shortcut around this (e.g. storing a raw offset, or doing manual hour arithmetic), it will silently drift by an hour at each DST boundary - this must be treated as a bug, not an edge case, if found in review.
 - Default timezone is sourced from the container's `TZ` environment variable at first run; user can override in Settings (8.1).
 
-**Fixed-task time semantics (added Revision 6):** `fixed_time_of_day` (3.2) represents a **wall-clock local time**, evaluated against the user's *current* `UserSettings.timezone` at the moment each instance's absolute UTC `scheduled_time` is computed or recomputed - not a UTC instant frozen at creation time. Practically: if the user changes their timezone setting, future (not-yet-occurred) fixed instances are re-projected against the new timezone the next time their `scheduled_time` is computed (e.g. at next recurrence generation, or via an explicit recompute triggered by the timezone-change save action); already-completed instances are historical and untouched. **(Added Revision 7)** A `detached` instance (3.10) - including one manually rescheduled via 6.6 - is also excluded from this re-projection: a manual retime is treated as an explicit wall-clock choice the user already made, and a later timezone-setting change should not silently move it again.
+**Fixed-task time semantics (added Revision 6, amended Revision 11):** `fixed_time_of_day` (3.2) represents a **wall-clock local time**, evaluated against the user's *current* `UserSettings.timezone` at the moment each instance's absolute UTC `scheduled_time` is computed - that is, when the occurrence is generated or explicitly retimed. **(Rev 11) Changing the timezone setting moves nothing.** Occurrences that already have a time keep the same instant; occurrences generated after the change use the new timezone. Revision 6's re-projection of existing fixed occurrences on a timezone change is **withdrawn** (IRR-2 H12): it could land two fixed tasks on top of each other, left flexible placements outside active hours unaddressed, and was never assigned to a build stage. What the user needs instead is to *know* when the two clocks differ - see "Timezone mismatch notice" below.
+
+**Timezone mismatch notice (added Revision 11).** The UI compares the device's timezone (as reported by the browser) with `UserSettings.timezone`. When they differ, the Timeline and the task create/edit form show a clear, persistent label naming both - e.g. "Tessera schedules in America/New_York; this device is on Europe/London. Times of day you enter are in America/New_York." - so the user is never guessing which clock a time refers to. It links to Settings, where the timezone can be changed; nothing is changed automatically.
 
 **DST edge cases:** a wall-clock time that falls in a spring-forward gap (doesn't exist that day) is shifted forward to the next valid instant; a wall-clock time that falls in a fall-back ambiguity (occurs twice) resolves to the first occurrence - this is standard behavior of a timezone-aware library applied per the binding rule above, not custom logic to write.
 
