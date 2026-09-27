@@ -735,7 +735,7 @@ On each poll:
 
 ### 6.6 Overdue-task handling
 
-Periodic check for instances where `scheduled_time` has passed and `status` is not `completed`:
+Periodic check for instances where `scheduled_time` has passed and `status` is not `completed`, `in_progress` or otherwise terminal. **(Clarified post-Revision 10, IRR-2 H2)** An `in_progress` instance is never overdue: the user has started it, so a flexible one is not thrown back into the pool mid-task. Nothing automatic happens to an `in_progress` instance that is never completed:
 - **Flexible:** clear `scheduled_time`, set `status = "pending"` (re-enters 6.2 on next pass, subject to the 6.7 deadline-elapsed gate first), create an informational `overdue` Notification so the move isn't silent.
 - **Fixed:** status unchanged, create an `overdue` Notification whose action menu offers **"reschedule"** (opens edit, subject to 6.5 validation for the new time), **"mark complete"** - covering the case where the user simply forgot to check it off - and **(Rev 9) "skip this occurrence"**, transitioning the instance to `dismissed` (3.8), for the case where it genuinely did not happen and is not going to.
 

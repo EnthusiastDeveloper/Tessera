@@ -229,10 +229,9 @@ def complete(db: Session, jobs: JobScheduler, instance_id: str) -> TaskInstance:
 def start_progress(db: Session, instance_id: str) -> TaskInstance:
     """§4 state diagram: `scheduled` -> `in_progress`, user-triggered and optional. The
     only inbound edge in the diagram is from `scheduled`, so that's the only status this
-    accepts from. No `jobs` param (unlike `dismiss`/`complete`) - the reminder and
-    overdue-check handlers already treat `in_progress` identically to `scheduled`
-    (`app/jobs/handlers.py`'s `status not in ("scheduled", "in_progress")` guards), so
-    this transition has no job side effects to co-locate, matching
+    accepts from. No `jobs` param (unlike `dismiss`/`complete`) - reminders still fire
+    for an `in_progress` instance and the overdue check no-ops on one
+    (`app/jobs/handlers.py`), so this transition has no job side effects to co-locate, matching
     `app.notifications.service.dismiss`'s precedent for a job-free mutation.
     """
     instance = _require_instance(db, instance_id)

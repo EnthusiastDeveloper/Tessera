@@ -183,8 +183,8 @@ class TestArchiveRecurringCalendarAnchor:
 
 class TestStartProgress:
     def test_starting_touches_no_jobs(self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler) -> None:
-        """§4: `scheduled` -> `in_progress` has no job side effects - the reminder and
-        overdue-check handlers already treat `in_progress` identically to `scheduled`
+        """§4: `scheduled` -> `in_progress` has no job side effects - reminders still
+        fire and the overdue check no-ops on an `in_progress` instance
         (`app/jobs/handlers.py`). `start_progress` doesn't even take a `jobs` param, so
         this just confirms the fixture's job-store state is untouched by the call.
         """

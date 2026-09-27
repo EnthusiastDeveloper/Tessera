@@ -395,7 +395,7 @@ Plain-HTTP LAN is a **fully supported deployment**, not a degraded mode. The fla
 **Where:** design-doc §6.6
 **Finding:** the trigger is "`scheduled_time` has passed and `status` is not `completed`." `in_progress` is not `completed`. So a flexible task the user started on time and is *currently doing* has its `scheduled_time` cleared and is thrown back into the scheduling pool the moment its start time passes.
 **Recommendation:** restrict the overdue check to `scheduled` only. Separately, decide what (if anything) should happen to an `in_progress` task that never gets completed - recommend nothing automatic for POC.
-**Disposition:** safe correction.
+**Disposition:** **resolved** (design-doc §6.6, clarified post-Revision 10) as recommended: the overdue check skips `in_progress`, for both types (a blocked fixed instance is still checked, per H11), and nothing automatic happens to an `in_progress` task that is never completed.
 
 ### H3 - Budget accounting counts commitments that fall outside active hours
 **Where:** design-doc §3.7 (final paragraph), §6.2 (`committed_duration`)
