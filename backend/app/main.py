@@ -114,7 +114,7 @@ _docs = _docs_urls(enable_api_docs=get_settings().enable_api_docs)
 app = FastAPI(
     title="Tessera",
     description="Self-hosted task scheduling that respects the real shape of your day.",
-    version="0.1.0",
+    version="0.2.0",
     openapi_url=_docs.openapi_url,
     docs_url=_docs.docs_url,
     redoc_url=_docs.redoc_url,
