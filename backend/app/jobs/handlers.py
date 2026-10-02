@@ -25,6 +25,7 @@ from app.core.config import get_settings
 from app.db.base import utcnow
 from app.db.repositories import (
     ExternalCalendarConnectionRepository,
+    ScheduleRepairRepository,
     TaskInstanceRepository,
     TaskTemplateRepository,
     UserSettingsRepository,
@@ -42,6 +43,7 @@ from app.scheduling.orchestration import (
     return_to_pending,
     schedule_next_occurrence_boundary,
 )
+from app.scheduling.repair import find_invalid_placements, repair_placement
 from app.scheduling_engine.deadlines import is_deadline_elapsed
 
 REMINDER = "reminder"
@@ -267,3 +269,36 @@ __all__ = [
     "run_overdue_check",
     "run_reminder",
 ]
+
+
+def run_schedule_repair(db: Session, jobs: JobScheduler, *, repair_id: str) -> None:
+    """§6.10 (Rev 11): re-places every scheduled flexible task that no longer fits the
+    current rules, one per commit, counting progress on the `ScheduleRepair` row the
+    client polls. The invalid set is recomputed here rather than trusted from the save
+    (the settings may have changed again since), and each task is re-checked just before
+    it is moved - moving one can bring a day back within budget, so a later one may fit
+    after all. Committing per task makes progress visible and durable: after a restart,
+    reconciliation re-runs this and only what still doesn't fit is touched.
+    """
+    repairs = ScheduleRepairRepository(db)
+    repair = repairs.get(repair_id)
+    if repair is None or repair.finished_at is not None:
+        return
+    settings = UserSettingsRepository(db).get()
+    if settings is None:
+        return
+
+    queue = find_invalid_placements(db, settings)
+    repair = repairs.update(repair.model_copy(update={"total": repair.done + len(queue)}))
+    db.commit()
+
+    for queued in queue:
+        still_invalid = find_invalid_placements(db, settings, only={queued.id})
+        if still_invalid:
+            result = repair_placement(db, jobs, still_invalid[0], settings=settings, now=utcnow())
+            outcome = "moved" if result.status == "scheduled" else "unschedulable"
+            repair = repair.model_copy(update={outcome: getattr(repair, outcome) + 1})
+        repair = repairs.update(repair.model_copy(update={"done": repair.done + 1}))
+        db.commit()
+
+    repairs.update(repair.model_copy(update={"finished_at": utcnow()}))

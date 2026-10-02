@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { deviceTimezone } from '../../lib/timezone';
 import { updateSettings } from '../../api/settings';
 import { ApiError } from '../../api/client';
 import type { UserSettings } from '../../types/settings';
@@ -30,9 +31,8 @@ interface TimezoneSectionProps {
 }
 
 /** §8.1 screen 6 "Timezone: select IANA timezone, defaulted from container TZ" (§3.7,
- * §14.1). Fixed tasks re-project on a timezone change unless `detached` (§14.1) -
- * that's server-side behavior triggered automatically by this same `PATCH /settings`
- * call, nothing extra for this component to do.
+ * §14.1). Changing it moves nothing already scheduled (§14.1, Rev 11); occurrences
+ * generated afterwards use the new zone.
  */
 export function TimezoneSection({ settings, onUpdated }: TimezoneSectionProps): JSX.Element {
   const [timezone, setTimezone] = useState(settings.timezone);
@@ -79,6 +79,10 @@ export function TimezoneSection({ settings, onUpdated }: TimezoneSectionProps): 
             </option>
           ))}
         </select>
+        <p style={{ color: 'var(--color-text-muted)', fontSize: 'var(--font-size-sm)' }}>
+          Changing this doesn’t move anything already scheduled. Tasks created or repeating after the change use the new
+          timezone. This device is set to {deviceTimezone()}.
+        </p>
       </div>
       <button type="button" className="primary" disabled={saving} onClick={() => void handleSave()}>
         {saving ? 'Saving…' : 'Save timezone'}

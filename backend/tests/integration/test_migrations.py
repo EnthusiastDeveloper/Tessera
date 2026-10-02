@@ -27,6 +27,7 @@ EXPECTED_TABLES = {
     "notifications",
     "external_calendar_connections",
     "external_events",
+    "schedule_repairs",
 }
 
 

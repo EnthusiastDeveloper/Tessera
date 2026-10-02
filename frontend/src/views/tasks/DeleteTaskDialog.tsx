@@ -15,15 +15,15 @@ interface DeleteTaskDialogProps {
 
 /** Design doc §3.8/§8.2: an instance with dependents gets an informational notice, not
  * a hard block (deleting just unlinks the dependency); a recurring template's instance
- * additionally requires the same this-occurrence/this-and-future scope choice as
- * editing. There is no third "archive the template but keep the current instance"
- * button here - `scope: this_and_future` already archives the template as part of
- * deleting the instance (backend/app/task_instances/service.py's `delete_instance`),
- * which is the only template-archival path any §8.1 screen actually calls for. */
+ * additionally asks whether to delete this occurrence or the whole series. The whole
+ * series (`scope: this_and_future`) deletes every open occurrence, started ones
+ * included, keeps finished ones and archives the template (Rev 11) - the dialog says
+ * how many go before the user confirms. */
 export function DeleteTaskDialog({ template, instance, onDeleted, onCancel }: DeleteTaskDialogProps): JSX.Element {
   const isRecurring = template.recurrence.pattern !== 'one_time';
   const [scope, setScope] = useState<EditScope | null>(null);
   const [dependentCount, setDependentCount] = useState<number | null>(null);
+  const [openSeries, setOpenSeries] = useState<TaskInstance[] | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -41,6 +41,23 @@ export function DeleteTaskDialog({ template, instance, onDeleted, onCancel }: De
       cancelled = true;
     };
   }, [instance.id]);
+
+  useEffect(() => {
+    if (!isRecurring) return;
+    let cancelled = false;
+    listInstances({ template_id: template.id })
+      .then((occurrences) => {
+        if (!cancelled) setOpenSeries(occurrences.filter((o) => o.status !== 'completed' && o.status !== 'dismissed'));
+      })
+      .catch(() => {
+        if (!cancelled) setOpenSeries(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isRecurring, template.id]);
+
+  const inProgressCount = openSeries?.filter((o) => o.status === 'in_progress').length ?? 0;
 
   const scopeChoicePending = isRecurring && scope === null;
 
@@ -76,10 +93,14 @@ export function DeleteTaskDialog({ template, instance, onDeleted, onCancel }: De
 
       {isRecurring ? (
         <>
-          <ScopePrompt value={scope} onChange={setScope} name="delete-scope" />
+          <ScopePrompt value={scope} onChange={setScope} name="delete-scope" seriesLabel="The whole series" />
           {scope === 'this_and_future' && (
-            <p style={{ color: 'var(--color-text-muted)', fontSize: 'var(--font-size-sm)' }}>
-              This ends the recurring series - no further occurrences will be generated.
+            <p role="note">
+              {openSeries === null
+                ? 'Every open occurrence of this series will be deleted.'
+                : `${openSeries.length} open occurrence${openSeries.length === 1 ? '' : 's'} will be deleted` +
+                  (inProgressCount > 0 ? `, including ${inProgressCount} in progress.` : '.')}{' '}
+              Finished ones are kept. This ends the recurring series - no further occurrences will be generated.
             </p>
           )}
         </>

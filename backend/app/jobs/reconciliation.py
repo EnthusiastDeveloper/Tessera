@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from app.db.base import utcnow
 from app.db.repositories import (
     ExternalCalendarConnectionRepository,
+    ScheduleRepairRepository,
     TaskInstanceRepository,
     TaskTemplateRepository,
     UserSettingsRepository,
@@ -32,13 +33,14 @@ from app.jobs.interface import (
     occurrence_boundary_job_key,
     overdue_job_key,
     reminder_job_key,
+    schedule_repair_job_key,
 )
 from app.scheduling.orchestration import (
+    promote_if_unblocked,
     schedule_dependency_at_risk_job,
     schedule_next_occurrence_boundary,
     schedule_reminder_and_overdue_jobs,
 )
-from app.task_instances.service import promote_if_unblocked
 
 _LIVE_SCHEDULED_STATUSES = ("scheduled", "in_progress")
 
@@ -53,6 +55,16 @@ def reconcile_on_startup(db: Session, jobs: JobScheduler) -> None:
     _reconcile_occurrence_boundary_jobs(db, jobs)
     _reconcile_calendar_poll_jobs(db, jobs)
     _run_missed_unblocks(db, jobs)
+    _resume_schedule_repair(db, jobs)
+
+
+def _resume_schedule_repair(db: Session, jobs: JobScheduler) -> None:
+    """Item 5 (architecture-plan §4.2, Rev 5): an unfinished repair (design doc §6.10)
+    runs again now. Its job recomputes what still doesn't fit, so nothing already
+    repaired is touched twice."""
+    latest = ScheduleRepairRepository(db).latest()
+    if latest is not None and latest.finished_at is None:
+        jobs.schedule_at(job_key=schedule_repair_job_key(latest.id), run_at=utcnow())
 
 
 def _recreate_or_cancel_instance_jobs(db: Session, jobs: JobScheduler) -> None:

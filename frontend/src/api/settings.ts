@@ -1,5 +1,5 @@
 import { apiClient } from './client';
-import type { UserSettings } from '../types/settings';
+import type { ScheduleRepair, UserSettings } from '../types/settings';
 
 /** `GET /settings` (design doc §3.7). */
 export function getSettings(): Promise<UserSettings> {
@@ -13,4 +13,9 @@ export function getSettings(): Promise<UserSettings> {
  * (`_validate_full_week`) - so a caller changing even one day must still send all 7. */
 export function updateSettings(patch: Partial<UserSettings>): Promise<UserSettings> {
   return apiClient.patch<UserSettings>('/settings', patch);
+}
+
+/** The latest schedule repair, or `null` if there has never been one (design doc §6.10). */
+export function getScheduleRepair(): Promise<ScheduleRepair | null> {
+  return apiClient.get<ScheduleRepair | null>('/settings/schedule-repair');
 }

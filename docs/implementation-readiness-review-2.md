@@ -413,7 +413,7 @@ Plain-HTTP LAN is a **fully supported deployment**, not a degraded mode. The fla
 **Where:** design-doc §3.8 (second bullet), §8.2
 **Finding:** §3.8 says the UI must explain "what happens to them" and §8.2 says the dialog lists them - but neither document ever says what actually happens. Are the live instances deleted, left scheduled (and still firing reminders for a task the user just deleted), or cancelled?
 **Recommendation:** define it. Recommend: incomplete instances of an archived template are deleted (with their jobs cancelled and dependents unlinked per §3.8's instance rule); completed instances are retained as history, which is the stated reason for archiving rather than hard-deleting in the first place.
-**Disposition:** needs stakeholder decision.
+**Disposition:** **resolved in design doc Revision 11** (Section 11 item 15, §3.8). Every open instance is deleted - including one in progress - and the template archived; completed and dismissed instances are kept as history.
 
 ### H6 - No de-duplication rule for `unschedulable` or `budget_exceeded`
 **Where:** design-doc §6.2, §6.3, §5
@@ -464,13 +464,13 @@ Plain-HTTP LAN is a **fully supported deployment**, not a degraded mode. The fla
 - **Unassigned:** implementation-plan Stage 4 (Settings) explicitly defers all settings-consuming behavior to Stage 5, but Stage 5's scope covers only the generation-time projection. No stage owns "recompute on timezone change."
 
 **Recommendation:** make the recompute mandatory and synchronous with the timezone save (same transaction, with job re-wiring, per architecture §4.1's co-location rule); define collision behavior (recommend: re-project anyway, then raise `sync_conflict`-style notifications for any resulting collisions rather than blocking the settings change); decide explicitly whether scheduled flexible instances are re-evaluated (recommend: return them to `pending` for re-placement, since their placement constraint is wall-clock); and assign the work to a named stage.
-**Disposition:** needs stakeholder decision on the flexible-instance half; the rest is safe correction.
+**Disposition:** **resolved in design doc Revision 11** (Section 11 item 16, §14.1). A timezone change moves nothing; Revision 6's re-projection is withdrawn, which removes the collision and flexible-placement problems with it. When the device's timezone differs from the setting, the Timeline and create/edit form say so.
 
 ### H13 - §6.8 feasibility is validated once and never re-validated
 **Where:** design-doc §6.8, §3.7
 **Finding:** duration feasibility is checked at save time against the then-current active hours. Nothing re-checks when the user later *shrinks* their global `active_hours` or a template's override. Every task that no longer fits silently returns to the exact failure mode §6.8 was written to prevent: permanent `pending` with a repeating `unschedulable` notification.
 **Recommendation:** re-run the §6.8 check across affected templates/instances when `active_hours` or an override is narrowed, and surface the now-infeasible tasks to the user at settings-save time (warn, don't block - the settings change is legitimate). Assign to Stage 4 or 5.
-**Disposition:** needs stakeholder decision (warn vs. block).
+**Disposition:** **resolved in design doc Revision 11** (Section 11 item 17, §6.10). Warn-not-block, as recommended, and broader: every scheduled flexible occurrence invalidated by narrowed active hours, new blackout dates or a tightened strict budget is placed again or flagged `unschedulable`, in the background behind a progress overlay.
 
 ### H14 - In-process APScheduler assumes a single worker; nothing enforces it
 **Where:** architecture-plan §4, §7

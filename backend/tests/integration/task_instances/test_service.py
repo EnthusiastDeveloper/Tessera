@@ -20,6 +20,7 @@ from app.db.repositories import (
 )
 from app.db.schemas import ExternalCalendarConnection, ExternalEvent, Notification, Recurrence, UserSettings
 from app.jobs.interface import occurrence_boundary_job_key
+from app.scheduling.orchestration import generate_and_place_next_instance
 from app.task_instances.service import (
     InstanceValidationError,
     complete,
@@ -31,7 +32,7 @@ from app.task_instances.service import (
     reschedule,
     start_progress,
 )
-from app.task_templates.service import TaskTemplateDraft, create_template
+from app.task_templates.service import TaskTemplateDraft, archive_template, create_template
 from tests.fixtures.db_entities import make_oauth_token
 from tests.fixtures.jobs import RecordingJobScheduler
 from tests.fixtures.scheduling import local_today
@@ -651,6 +652,59 @@ class TestDeleteInstanceScope:
 
         archived = TaskTemplateRepository(db_session).get(created.template.id)
         assert archived is not None and archived.archived is True
+        assert occurrence_boundary_job_key(created.template.id) in jobs.cancelled
+
+    def test_ending_a_series_deletes_every_open_occurrence_and_keeps_finished_ones(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        """§3.8 (Rev 11): earlier ones and a started one go too; completed and skipped
+        ones stay as history; their dependents are unlinked and unblocked."""
+        created = create_template(
+            db_session, jobs, _flexible_draft(recurrence=Recurrence(pattern="daily", interval=1, anchor="calendar"))
+        )
+        occurrences = [created.instance]
+        for _ in range(4):
+            occurrences.append(
+                generate_and_place_next_instance(
+                    db_session, jobs, template=created.template, predecessor=occurrences[-1], settings=settings, now=utcnow()
+                )
+            )
+        done, skipped, started, waiting_on, last = (o.id for o in occurrences)
+        complete(db_session, jobs, done)
+        dismiss(db_session, jobs, skipped)
+        repo = TaskInstanceRepository(db_session)
+        started_row = repo.get(started)
+        assert started_row is not None
+        repo.update(started_row.model_copy(update={"status": "in_progress"}))
+        downstream = create_template(db_session, jobs, _flexible_draft(name="Downstream", dependencies=(waiting_on,)))
+        db_session.commit()
+        assert downstream.instance.status == "blocked"
+
+        result = delete_instance(db_session, jobs, last, scope="this_and_future")
+        db_session.commit()
+
+        assert set(result.deleted_instance_ids) == {started, waiting_on, last}
+        assert {i.id for i in repo.list_by_template(created.template.id)} == {done, skipped}
+        assert {started, waiting_on, last} <= set(jobs.cancelled_instances)
+        assert result.unblocked_instance_ids == (downstream.instance.id,)
+        unblocked = repo.get(downstream.instance.id)
+        assert unblocked is not None and unblocked.status in ("pending", "scheduled")
+        template = TaskTemplateRepository(db_session).get(created.template.id)
+        assert template is not None and template.archived is True
+
+    def test_archiving_the_template_ends_the_series_the_same_way(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        created = create_template(
+            db_session, jobs, _fixed_draft(recurrence=Recurrence(pattern="daily", interval=1, anchor="calendar"))
+        )
+        db_session.commit()
+
+        result = archive_template(db_session, jobs, created.template.id)
+        db_session.commit()
+
+        assert result.deleted_instance_ids == (created.instance.id,)
+        assert TaskInstanceRepository(db_session).list_by_template(created.template.id) == ()
         assert occurrence_boundary_job_key(created.template.id) in jobs.cancelled
 
     def test_this_occurrence_on_a_completion_anchored_template_generates_a_successor(

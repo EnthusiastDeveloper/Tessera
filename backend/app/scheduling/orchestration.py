@@ -17,6 +17,7 @@ adapter itself, not a layering violation - `app.scheduling` sits above `app.db` 
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import cast
 
@@ -453,6 +454,90 @@ def _budget_exceeded_message(template: TaskTemplate) -> str:
     return f'"{template.name}" was placed by overriding its daily time budget to meet its deadline.'
 
 
+def promote_if_unblocked(db: Session, jobs: JobScheduler, instance: TaskInstance, *, now: datetime) -> TaskInstance | None:
+    """If `instance` is `blocked` and every dependency has since reached `completed`,
+    promote it to `pending` and place it immediately if flexible (§6.9). Returns the
+    updated instance, or `None` if it wasn't eligible.
+
+    Lives here, not in `app.task_instances`, because three siblings need it: completion
+    and deletion (`app.task_instances`), ending a series (`end_series`, reached from
+    `app.task_templates` too), and Stage 6's startup reconciliation (architecture-plan §4.2 item 4) needs this exact check outside
+    either normal trigger path, to catch a dependency that completed while the process
+    that should have unblocked its dependent was down.
+    """
+    if instance.status != "blocked" or not all_dependencies_completed(db, instance):
+        return None
+    repo = TaskInstanceRepository(db)
+    template = TaskTemplateRepository(db).get(instance.template_id)
+    if template is None:
+        raise LookupError(f"TaskTemplate {instance.template_id} not found")
+    settings = require_settings(db)
+    # §4/§6.9: a fixed instance already has its time - it goes straight to `scheduled`.
+    # It held its slot while blocked (§6.5), so there is nothing to place or re-check.
+    new_status: TaskInstanceStatus = "scheduled" if instance.type == "fixed" else "pending"
+    promoted = repo.update(
+        instance.model_copy(
+            update={
+                "status": new_status,
+                "status_history": (*instance.status_history, StatusHistoryEntry(status=new_status, at=now)),
+            }
+        )
+    )
+    # §3.9: nothing is waiting any more, so the at-risk warning has cleared.
+    jobs.cancel(job_key=dependency_at_risk_job_key(promoted.id))
+    resolve_notifications(db, instance_id=promoted.id, types=(DEPENDENCY_AT_RISK,), now=now)
+    if promoted.type == "fixed":
+        if promoted.scheduled_time is not None and promoted.scheduled_time > now:
+            # Idempotent: re-points the jobs it already carried while blocked, and gives
+            # an instance blocked before this rule existed the jobs it never got.
+            schedule_reminder_and_overdue_jobs(jobs, promoted, template.reminder_offsets_minutes)
+        else:
+            # Its time has passed: overdue now (§6.9), without replaying stale reminders.
+            # The handler skips it if the notice was already raised while blocked.
+            jobs.schedule_at(job_key=overdue_job_key(promoted.id), run_at=now)
+        return promoted
+    return place_or_defer(db, jobs, instance=promoted, template=template, settings=settings, now=now)
+
+
+@dataclass(frozen=True)
+class SeriesEnded:
+    deleted_instance_ids: tuple[str, ...]
+    unblocked_instance_ids: tuple[str, ...]
+
+
+def end_series(db: Session, jobs: JobScheduler, template_id: str, *, now: datetime) -> SeriesEnded:
+    """§3.8 (Rev 11): ending a series deletes every open occurrence of it - whatever its
+    date or status, `in_progress` included - and archives the template. Completed and
+    dismissed occurrences are kept as history. Each deleted occurrence's jobs are
+    cancelled and its dependents unlinked; a dependent left with nothing to wait on is
+    unblocked and placed in the same transaction (§6.9), exactly as a single delete does.
+
+    Shared by the instance delete path (`scope=this_and_future`) and template archival -
+    siblings under the layering contract, hence its home here.
+    """
+    repo = TaskInstanceRepository(db)
+    open_occurrences = [i for i in repo.list_by_template(template_id) if i.status not in TERMINAL_STATUSES]
+    deleted_ids = {i.id for i in open_occurrences}
+    dependents: dict[str, TaskInstance] = {}
+    for occurrence in open_occurrences:
+        for dependent in repo.list_dependents(occurrence.id):
+            if dependent.id not in deleted_ids:
+                dependents[dependent.id] = dependent
+        jobs.cancel_all_for_instance(instance_id=occurrence.id)
+        repo.delete(occurrence.id)
+
+    archive_template_and_cancel_jobs(db, jobs, template_id)
+
+    unblocked: list[str] = []
+    for dependent_id in dependents:
+        refreshed = repo.get(dependent_id)
+        if refreshed is None:
+            continue
+        if promote_if_unblocked(db, jobs, refreshed, now=now) is not None:
+            unblocked.append(dependent_id)
+    return SeriesEnded(deleted_instance_ids=tuple(i.id for i in open_occurrences), unblocked_instance_ids=tuple(unblocked))
+
+
 def _status(value: str) -> TaskInstanceStatus:
     return cast(TaskInstanceStatus, value)
 
@@ -474,6 +559,9 @@ __all__ = [
     "DEPENDENCY_AT_RISK",
     "displace_flexible_from",
     "displace_flexible_under",
+    "end_series",
+    "promote_if_unblocked",
+    "SeriesEnded",
     "fixed_slot_change_conflicts",
     "generate_and_place_next_instance",
     "has_active_notification",

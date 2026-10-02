@@ -40,8 +40,8 @@ from app.scheduling.generation import (
 )
 from app.scheduling.orchestration import (
     TERMINAL_STATUSES,
-    archive_template_and_cancel_jobs,
     displace_flexible_under,
+    end_series,
     fixed_slot_change_conflicts,
     place_or_defer,
     require_settings,
@@ -51,6 +51,7 @@ from app.scheduling.orchestration import (
     schedule_next_occurrence_boundary,
     schedule_reminder_and_overdue_jobs,
 )
+from app.scheduling.repair import find_invalid_placements
 from app.scheduling_engine.dependencies import cycle_check
 from app.scheduling_engine.feasibility import validate_feasible_duration
 
@@ -321,33 +322,23 @@ _REDEADLINABLE_FLEXIBLE_STATUSES = frozenset({"pending", "scheduled", "blocked",
 @dataclass(frozen=True)
 class ArchiveResult:
     template: TaskTemplate
-    incomplete_instance_ids: tuple[str, ...]
+    deleted_instance_ids: tuple[str, ...]
+    unblocked_instance_ids: tuple[str, ...]
 
 
 def archive_template(db: Session, jobs: JobScheduler, template_id: str) -> ArchiveResult:
-    """§3.8: soft-delete - `archived=true`, keeping the row so historical instances'
-    `template_id` references stay valid. Returns the ids of any non-terminal instances
-    left behind, for the frontend's confirmation dialog to list.
-
-    The actual archive + calendar-anchor occurrence-boundary job cancellation is shared
-    with `app.task_instances.service.delete_instance`'s `this_and_future` scope - see
-    `archive_template_and_cancel_jobs`'s docstring. `app.jobs.handlers.run_occurrence_boundary`
-    also no-ops defensively on an archived template - this is the direct cancellation,
-    that is the fallback for the gap before the next startup reconciliation pass (§4.2
-    item 3).
+    """§3.8 (Rev 11): ending a series - the template is archived, not hard-deleted, so
+    historical instances' `template_id` references stay valid; every open occurrence is
+    deleted (see `end_series`). Returns what was deleted and unblocked.
     """
-    repo = TaskTemplateRepository(db)
-    template = repo.get(template_id)
-    if template is None:
+    if TaskTemplateRepository(db).get(template_id) is None:
         raise TemplateValidationError("not_found", f"TaskTemplate {template_id} not found")
-
-    incomplete = tuple(
-        instance.id
-        for instance in TaskInstanceRepository(db).list_by_template(template_id)
-        if instance.status not in TERMINAL_STATUSES
+    ended = end_series(db, jobs, template_id, now=utcnow())
+    archived = TaskTemplateRepository(db).get(template_id)
+    assert archived is not None
+    return ArchiveResult(
+        template=archived, deleted_instance_ids=ended.deleted_instance_ids, unblocked_instance_ids=ended.unblocked_instance_ids
     )
-    archived = archive_template_and_cancel_jobs(db, jobs, template_id)
-    return ArchiveResult(template=archived, incomplete_instance_ids=incomplete)
 
 
 def edit_template_this_and_future(
@@ -528,7 +519,13 @@ def _propagate_to_instance(
     if template.type != "flexible" or updated.status not in ("pending", "scheduled"):
         return updated
 
-    placement_invalidated = "estimated_duration_minutes" in patch or "active_hours_override" in patch
+    # A new override gives a pending occurrence a fresh attempt, but only invalidates a
+    # scheduled one's slot if it no longer covers it (§6.10) - placement is an
+    # incremental fit, so a slot that still fits stays put.
+    placement_invalidated = "estimated_duration_minutes" in patch or (
+        "active_hours_override" in patch
+        and (updated.status == "pending" or bool(find_invalid_placements(db, settings, only={updated.id})))
+    )
     if new_deadline is not None:
         # A pending instance gets a fresh attempt against its new window (a later deadline
         # may now fit, an elapsed one goes to `missed` via §6.7's gate). A scheduled one is

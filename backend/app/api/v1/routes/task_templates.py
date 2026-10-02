@@ -78,7 +78,8 @@ class PatchTemplateRequest(BaseModel):
 
 class ArchiveResponse(BaseModel):
     template: TaskTemplate
-    incomplete_instance_ids: tuple[str, ...]
+    deleted_instance_ids: tuple[str, ...]
+    unblocked_instance_ids: tuple[str, ...]
 
 
 class VirtualOccurrenceResponse(BaseModel):
@@ -184,12 +185,14 @@ def patch_template_endpoint(
 def archive_template_endpoint(
     template_id: str, db: Session = DB_SESSION, jobs: JobScheduler = Depends(get_request_job_scheduler)
 ) -> ArchiveResponse:
-    """§3.8: soft-delete. Returns the incomplete instances left behind so the frontend's
-    confirmation dialog (§3.8's "must show a confirmation dialog explaining the
-    implications") can list them.
-    """
+    """§3.8 (Rev 11): ends the series - archives the template and deletes every open
+    occurrence. Returns what was deleted and which dependents that unblocked."""
     try:
         result = service.archive_template(db, jobs, template_id)
     except service.TemplateValidationError as exc:
         raise AppError.for_code(exc.code, str(exc), details=exc.details) from exc
-    return ArchiveResponse(template=result.template, incomplete_instance_ids=result.incomplete_instance_ids)
+    return ArchiveResponse(
+        template=result.template,
+        deleted_instance_ids=result.deleted_instance_ids,
+        unblocked_instance_ids=result.unblocked_instance_ids,
+    )

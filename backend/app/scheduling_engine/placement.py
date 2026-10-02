@@ -63,13 +63,13 @@ def find_first_free_slot(
     duration = timedelta(minutes=duration_minutes)
     sorted_obstacles = sorted(obstacles, key=lambda obstacle: obstacle.start)
     for day in day_range(not_before.date(), not_after.date()):
-        window = _eligible_window_for_day(day, allowed_hours, excluded_dates)
+        window = eligible_window_for_day(day, allowed_hours, excluded_dates)
         if window is None:
             continue
         if daily_time_budget_minutes is not None:
             budget = daily_time_budget_minutes.get(day_name(day))
             if budget is not None:
-                committed = _committed_minutes_for_day(day, sorted_obstacles, not_before.tzinfo)
+                committed = committed_minutes_for_day(day, sorted_obstacles, not_before.tzinfo)
                 if committed + duration_minutes > budget:
                     continue
         slot = _first_slot_in_window(
@@ -173,7 +173,7 @@ def _pass_two(
     best_key: tuple[float, float, date] | None = None
 
     for day in day_range(earliest_start.date(), task.deadline.date()):
-        window = _eligible_window_for_day(day, effective_hours, blackout_dates)
+        window = eligible_window_for_day(day, effective_hours, blackout_dates)
         if window is None:
             continue
         slot = _first_slot_in_window(
@@ -189,7 +189,7 @@ def _pass_two(
             continue
 
         cap = daily_time_budget_minutes.get(day_name(day))
-        committed = _committed_minutes_for_day(day, sorted_obstacles, tz)
+        committed = committed_minutes_for_day(day, sorted_obstacles, tz)
         overage = max(0.0, committed + task.estimated_duration_minutes - cap) if cap is not None else 0.0
         remaining_after = _free_capacity_in_window(day, window, sorted_obstacles, tz) - task.estimated_duration_minutes
         key = (overage, float(-remaining_after), day)
@@ -201,7 +201,7 @@ def _pass_two(
     return best_slot, best_slot is not None
 
 
-def _eligible_window_for_day(
+def eligible_window_for_day(
     day: date, allowed_hours: ActiveHoursMap, excluded_dates: Sequence[BlackoutDate]
 ) -> ActiveHoursWindow | None:
     """The day's active-hours window, or None if the day is ineligible - blacked out or excluded (§6.2).
@@ -255,7 +255,7 @@ def _first_slot_in_window(
     return cursor if cursor + duration <= limit else None
 
 
-def _committed_minutes_for_day(day: date, obstacles: Sequence[Obstacle], tz: tzinfo | None) -> int:
+def committed_minutes_for_day(day: date, obstacles: Sequence[Obstacle], tz: tzinfo | None) -> int:
     """Total obstacle-occupied minutes anywhere in the calendar day `day` (§6.2 budget accounting).
 
     Whole-day, not window-scoped: fixed tasks and external events count against a
@@ -277,7 +277,7 @@ def _free_capacity_in_window(day: date, window: ActiveHoursWindow, obstacles: Se
 def _clip_obstacles(obstacles: Sequence[Obstacle], bound_start: datetime, bound_end: datetime) -> list[tuple[datetime, datetime]]:
     """Clip each obstacle overlapping [bound_start, bound_end) to that range.
 
-    Shared by `_committed_minutes_for_day` (whole-day bound) and
+    Shared by `committed_minutes_for_day` (whole-day bound) and
     `_free_capacity_in_window` (active-hours-window bound). `obstacles` must
     already be sorted by `start`; clipping via `max`/`min` against a fixed bound
     is monotonic in each obstacle's own start, so the result stays sorted too and

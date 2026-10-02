@@ -22,3 +22,14 @@ export interface UserSettings {
   budget_enforcement: BudgetEnforcement;
   first_day_of_week: DayName;
 }
+
+/** `GET /settings/schedule-repair` (design doc §6.10, Rev 11) - progress of the latest
+ * background repair a stricter settings save started. */
+export interface ScheduleRepair {
+  id: string;
+  status: 'running' | 'finished';
+  done: number;
+  total: number;
+  moved: number;
+  unschedulable: number;
+}

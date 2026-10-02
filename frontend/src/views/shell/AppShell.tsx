@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthContext';
+import { ScheduleRepairOverlay } from '../../components/ScheduleRepairOverlay';
 import type { CalendarProvider } from '../../types/calendarConnection';
 
 const NAV_ITEMS = [
@@ -58,6 +59,7 @@ export function AppShell(): JSX.Element {
       <main className="app-shell__content">
         <Outlet />
       </main>
+      <ScheduleRepairOverlay />
     </div>
   );
 }

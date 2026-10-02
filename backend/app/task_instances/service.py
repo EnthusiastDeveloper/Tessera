@@ -17,21 +17,20 @@ from app.db.repositories import (
     TaskInstanceRepository,
     TaskTemplateRepository,
 )
-from app.db.schemas import StatusHistoryEntry, TaskInstance, TaskInstanceStatus, TaskTemplate
-from app.jobs.interface import JobScheduler, dependency_at_risk_job_key, overdue_job_key
+from app.db.schemas import StatusHistoryEntry, TaskInstance, TaskTemplate
+from app.jobs.interface import JobScheduler
 from app.scheduling.adapter import build_active_hours_map, has_fixed_conflict
 from app.scheduling.orchestration import (
     DEADLINE_MISSED,
-    DEPENDENCY_AT_RISK,
     TERMINAL_STATUSES,
     UNSCHEDULABLE,
-    all_dependencies_completed,
-    archive_template_and_cancel_jobs,
     displace_flexible_under,
+    end_series,
     fixed_slot_change_conflicts,
     generate_and_place_next_instance,
     has_active_notification,
     place_or_defer,
+    promote_if_unblocked,
     require_settings,
     resolve_cleared_sync_conflicts,
     resolve_notifications,
@@ -71,6 +70,8 @@ class InstanceValidationError(Exception):
 class DeleteResult:
     deleted_instance_id: str
     unblocked_instance_ids: tuple[str, ...]
+    #: Every instance removed - just this one, or the whole open series (§3.8, Rev 11).
+    deleted_instance_ids: tuple[str, ...] = ()
 
 
 def list_instances(
@@ -340,40 +341,54 @@ def delete_instance(db: Session, jobs: JobScheduler, instance_id: str, *, scope:
     skipped there, matching design doc §3.8's own framing). `this_occurrence` deletes just
     this instance and the series continues (a successor is generated per §9.1 for a
     `completion`-anchored template - a `calendar`-anchored one already continues on its
-    own via the independently-running occurrence-boundary job). `this_and_future` deletes
-    this instance **and** archives the template, ending the series.
+    own via the independently-running occurrence-boundary job). `this_and_future` ends
+    the series (Rev 11): every open occurrence - not only this one and later ones - is
+    deleted and the template archived, see `end_series`.
     """
-    repo = TaskInstanceRepository(db)
     instance = _require_instance(db, instance_id)  # 404s cleanly if the id is unknown
     template = _require_template(db, instance.template_id)
     is_recurring = template.recurrence.pattern != "one_time"
     if is_recurring and scope is None:
         raise InstanceValidationError("scope_required", "scope is required when deleting an instance of a recurring template.")
 
-    dependents = repo.list_dependents(instance_id)
+    if scope == "this_and_future":
+        ended = end_series(db, jobs, template.id, now=utcnow())
+        deleted, unblocked = ended.deleted_instance_ids, ended.unblocked_instance_ids
+        if instance_id not in deleted:
+            # A finished occurrence isn't part of the open series, but the user asked for
+            # this one by name, so it goes too.
+            unblocked += _delete_one(db, jobs, instance_id)
+            deleted += (instance_id,)
+        return DeleteResult(deleted_instance_id=instance_id, unblocked_instance_ids=unblocked, deleted_instance_ids=deleted)
 
+    unblocked = _delete_one(db, jobs, instance_id)
+    now = utcnow()
+
+    if is_recurring and scope == "this_occurrence" and not template.archived and template.recurrence.anchor == "completion":
+        # See dismiss()'s identical §3.8 "Re-anchoring on this_occurrence" comment -
+        # deleting isn't completing, so the successor anchors at `now + cadence`.
+        settings = require_settings(db)
+        generate_and_place_next_instance(db, jobs, template=template, predecessor=None, settings=settings, now=now)
+
+    return DeleteResult(deleted_instance_id=instance_id, unblocked_instance_ids=unblocked, deleted_instance_ids=(instance_id,))
+
+
+def _delete_one(db: Session, jobs: JobScheduler, instance_id: str) -> tuple[str, ...]:
+    """Deletes one instance and unlinks its dependents (§3.8), unblocking any left with
+    nothing to wait on. Returns the ids it unblocked."""
+    repo = TaskInstanceRepository(db)
+    dependents = repo.list_dependents(instance_id)
     jobs.cancel_all_for_instance(instance_id=instance_id)
     repo.delete(instance_id)
-
     unblocked: list[str] = []
     now = utcnow()
     for dependent in dependents:
         refreshed = repo.get(dependent.id)
         if refreshed is None:
             continue
-        promoted = promote_if_unblocked(db, jobs, refreshed, now=now)
-        if promoted is not None:
-            unblocked.append(promoted.id)
-
-    if scope == "this_and_future":
-        archive_template_and_cancel_jobs(db, jobs, template.id)
-    elif is_recurring and scope == "this_occurrence" and not template.archived and template.recurrence.anchor == "completion":
-        # See dismiss()'s identical §3.8 "Re-anchoring on this_occurrence" comment -
-        # deleting isn't completing, so the successor anchors at `now + cadence`.
-        settings = require_settings(db)
-        generate_and_place_next_instance(db, jobs, template=template, predecessor=None, settings=settings, now=now)
-
-    return DeleteResult(deleted_instance_id=instance_id, unblocked_instance_ids=tuple(unblocked))
+        if promote_if_unblocked(db, jobs, refreshed, now=now) is not None:
+            unblocked.append(refreshed.id)
+    return tuple(unblocked)
 
 
 def _unblock_dependents(db: Session, jobs: JobScheduler, *, completed_instance_id: str, now: datetime) -> None:
@@ -383,48 +398,6 @@ def _unblock_dependents(db: Session, jobs: JobScheduler, *, completed_instance_i
         if refreshed is None:
             continue
         promote_if_unblocked(db, jobs, refreshed, now=now)
-
-
-def promote_if_unblocked(db: Session, jobs: JobScheduler, instance: TaskInstance, *, now: datetime) -> TaskInstance | None:
-    """If `instance` is `blocked` and every dependency has since reached `completed`,
-    promote it to `pending` and place it immediately if flexible (§6.9). Returns the
-    updated instance, or `None` if it wasn't eligible.
-
-    Public - besides the two direct triggers above (completion, deletion), Stage 6's
-    startup reconciliation (architecture-plan §4.2 item 4) needs this exact check outside
-    either normal trigger path, to catch a dependency that completed while the process
-    that should have unblocked its dependent was down.
-    """
-    if instance.status != "blocked" or not all_dependencies_completed(db, instance):
-        return None
-    repo = TaskInstanceRepository(db)
-    template = _require_template(db, instance.template_id)
-    settings = require_settings(db)
-    # §4/§6.9: a fixed instance already has its time - it goes straight to `scheduled`.
-    # It held its slot while blocked (§6.5), so there is nothing to place or re-check.
-    new_status: TaskInstanceStatus = "scheduled" if instance.type == "fixed" else "pending"
-    promoted = repo.update(
-        instance.model_copy(
-            update={
-                "status": new_status,
-                "status_history": (*instance.status_history, StatusHistoryEntry(status=new_status, at=now)),
-            }
-        )
-    )
-    # §3.9: nothing is waiting any more, so the at-risk warning has cleared.
-    jobs.cancel(job_key=dependency_at_risk_job_key(promoted.id))
-    resolve_notifications(db, instance_id=promoted.id, types=(DEPENDENCY_AT_RISK,), now=now)
-    if promoted.type == "fixed":
-        if promoted.scheduled_time is not None and promoted.scheduled_time > now:
-            # Idempotent: re-points the jobs it already carried while blocked, and gives
-            # an instance blocked before this rule existed the jobs it never got.
-            schedule_reminder_and_overdue_jobs(jobs, promoted, template.reminder_offsets_minutes)
-        else:
-            # Its time has passed: overdue now (§6.9), without replaying stale reminders.
-            # The handler skips it if the notice was already raised while blocked.
-            jobs.schedule_at(job_key=overdue_job_key(promoted.id), run_at=now)
-        return promoted
-    return place_or_defer(db, jobs, instance=promoted, template=template, settings=settings, now=now)
 
 
 def _require_instance(db: Session, instance_id: str) -> TaskInstance:
@@ -451,7 +424,6 @@ __all__ = [
     "edit_this_occurrence",
     "extend_deadline",
     "list_instances",
-    "promote_if_unblocked",
     "reschedule",
     "start_progress",
 ]

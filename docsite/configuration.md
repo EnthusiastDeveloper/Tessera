@@ -28,7 +28,9 @@ Everything below lives in **Settings** in the app itself, not in environment var
 
 An IANA timezone name (e.g. `America/New_York`), not a raw UTC offset. Every scheduling computation - active-hours windows, deadlines, the 15-minute placement grid, day boundaries for budget accounting - runs in this timezone, and DST transitions are handled by the timezone library rather than any custom offset math.
 
-Changing it doesn't move occurrences that already have a time - only occurrences generated afterwards use the new zone. See [Tasks & Events](tasks-and-events.md#dates-times-and-time-zones) for how dates, times of day and deadline offsets relate to your time zone.
+Changing it doesn't move anything already scheduled - only occurrences generated afterwards use the new zone.
+
+**When your device is somewhere else.** If the timezone your browser reports differs from this setting - you're travelling, say - the Timeline and the new/edit task screens show a notice naming both. The Timeline draws times in your device's time; a time of day you type into a task is read in the setting's timezone. Nothing changes until you change the setting yourself. See [Tasks & Events](tasks-and-events.md#dates-times-and-time-zones) for how dates, times of day and deadline offsets relate to your time zone.
 
 ### Active hours
 
@@ -40,6 +42,12 @@ A day can be:
 - **`null`**, meaning that day is fully excluded from flexible placement
 
 There is deliberately no "unrestricted" value. If you want a day fully open, set it explicitly to `00:00`–`23:59`.
+
+### When the rules get stricter, Tessera fixes the calendar
+
+Narrowing active hours, excluding a day, adding a blackout date, or - with budget enforcement set to "respect the budget" - lowering a day's budget can leave flexible tasks sitting where they're no longer allowed. When you save a change like that, Tessera finds every scheduled flexible task that no longer fits and places it again, or tells you in Notifications if there's no room left before its deadline. While it works, the screen shows **"Fixing the calendar (*n*/*total*)…"**; when it's done, you get a summary of how many tasks moved.
+
+It never moves a task that still fits, a task you've already started, or a fixed task. A change that makes the rules looser (a longer window, a removed blackout) doesn't move anything: tasks stay where they are. Changing a single task's own active-hours override does the same check, for that task's occurrences only.
 
 ### Per-task active-hours override
 

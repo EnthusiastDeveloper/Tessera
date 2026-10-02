@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import time
+from datetime import timedelta
+
 from fastapi.testclient import TestClient
 
 from app.auth.setup_token import setup_token_store
+from app.settings.service import DAY_NAMES
+from tests.fixtures.scheduling import app_today
 
 VALID_PASSWORD = "correcthorsebatterystaple"
 
@@ -92,3 +97,45 @@ class TestPatchSettings:
         response = app_client.patch("/api/v1/settings", json={"blackout_dates": blackout})
         assert response.status_code == 200, response.text
         assert response.json()["blackout_dates"] == blackout
+
+
+class TestScheduleRepair:
+    """Design doc §6.10 (Rev 11): a stricter save starts a background repair the client
+    can follow. The real job scheduler runs it, so this polls like the overlay does."""
+
+    def test_no_repair_has_ever_run(self, app_client: TestClient) -> None:
+        _login(app_client)
+        response = app_client.get("/api/v1/settings/schedule-repair")
+        assert response.status_code == 200
+        assert response.json() is None
+
+    def test_narrowing_the_window_repairs_a_stranded_task_in_the_background(self, app_client: TestClient) -> None:
+        _login(app_client)
+        tomorrow = app_today() + timedelta(days=1)
+        created = app_client.post(
+            "/api/v1/task-templates",
+            json={
+                "name": "Stranded",
+                "type": "flexible",
+                "recurrence": {"pattern": "one_time", "anchor": "calendar"},
+                "priority": "medium",
+                "start_date": tomorrow.isoformat(),
+                "estimated_duration_minutes": 60,
+                "deadline_offset_minutes": 60 * 24 * 3,
+            },
+        ).json()
+        assert created["instance"]["scheduled_time"].startswith(f"{tomorrow.isoformat()}T09:00")
+
+        narrowed = {day: {"start": "10:00", "end": "17:00"} for day in DAY_NAMES}
+        assert app_client.patch("/api/v1/settings", json={"active_hours": narrowed}).status_code == 200
+
+        deadline = time.monotonic() + 10
+        repair = app_client.get("/api/v1/settings/schedule-repair").json()
+        while repair["status"] != "finished" and time.monotonic() < deadline:
+            time.sleep(0.05)
+            repair = app_client.get("/api/v1/settings/schedule-repair").json()
+
+        assert repair["status"] == "finished"
+        assert (repair["done"], repair["total"], repair["moved"], repair["unschedulable"]) == (1, 1, 1, 0)
+        moved = app_client.get("/api/v1/task-instances", params={"template_id": created["template"]["id"]}).json()[0]
+        assert moved["scheduled_time"].startswith(f"{tomorrow.isoformat()}T10:00")

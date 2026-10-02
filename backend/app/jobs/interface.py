@@ -102,6 +102,12 @@ def calendar_poll_job_key(connection_id: str) -> str:
     return f"calendar_poll:{connection_id}"
 
 
+def schedule_repair_job_key(repair_id: str) -> str:
+    """Design doc §6.10's background repair (architecture-plan §4, Rev 5) - one one-off
+    job per `ScheduleRepair` row, run as soon as the settings change commits."""
+    return f"schedule_repair:{repair_id}"
+
+
 #: Singleton key for the §6.7 periodic deadline-elapsed safety-net sweep - one recurring
 #: job for the whole table, not per-instance (the inline gate + the one-off per-instance
 #: job are the primary mechanism; this just catches anything they missed).
