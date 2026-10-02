@@ -30,6 +30,9 @@ export interface TaskTemplate {
   location?: string | null;
   type: TaskType;
   recurrence: Recurrence;
+  /** Local "YYYY-MM-DD" the series starts from (design doc §3.2, Rev 10). Set at creation
+   * only; null on a template created before the field existed. */
+  start_date?: string | null;
   fixed_time_of_day?: string | null;
   deadline_offset_minutes?: number | null;
   priority: Priority;

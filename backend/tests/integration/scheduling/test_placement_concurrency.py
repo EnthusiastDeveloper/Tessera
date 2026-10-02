@@ -25,7 +25,7 @@ from app.scheduling import adapter
 from app.scheduling.orchestration import place_or_defer
 from app.settings.service import DEFAULT_ACTIVE_HOURS, DEFAULT_DAILY_TIME_BUDGET
 from app.task_templates.service import TaskTemplateDraft, create_template
-from tests.fixtures.scheduling import ny
+from tests.fixtures.scheduling import local_today, ny
 
 #: Mon 2026-03-02 08:00 New York - the first free grid point is 09:00.
 _NOW = ny(2026, 3, 2, 8, 0)
@@ -62,6 +62,7 @@ def _seed_two_pending_instances(factory: sessionmaker[Session]) -> list[str]:
                 priority="medium",
                 estimated_duration_minutes=60,
                 deadline_offset_minutes=60 * 24 * 30,
+                start_date=local_today(),
             )
             created = create_template(db, NoOpJobScheduler(), draft)
             TaskInstanceRepository(db).update(created.instance.model_copy(update={"status": "pending", "scheduled_time": None}))

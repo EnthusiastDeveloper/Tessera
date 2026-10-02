@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Query
@@ -42,6 +42,9 @@ class CreateTemplateRequest(BaseModel):
     recurrence: RecurrenceIn
     priority: Priority
     estimated_duration_minutes: int
+    # Required (§3.2, Rev 10): a local "YYYY-MM-DD" in the user's timezone. Not accepted on
+    # PATCH - the series' dates come from its occurrences once it exists.
+    start_date: date
     description: str | None = None
     location: str | None = None
     fixed_time_of_day: str | None = None
@@ -120,7 +123,7 @@ def get_template_endpoint(template_id: str, db: Session = DB_SESSION) -> TaskTem
     try:
         return service.get_template(db, template_id)
     except service.TemplateValidationError as exc:
-        raise AppError.for_code(exc.code, str(exc)) from exc
+        raise AppError.for_code(exc.code, str(exc), details=exc.details) from exc
 
 
 @router.post("", status_code=201)
@@ -135,6 +138,7 @@ def create_template_endpoint(
         recurrence=Recurrence(**payload.recurrence.model_dump()),
         priority=payload.priority,
         estimated_duration_minutes=payload.estimated_duration_minutes,
+        start_date=payload.start_date,
         description=payload.description,
         location=payload.location,
         fixed_time_of_day=payload.fixed_time_of_day,
@@ -146,7 +150,7 @@ def create_template_endpoint(
     try:
         result = service.create_template(db, jobs, draft)
     except service.TemplateValidationError as exc:
-        raise AppError.for_code(exc.code, str(exc)) from exc
+        raise AppError.for_code(exc.code, str(exc), details=exc.details) from exc
     return CreateTemplateResponse(template=result.template, instance=result.instance)
 
 
@@ -155,9 +159,13 @@ def patch_template_endpoint(
     template_id: str,
     payload: PatchTemplateRequest,
     scope: Literal["this_and_future"] = Query(...),
+    from_instance: str | None = None,
+    include_detached: bool = False,
     db: Session = DB_SESSION,
     jobs: JobScheduler = Depends(get_request_job_scheduler),
 ) -> TaskTemplate:
+    """§3.10 "this and future": `from_instance` names the edited occurrence (required for
+    a recurring task); `include_detached` is the edit dialog's "include these" checkbox."""
     # Deliberately not payload.model_dump() - see the identical note in
     # app.api.v1.routes.settings.patch_settings_endpoint: it would flatten nested models
     # to plain dicts, and model_copy(update=...) does not re-validate.
@@ -165,9 +173,11 @@ def patch_template_endpoint(
     if payload.recurrence is not None:
         patch["recurrence"] = Recurrence(**payload.recurrence.model_dump())
     try:
-        return service.edit_template_this_and_future(db, jobs, template_id, patch=patch)
+        return service.edit_template_this_and_future(
+            db, jobs, template_id, patch=patch, from_instance_id=from_instance, include_detached=include_detached
+        )
     except service.TemplateValidationError as exc:
-        raise AppError.for_code(exc.code, str(exc)) from exc
+        raise AppError.for_code(exc.code, str(exc), details=exc.details) from exc
 
 
 @router.delete("/{template_id}")
@@ -181,5 +191,5 @@ def archive_template_endpoint(
     try:
         result = service.archive_template(db, jobs, template_id)
     except service.TemplateValidationError as exc:
-        raise AppError.for_code(exc.code, str(exc)) from exc
+        raise AppError.for_code(exc.code, str(exc), details=exc.details) from exc
     return ArchiveResponse(template=result.template, incomplete_instance_ids=result.incomplete_instance_ids)

@@ -74,7 +74,13 @@ class DeleteResult:
 
 
 def list_instances(
-    db: Session, *, status: str | None = None, priority: int | None = None, type: str | None = None, view: str | None = None
+    db: Session,
+    *,
+    status: str | None = None,
+    priority: int | None = None,
+    type: str | None = None,
+    view: str | None = None,
+    template_id: str | None = None,
 ) -> tuple[TaskInstance, ...]:
     """`GET /task-instances` (architecture-plan §3). `view=backlog` is the Backlog view
     (design doc §8.1, architecture-plan §3 Rev 3): "a filter on the existing collection,
@@ -83,10 +89,22 @@ def list_instances(
     may be combined with the other filters - chosen behavior: it takes over the query
     entirely and the other filters are ignored, since the Backlog view already fully
     determines its own status set.
+
+    `template_id` narrows the list to one series (architecture-plan §3, Rev 4) - the edit
+    dialog uses it to name the occurrences a "this and future" edit would skip.
     """
     if view == "backlog":
         return _list_backlog(db)
-    return TaskInstanceRepository(db).list_filtered(status=status, priority=priority, type_=type)
+    repo = TaskInstanceRepository(db)
+    if template_id is None:
+        return repo.list_filtered(status=status, priority=priority, type_=type)
+    return tuple(
+        instance
+        for instance in repo.list_by_template(template_id)
+        if (status is None or instance.status == status)
+        and (priority is None or instance.priority == priority)
+        and (type is None or instance.type == type)
+    )
 
 
 def _list_backlog(db: Session) -> tuple[TaskInstance, ...]:
@@ -229,10 +247,9 @@ def complete(db: Session, jobs: JobScheduler, instance_id: str) -> TaskInstance:
 def start_progress(db: Session, instance_id: str) -> TaskInstance:
     """§4 state diagram: `scheduled` -> `in_progress`, user-triggered and optional. The
     only inbound edge in the diagram is from `scheduled`, so that's the only status this
-    accepts from. No `jobs` param (unlike `dismiss`/`complete`) - the reminder and
-    overdue-check handlers already treat `in_progress` identically to `scheduled`
-    (`app/jobs/handlers.py`'s `status not in ("scheduled", "in_progress")` guards), so
-    this transition has no job side effects to co-locate, matching
+    accepts from. No `jobs` param (unlike `dismiss`/`complete`) - reminders still fire
+    for an `in_progress` instance and the overdue check no-ops on one
+    (`app/jobs/handlers.py`), so this transition has no job side effects to co-locate, matching
     `app.notifications.service.dismiss`'s precedent for a job-free mutation.
     """
     instance = _require_instance(db, instance_id)
@@ -277,9 +294,7 @@ def dismiss(db: Session, jobs: JobScheduler, instance_id: str) -> TaskInstance:
     if template.recurrence.anchor == "completion" and not template.archived:
         # §3.8 "Re-anchoring on this_occurrence": dismissing isn't completing, so there is
         # no completed_at to anchor against - the successor's nominal date is
-        # `now + cadence`. `predecessor=None` is exactly that: the same "advance the rule
-        # from now" path `generate_next_instance` already uses for a template's very
-        # first instance (see its module docstring's `_next_nominal_instant`).
+        # `now + cadence`, which is what `predecessor=None` asks for.
         settings = require_settings(db)
         generate_and_place_next_instance(db, jobs, template=template, predecessor=None, settings=settings, now=now)
 

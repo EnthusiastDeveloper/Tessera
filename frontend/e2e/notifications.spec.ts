@@ -18,10 +18,16 @@ test.describe('notifications panel against the real backend', () => {
     // Trigger a real `unschedulable` notification (design doc §5): a flexible task whose
     // duration cannot possibly fit before its deadline, regardless of active hours or
     // time of day - 90 minutes of work with only 1 hour (60 minutes) until the deadline.
-    // This is deterministic and doesn't depend on the server's current wall-clock time.
+    // It starts tomorrow: the window is counted from the start of its date (§9.1), so a
+    // 1-hour window starting today would already be over and the form would refuse it.
     await page.getByRole('button', { name: 'New task' }).click();
     await expect(page).toHaveURL(/\/tasks\/new$/);
     await page.getByLabel('Name').fill('Notifications smoke test task');
+    const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const pad = (n: number): string => String(n).padStart(2, '0');
+    await page
+      .getByLabel('Starts on')
+      .fill(`${tomorrow.getFullYear()}-${pad(tomorrow.getMonth() + 1)}-${pad(tomorrow.getDate())}`);
     await page.getByLabel('Estimated duration', { exact: true }).fill('90');
     await page.getByLabel('Deadline unit').selectOption('hours');
     await page.getByLabel('Deadline', { exact: true }).fill('1');

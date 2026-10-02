@@ -34,10 +34,12 @@ from app.task_instances.service import (
 from app.task_templates.service import TaskTemplateDraft, create_template
 from tests.fixtures.db_entities import make_oauth_token
 from tests.fixtures.jobs import RecordingJobScheduler
+from tests.fixtures.scheduling import local_today
 
 
 def _flexible_draft(**overrides: object) -> TaskTemplateDraft:
     defaults: dict[str, object] = {
+        "start_date": local_today(),
         "name": "Deep clean garage",
         "type": "flexible",
         "recurrence": Recurrence(pattern="one_time", anchor="calendar"),
@@ -51,6 +53,7 @@ def _flexible_draft(**overrides: object) -> TaskTemplateDraft:
 
 def _fixed_draft(**overrides: object) -> TaskTemplateDraft:
     defaults: dict[str, object] = {
+        "start_date": local_today(),
         "name": "Team sync",
         "type": "fixed",
         "fixed_time_of_day": "18:00",
@@ -436,7 +439,7 @@ class TestExtendDeadline:
     def test_example_k_missed_instance_extends_and_re_enters_placement(
         self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
     ) -> None:
-        created = create_template(db_session, jobs, _flexible_draft(deadline_offset_minutes=5))
+        created = create_template(db_session, jobs, _flexible_draft())
         db_session.commit()
         now = utcnow()
         missed = TaskInstanceRepository(db_session).get(created.instance.id)

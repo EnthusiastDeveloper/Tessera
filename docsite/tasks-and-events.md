@@ -10,7 +10,7 @@ The template holds recurrence rules and defaults (name, priority, duration, dead
 
 | | Fixed | Flexible |
 |---|---|---|
-| You specify | An exact time (`fixed_time_of_day`) | A deadline offset |
+| You specify | A start date and an exact time (`fixed_time_of_day`) | A start date and a deadline offset |
 | Tessera specifies | Nothing - it's exactly where you put it | The scheduled time, via the placement algorithm |
 | Conflict with something else | **Hard-blocked at creation** if it collides with another fixed task, a busy external event or a flexible task you've already started - save is rejected (`creation_conflict`), nothing is created. A flexible task that's only *scheduled* there isn't a conflict: it moves out of the way | Moved automatically when its slot is taken - to another free slot before its deadline, or reported `unschedulable` |
 | Bound by active hours / budget | No - never constrained by your scheduling window | Yes - the whole point of the setting |
@@ -20,12 +20,20 @@ The template holds recurrence rules and defaults (name, priority, duration, dead
 
 Templates support five patterns: `one_time`, `daily`, `weekly`, `monthly`, and `custom` (interval-based, e.g. every 2 weeks; weekly/monthly patterns also take a day-of-week or day-of-month).
 
+### Start date
+
+Every new task asks **Starts on** - the date its first occurrence belongs to. It can't be in the past, and it's set once: after that, the series' dates come from its occurrences.
+
+- A one-time task, or a flexible task that repeats on completion, starts on that date.
+- A task that repeats on the calendar starts on the first date on or after it that the rule produces - a weekly-on-Friday task started on a Monday first occurs that Friday. For a fixed task, if that day's time has already passed, it starts on the rule's next date.
+- A flexible occurrence is never scheduled before its date. Its **deadline** is how long it may take to get done, counted from the start of that date: a task dated Monday with a 3-day deadline is due by the end of Wednesday. That also means a short deadline on a task starting today can already be over - Tessera refuses to save one rather than create it already missed; pick a later start date or a longer deadline.
+
 ### Anchoring: `calendar` vs. `completion`
 
 Every non-one-time template picks an **anchor**, which decides where the *next* occurrence lands:
 
 - **`calendar`** - the next occurrence is generated at the next date the recurrence rule produces, full stop, independent of whether the previous occurrence was ever completed. Use this for rigid commitments like a weekly meeting - if you missed last Monday's, next Monday's still shows up on schedule, and you clear the stale one with **skip this occurrence** (below).
-- **`completion`** - the next occurrence is generated at `completed_at + cadence`, i.e. relative to when you actually finished the previous one. Use this for upkeep work that should shift with reality ("replace the filter a month after I actually did it last," not a month after some date I never got to). The new occurrence isn't scheduled before that date - finish the filter on 7 March and the next one is placed on or after 7 April, not the same afternoon. The very first occurrence of a new template is the exception: it's scheduled as soon as it fits.
+- **`completion`** - the next occurrence is generated at `completed_at + cadence`, i.e. relative to when you actually finished the previous one. Use this for upkeep work that should shift with reality ("replace the filter a month after I actually did it last," not a month after some date I never got to). The new occurrence isn't scheduled before that date - finish the filter on 7 March and the next one is placed on or after 7 April, not the same afternoon. The first occurrence follows the same rule: it isn't scheduled before its start date.
 
 `anchor: completion` is **only valid on flexible templates** - saving it on a fixed template is rejected with `invalid_recurrence_anchor`. The reason is structural: completion-anchoring means "this occurrence can slide within a window," and that window is the deadline offset a flexible task has and a fixed task doesn't.
 
@@ -96,16 +104,18 @@ Dismissal, like completion, is irreversible. Recovering from a mistaken skip mea
 Editing a recurring task asks **which scope** you mean:
 
 - **"This occurrence"** - changes only the live instance (name, duration, priority, deadline/scheduled time, etc.). Sets `detached = true` on that instance. The template, and every future occurrence, is unaffected.
-- **"This and future occurrences"** - edits the template, and - unless the current live instance is already `detached` - also applies the same change to it immediately, in the same operation.
+- **"This and future occurrences"** - changes the occurrence you're editing, **every open occurrence of the series dated after it**, and every occurrence not generated yet. Occurrences dated before the one you're editing, and finished ones (completed or skipped), are never changed. It all happens in one operation: if any reached occurrence can't take the change, nothing is changed and the error says which occurrence.
 
-  Two template fields reach the live instance indirectly:
+  Two template fields reach occurrences indirectly:
 
-  - Changing a fixed task's **time of day** moves the live occurrence to the new time on the same date. If the new time collides with another fixed task or a busy external event, the whole edit is rejected - the same hard block as creating the task there.
-  - Changing a flexible task's **deadline offset** moves the live occurrence's deadline by the same amount. If its current slot still finishes in time it stays put; otherwise it's re-placed, and a deadline that has already passed sends it straight to `missed`. An occurrence that is already `missed` is left for you to resolve.
+  - Changing a fixed task's **time of day** moves each reached occurrence to the new time on its own date. If the new time collides with another fixed task or a busy external event on any of them, the whole edit is rejected - the same hard block as creating the task there.
+  - Changing a flexible task's **deadline offset** puts each reached occurrence's deadline at its date plus the new offset. If its current slot still finishes in time it stays put; otherwise it's re-placed, and a deadline that has already passed sends it straight to `missed`. An occurrence that is already `missed` is left for you to resolve.
 
-Once an instance is `detached`, it's skipped **entirely** by future template-wide edits (not just the field you originally overrode) until it reaches `completed`. A manual reschedule of a fixed task works the same way: it's a "this occurrence" edit and sets `detached = true`.
+**Occurrences you changed on their own are skipped - unless you say otherwise.** A "this occurrence" edit (or a manual reschedule of a fixed task) sets `detached = true` on that occurrence. A later "this and future" edit leaves a *later* detached occurrence exactly as it is, all of it, not just the field you originally changed - a change you made on purpose isn't silently undone. Before you save, the form names the occurrences it will skip and offers **"Apply to all upcoming occurrences, including these"**. Tick it and they take the edit too; fields the edit didn't touch keep their own values.
 
-The UI should always show you when an instance is detached - it's the reason a template-wide edit didn't land on a specific occurrence you're looking at.
+The occurrence you're editing always takes the edit, even if it was detached. Either way, every occurrence the edit reaches rejoins the series (`detached` is cleared), so later series edits reach it again.
+
+The task detail view shows when an occurrence is detached - it's the reason a series edit didn't land on it.
 
 ## Deadline extension for missed tasks
 

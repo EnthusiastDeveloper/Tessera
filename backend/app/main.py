@@ -26,6 +26,7 @@ from app.core.config import get_settings
 from app.db.repositories import UserRepository
 from app.db.session import get_jobs_engine, session_scope
 from app.jobs.interface import DEADLINE_ELAPSED_SWEEP_INTERVAL_MINUTES, DEADLINE_ELAPSED_SWEEP_JOB_KEY, set_job_scheduler
+from app.jobs.process_lock import acquire_scheduler_lock, release_scheduler_lock, scheduler_lock_path
 from app.jobs.reconciliation import reconcile_on_startup
 from app.jobs.scheduler import APSchedulerJobScheduler
 from app.jobs.transactional import TransactionalJobScheduler
@@ -60,6 +61,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.warning("TZ=%s is not a valid IANA timezone name - falling back to UTC.", settings.tz)
         get_or_create_default(db, default_timezone=default_timezone)
 
+    # IRR-2 H14: refuse to start a second scheduler against the same database - it would
+    # fire every job twice. Taken before anything else touches the job store.
+    scheduler_lock = acquire_scheduler_lock(scheduler_lock_path(settings.database_path))
+
     # Stage 6: the real job scheduler, persisted in its own SQLite file - deliberately not
     # the app's own (architecture-plan §4's persistence requirement; see
     # app.db.session.jobs_database_path for why a shared file doesn't work here). Installed
@@ -76,6 +81,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield
     logger.info("Tessera shutting down")
     job_scheduler.shutdown(wait=False)
+    release_scheduler_lock(scheduler_lock)
 
 
 class _DocsUrls(NamedTuple):

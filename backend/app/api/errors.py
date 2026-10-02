@@ -27,6 +27,7 @@ ERROR_CODE_STATUS: dict[str, int] = {
     "cycle_detected": 409,
     "infeasible_duration": 422,
     "invalid_recurrence_anchor": 422,
+    "invalid_start_date": 422,
     # Settings (§3.7)
     "invalid_timezone": 422,
     "invalid_day_map": 422,

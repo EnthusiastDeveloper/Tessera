@@ -11,7 +11,7 @@ Notifications are a separate concept from task **status** - a task can be `sched
 | `sync_conflict` | An external calendar sync introduces an event that collides with an already-`scheduled` fixed task | Manual - reschedule the fixed task or dismiss the notice |
 | `unschedulable` | A flexible task's placement search finds no valid slot before its deadline (budget ignored, in soft mode) | Relax the deadline or duration, or intervene manually |
 | `dependency_at_risk` | The deadline (flexible) or the scheduled time (fixed) is within 3 days and at least one dependency is still incomplete | Informational - chase the dependency, or adjust the deadline or time |
-| `overdue` | A task's scheduled time has passed without it being marked complete | Flexible tasks auto-reschedule (informational notice); fixed tasks get an action menu - reschedule, mark complete, or skip this occurrence |
+| `overdue` | A task's scheduled time has passed without it being started or marked complete | Flexible tasks auto-reschedule (informational notice); fixed tasks get an action menu - reschedule, mark complete, or skip this occurrence |
 | `budget_exceeded` | A flexible task was placed by overriding its day's time budget as a last resort | Informational only - the one type that never auto-resolves, since it records something that already happened rather than an ongoing condition |
 | `deadline_missed` | A flexible task's deadline elapses while it's still `pending` or `blocked` | Extend the deadline, mark complete, or delete the instance/template |
 

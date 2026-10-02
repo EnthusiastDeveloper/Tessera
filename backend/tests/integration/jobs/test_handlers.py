@@ -128,6 +128,33 @@ class TestRunOverdueCheck:
         assert refreshed.status in ("pending", "scheduled")  # re-placed immediately if a slot exists
         assert any(n.type == "overdue" for n in NotificationRepository(db_session).list_for_instance(instance.id))
 
+    @pytest.mark.parametrize("task_type", ["flexible", "fixed"])
+    def test_an_in_progress_instance_is_not_overdue(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler, task_type: str
+    ) -> None:
+        """IRR-2 H2: a task started before its time must not be thrown back into the pool
+        (flexible) or reported overdue (fixed) when that time arrives."""
+        overrides: dict[str, object] = {"type": "fixed", "fixed_time_of_day": "09:00"} if task_type == "fixed" else {}
+        template = _persist_template(db_session, **overrides)
+        scheduled_time = utcnow() - timedelta(minutes=5)
+        instance = _persist_instance(
+            db_session,
+            template=template,
+            status="in_progress",
+            scheduled_time=scheduled_time,
+            deadline=utcnow() + timedelta(days=5) if task_type == "flexible" else None,
+        )
+        db_session.commit()
+
+        handlers.run_overdue_check(db_session, jobs, instance_id=instance.id)
+        db_session.commit()
+
+        refreshed = TaskInstanceRepository(db_session).get(instance.id)
+        assert refreshed is not None
+        assert refreshed.status == "in_progress"
+        assert refreshed.scheduled_time == scheduled_time
+        assert NotificationRepository(db_session).list_for_instance(instance.id) == ()
+
     def test_no_ops_if_already_completed_by_the_time_the_job_fires(
         self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
     ) -> None:

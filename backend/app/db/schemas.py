@@ -67,6 +67,9 @@ class TaskTemplate(_Frozen):
     location: str | None = None
     type: TaskType
     recurrence: Recurrence
+    # Local calendar date the series starts from (§3.2, Rev 10). Required at creation;
+    # `None` only on a template created before the field existed.
+    start_date: date | None = None
     fixed_time_of_day: str | None = None  # required if type == "fixed"
     deadline_offset_minutes: int | None = None  # required if type == "flexible"
     priority: Priority

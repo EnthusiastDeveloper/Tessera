@@ -64,12 +64,13 @@ def list_instances_endpoint(
     priority: int | None = None,
     type: TaskType | None = None,
     view: Literal["backlog"] | None = None,
+    template_id: str | None = None,
     db: Session = DB_SESSION,
 ) -> list[TaskInstance]:
-    """architecture-plan §3: `status`/`priority`/`type` filters, plus `?view=backlog`
-    (design doc §8.1) - a filter on this same collection, not its own resource.
+    """architecture-plan §3: `status`/`priority`/`type`/`template_id` filters, plus
+    `?view=backlog` (design doc §8.1) - a filter on this same collection, not its own resource.
     """
-    return list(service.list_instances(db, status=status, priority=priority, type=type, view=view))
+    return list(service.list_instances(db, status=status, priority=priority, type=type, view=view, template_id=template_id))
 
 
 @router.patch("/{instance_id}")

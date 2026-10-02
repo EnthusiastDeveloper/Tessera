@@ -65,9 +65,13 @@ def run_overdue_check(db: Session, jobs: JobScheduler, *, instance_id: str) -> N
     reschedule/complete/skip actions are the existing endpoints, no special handling
     needed here). Flexible: clear `scheduled_time`, re-enter §6.2 (subject to §6.7's gate
     first), plus the same `overdue` Notification so the move isn't silent.
+
+    An `in_progress` instance is never overdue (IRR-2 H2): the user has started it, so a
+    flexible one must not be thrown back into the pool mid-task, and a fixed one is
+    plainly happening. Nothing automatic happens to one that is never completed.
     """
     instance = TaskInstanceRepository(db).get(instance_id)
-    if instance is None or not holds_slot(instance):
+    if instance is None or not holds_slot(instance) or instance.status == "in_progress":
         return
 
     now = utcnow()

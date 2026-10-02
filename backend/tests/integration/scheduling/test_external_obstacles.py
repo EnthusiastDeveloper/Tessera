@@ -25,7 +25,7 @@ from app.scheduling.adapter import attempt_placement, gather_external_obstacles,
 from app.task_templates.service import TaskTemplateDraft, TemplateValidationError, create_template
 from tests.fixtures.db_entities import make_external_calendar_connection, make_external_event
 from tests.fixtures.jobs import RecordingJobScheduler
-from tests.fixtures.scheduling import ny
+from tests.fixtures.scheduling import local_today, ny
 
 NY = ZoneInfo("America/New_York")
 _DAY_NAMES = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
@@ -166,6 +166,7 @@ class TestExampleAFixedCreationHardBlock:
             recurrence=Recurrence(pattern="one_time", anchor="calendar"),
             priority="medium",
             estimated_duration_minutes=60,
+            start_date=local_today(),
         )
         with pytest.raises(TemplateValidationError) as exc_info:
             create_template(db_session, jobs, draft)

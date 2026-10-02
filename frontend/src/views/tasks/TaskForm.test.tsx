@@ -76,7 +76,24 @@ describe('TaskForm', () => {
       expect(payload.name).toBe('Water the plants');
       expect(payload.type).toBe('flexible');
       expect(payload.recurrence.pattern).toBe('one_time');
+      expect(payload.start_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
       expect(onSaved).toHaveBeenCalledWith({ template: BASE_TEMPLATE, instance: BASE_INSTANCE });
+    });
+
+    it('asks for a start date, sends the chosen one, and shows invalid_start_date beside it', async () => {
+      mockedTemplates.createTemplate.mockRejectedValue(new ApiError(422, 'invalid_start_date', "The start date can't be in the past."));
+      render(<TaskForm mode="create" onSaved={vi.fn()} onCancel={vi.fn()} />);
+
+      await userEvent.type(screen.getByLabelText('Name'), 'Renew passport');
+      const startDate = screen.getByLabelText('Starts on');
+      await userEvent.clear(startDate);
+      await userEvent.type(startDate, '2099-05-04');
+      await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+      await waitFor(() => expect(mockedTemplates.createTemplate).toHaveBeenCalled());
+      expect(mockedTemplates.createTemplate.mock.calls[0][0].start_date).toBe('2099-05-04');
+      const matches = await screen.findAllByText("The start date can't be in the past.");
+      expect(matches.length).toBe(2);
     });
 
     it('shows the active-hours override and dependencies inputs', async () => {
@@ -113,8 +130,25 @@ describe('TaskForm', () => {
 
       await userEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-      await waitFor(() => expect(mockedTemplates.patchTemplateThisAndFuture).toHaveBeenCalledWith('template-1', expect.anything()));
+      await waitFor(() =>
+        expect(mockedTemplates.patchTemplateThisAndFuture).toHaveBeenCalledWith('template-1', expect.anything(), expect.anything())
+      );
       expect(mockedInstances.patchInstanceThisOccurrence).not.toHaveBeenCalled();
+    });
+
+    it('sends only the fields the user changed', async () => {
+      mockedTemplates.patchTemplateThisAndFuture.mockResolvedValue(BASE_TEMPLATE);
+      render(<TaskForm mode="edit" template={BASE_TEMPLATE} instance={BASE_INSTANCE} onSaved={vi.fn()} onCancel={vi.fn()} />);
+
+      const name = screen.getByLabelText('Name');
+      await userEvent.clear(name);
+      await userEvent.type(name, 'Water the ferns');
+      await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+      await waitFor(() => expect(mockedTemplates.patchTemplateThisAndFuture).toHaveBeenCalled());
+      const [, patch, options] = mockedTemplates.patchTemplateThisAndFuture.mock.calls[0];
+      expect(patch).toEqual({ name: 'Water the ferns' });
+      expect(options).toEqual({ fromInstanceId: undefined, includeDetached: false });
     });
   });
 
@@ -158,9 +192,63 @@ describe('TaskForm', () => {
       await userEvent.click(screen.getByRole('button', { name: 'Save' }));
 
       await waitFor(() =>
-        expect(mockedTemplates.patchTemplateThisAndFuture).toHaveBeenCalledWith('template-1', expect.anything())
+        expect(mockedTemplates.patchTemplateThisAndFuture).toHaveBeenCalledWith('template-1', expect.anything(), expect.anything())
       );
       expect(mockedInstances.patchInstanceThisOccurrence).not.toHaveBeenCalled();
+    });
+
+    describe('with later occurrences edited on their own (design doc §3.10, Worked Example M)', () => {
+      const monday = { ...BASE_INSTANCE, id: 'mon', nominal_date: '2026-03-02T05:00:00Z' };
+      const tuesday = { ...BASE_INSTANCE, id: 'tue', nominal_date: '2026-03-03T05:00:00Z' };
+      const wednesday = {
+        ...BASE_INSTANCE,
+        id: 'wed',
+        nominal_date: '2026-03-04T05:00:00Z',
+        scheduled_time: '2026-03-04T23:00:00Z',
+        detached: true,
+      };
+      const earlierDetached = { ...BASE_INSTANCE, id: 'sun', nominal_date: '2026-03-01T05:00:00Z', detached: true };
+      const finishedDetached = { ...BASE_INSTANCE, id: 'thu', nominal_date: '2026-03-05T05:00:00Z', detached: true, status: 'completed' as const };
+
+      beforeEach(() => {
+        mockedInstances.listInstances.mockResolvedValue([earlierDetached, monday, tuesday, wednesday, finishedDetached]);
+        mockedTemplates.patchTemplateThisAndFuture.mockResolvedValue(recurringTemplate);
+      });
+
+      it('names the skipped occurrence and leaves the box unticked by default', async () => {
+        render(<TaskForm mode="edit" template={recurringTemplate} instance={tuesday} onSaved={vi.fn()} onCancel={vi.fn()} />);
+        await waitFor(() => expect(mockedInstances.listInstances).toHaveBeenCalledWith({ template_id: 'template-1' }));
+
+        expect(screen.queryByText(/won’t be updated/)).not.toBeInTheDocument(); // no scope chosen yet
+        await userEvent.click(screen.getByLabelText('This and future occurrences'));
+
+        const note = await screen.findByText(/1 upcoming occurrence has its own changes and won’t be updated/);
+        expect(note.textContent).toContain(new Date(wednesday.scheduled_time).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }));
+        const checkbox = screen.getByLabelText('Apply to all upcoming occurrences, including these');
+        expect(checkbox).not.toBeChecked();
+
+        await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+        await waitFor(() => expect(mockedTemplates.patchTemplateThisAndFuture).toHaveBeenCalled());
+        expect(mockedTemplates.patchTemplateThisAndFuture.mock.calls[0][2]).toEqual({ fromInstanceId: 'tue', includeDetached: false });
+      });
+
+      it('sends include_detached when the box is ticked', async () => {
+        render(<TaskForm mode="edit" template={recurringTemplate} instance={tuesday} onSaved={vi.fn()} onCancel={vi.fn()} />);
+        await userEvent.click(screen.getByLabelText('This and future occurrences'));
+        await userEvent.click(await screen.findByLabelText('Apply to all upcoming occurrences, including these'));
+        await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+        await waitFor(() => expect(mockedTemplates.patchTemplateThisAndFuture).toHaveBeenCalled());
+        expect(mockedTemplates.patchTemplateThisAndFuture.mock.calls[0][2]).toEqual({ fromInstanceId: 'tue', includeDetached: true });
+      });
+
+      it('shows nothing when editing from the last open occurrence', async () => {
+        render(<TaskForm mode="edit" template={recurringTemplate} instance={wednesday} onSaved={vi.fn()} onCancel={vi.fn()} />);
+        await waitFor(() => expect(mockedInstances.listInstances).toHaveBeenCalled());
+        await userEvent.click(screen.getByLabelText('This and future occurrences'));
+        expect(screen.queryByText(/won’t be updated/)).not.toBeInTheDocument();
+        expect(screen.queryByLabelText('Apply to all upcoming occurrences, including these')).not.toBeInTheDocument();
+      });
     });
   });
 });

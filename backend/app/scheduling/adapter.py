@@ -184,23 +184,8 @@ def build_candidate(db: Session, instance: TaskInstance, template: TaskTemplate,
         estimated_duration_minutes=instance.estimated_duration_minutes,
         active_hours_override=to_engine_active_hours(template.active_hours_override),
         dependency_completed_at=tuple(dependency_completed_at),
-        not_before=_completion_anchor_gate(repo, instance, template, tz=tz),
+        not_before=instance.nominal_date.astimezone(tz) if instance.nominal_date is not None else None,
     )
-
-
-def _completion_anchor_gate(
-    repo: TaskInstanceRepository, instance: TaskInstance, template: TaskTemplate, *, tz: tzinfo
-) -> datetime | None:
-    """§9.1: a completion-anchored occurrence "is not eligible for placement before" its
-    nominal date (design doc Example O). That rule is about the series' successors - a
-    template's very first instance has no predecessor to be "due again" after, and keeps
-    being placed as soon as it fits, as it always has.
-    """
-    if template.recurrence.anchor != "completion" or instance.nominal_date is None:
-        return None
-    if repo.list_by_template(template.id)[-1].id == instance.id:  # most-recent-first: [-1] is the first ever generated
-        return None
-    return instance.nominal_date.astimezone(tz)
 
 
 def attempt_placement(

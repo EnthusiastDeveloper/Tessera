@@ -67,6 +67,12 @@ test.describe('recurring task edit and delete scopes against the real backend', 
 
     const templateAfterSeriesEdit = await page.request.get(`/api/v1/task-templates/${templateId}`);
     expect(((await templateAfterSeriesEdit.json()) as { name: string }).name).toBe('Daily sync');
+
+    // Design doc §3.10 (Rev 10): the occurrence the series edit started from takes it and
+    // rejoins the series, even though it had been edited on its own.
+    await page.goto(`/tasks/${instanceId}`);
+    await expect(page.getByRole('heading', { name: 'Daily sync' })).toBeVisible();
+    await expect(page.getByText('Detached', { exact: true })).toHaveCount(0);
   });
 
   test('deleting a recurring task requires a scope, and "this and future" ends the series', async ({ page }) => {

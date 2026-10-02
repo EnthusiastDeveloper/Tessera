@@ -17,7 +17,7 @@ Sessions are absolute-TTL (30 days from issue, no idle extension) and are revoke
 ## Deployment
 
 **The container won't start / crashes immediately.**
-Check that `SECRET_KEY` is actually set to something in `.env` - it's the one genuinely required variable. Also confirm `DATABASE_PATH` points somewhere writable inside the container (the default, `./data/tessera.db`, assumes the compose file's volume mount is in place).
+Check that `SECRET_KEY` is actually set to something in `.env` - it's the one genuinely required variable. Also confirm `DATABASE_PATH` points somewhere writable inside the container (the default, `./data/tessera.db`, assumes the compose file's volume mount is in place). If the log says *another Tessera process is already running against this database*, a second copy is using the same data volume - stop it; Tessera runs as a single process (see [Getting Started](installation.md#running-more-than-one-copy)).
 
 **Login works on `http://localhost` but not behind my reverse proxy / HTTPS domain.**
 Set `APP_BASE_URL` to the externally-visible URL and leave `SESSION_COOKIE_SECURE=auto` - it derives the cookie's `Secure` flag from that URL's scheme. Hardcoding `SESSION_COOKIE_SECURE=true` will silently break login on plain HTTP.

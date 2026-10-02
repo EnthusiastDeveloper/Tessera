@@ -101,3 +101,33 @@ def test_nominal_date_backfill_reproduces_the_old_derivation(tmp_path: Path) -> 
         nominal = dict(conn.execute("SELECT id, nominal_date FROM task_instances").fetchall())
     assert nominal["i-flex"].startswith("2026-03-09 14:00:00")  # deadline minus one day
     assert nominal["i-fixed"].startswith("2026-03-05 23:00:00")  # scheduled_time
+
+
+def test_start_date_backfill_uses_the_earliest_occurrence_else_the_creation_day(tmp_path: Path) -> None:
+    """c5a8e2f41d07 (design doc §3.2, Rev 10): an existing template's `start_date` is the
+    local date of its earliest occurrence, or the day it was created if it has none."""
+    db_path = tmp_path / "start_date.db"
+    _run_alembic("upgrade", "b7d2c41e9a10", database_path=db_path)
+
+    ts = "2026-03-01 12:00:00.000000"
+    with sqlite3.connect(db_path) as conn:
+        for template_id in ("t-series", "t-empty"):
+            conn.execute(
+                "INSERT INTO task_templates (id, name, type, recurrence_pattern, recurrence_anchor, priority,"
+                " estimated_duration_minutes, deadline_offset_minutes, reminder_offsets_minutes, archived,"
+                " created_at, updated_at, version) VALUES (?, 'x', 'flexible', 'daily', 'calendar', 2, 30, 1440, '[]', 0, ?, ?, 1)",
+                (template_id, ts, ts),
+            )
+        for instance_id, nominal in (("i-later", "2026-03-09 05:00:00.000000"), ("i-first", "2026-03-04 05:00:00.000000")):
+            conn.execute(
+                "INSERT INTO task_instances (id, template_id, name, type, priority, estimated_duration_minutes, detached,"
+                " deadline, nominal_date, status, status_history, generated_at, created_at, updated_at, version)"
+                " VALUES (?, 't-series', 'x', 'flexible', 2, 30, 0, ?, ?, 'pending', '[]', ?, ?, ?, 1)",
+                (instance_id, nominal, nominal, ts, ts, ts),
+            )
+
+    _run_alembic("upgrade", "head", database_path=db_path)
+
+    with sqlite3.connect(db_path) as conn:
+        start_dates = dict(conn.execute("SELECT id, start_date FROM task_templates").fetchall())
+    assert start_dates == {"t-series": "2026-03-04", "t-empty": "2026-03-01"}

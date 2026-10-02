@@ -19,6 +19,7 @@ import httpx
 from fastapi.testclient import TestClient
 
 from app.auth.setup_token import setup_token_store
+from tests.fixtures.scheduling import app_today
 
 VALID_PASSWORD = "correcthorsebatterystaple"
 
@@ -46,6 +47,7 @@ class TestCreationConflict:
             "fixed_time_of_day": "18:00",
             "recurrence": {"pattern": "one_time", "anchor": "calendar"},
             "priority": "medium",
+            "start_date": app_today().isoformat(),
             "estimated_duration_minutes": 60,
         }
         app_client.post("/api/v1/task-templates", json=first)
@@ -63,6 +65,7 @@ class TestInfeasibleDuration:
             "type": "flexible",
             "recurrence": {"pattern": "one_time", "anchor": "calendar"},
             "priority": "medium",
+            "start_date": app_today().isoformat(),
             "estimated_duration_minutes": 24 * 60,  # longer than any day's active-hours window
             "deadline_offset_minutes": 60,
         }
@@ -79,6 +82,7 @@ class TestInvalidRecurrenceAnchor:
             "fixed_time_of_day": "09:00",
             "recurrence": {"pattern": "daily", "interval": 1, "anchor": "completion"},
             "priority": "medium",
+            "start_date": app_today().isoformat(),
             "estimated_duration_minutes": 30,
         }
         response = app_client.post("/api/v1/task-templates", json=payload)
@@ -101,6 +105,7 @@ class TestScopeRequired:
             "fixed_time_of_day": "09:00",
             "recurrence": {"pattern": "daily", "interval": 1, "anchor": "calendar"},
             "priority": "medium",
+            "start_date": app_today().isoformat(),
             "estimated_duration_minutes": 15,
         }
         instance = app_client.post("/api/v1/task-templates", json=payload).json()["instance"]

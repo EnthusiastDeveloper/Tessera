@@ -6,6 +6,8 @@ export interface ListInstancesParams {
   priority?: number;
   type?: 'fixed' | 'flexible';
   view?: 'backlog';
+  /** One series' occurrences (architecture-plan §3, Rev 4). */
+  template_id?: string;
 }
 
 export function listInstances(params: ListInstancesParams = {}): Promise<TaskInstance[]> {
