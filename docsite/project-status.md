@@ -46,6 +46,6 @@ This project is built in sequential stages, each merged as its own PR. As of thi
 | 10 | Deployment & packaging | Done |
 | 11 | Hardening & release readiness | Done |
 
-In short: the full stack - scheduling engine, data layer, auth, settings, task/notification domain, background jobs, calendar sync, the API contract, and the web frontend - is functionally complete and has passed a full regression, coverage, and security review. Remaining: tagging `v0.1.0-poc`.
+In short: the full stack - scheduling engine, data layer, auth, settings, task/notification domain, background jobs, calendar sync, the API contract, and the web frontend - is functionally complete and has passed a full regression, coverage, and security review. The `v0.1.0-poc` tag is released; see `CHANGELOG.md` for what has landed since.
 
 For the authoritative, continuously-updated stage-by-stage tracker (including per-stage implementation notes and what was deferred within each), see [`docs/implementation-plan.md`](https://github.com/EnthusiastDeveloper/Tessera/blob/main/docs/implementation-plan.md) in the repository - that file, not this page, is the source of truth for build progress.
