@@ -1,6 +1,8 @@
 # Tessera - Design Document (POC)
-### Revision 11
+### Revision 12
 
+> **Revision 12 closes the Medium findings of IRR-2 (M1-M16).** Most were already decided or built and are now stated where the next reader will look; the rest are decided here (Section 11 items 18-22): the undefined `custom` recurrence pattern is dropped (3.2), field validation limits are tabulated (new 3.13), instances speak the same priority labels as templates (3.2, 3.3), and what external sync does today is written down (7). Nothing about scheduling behaviour changes. Everything below about Revisions 9, 10 and 11 still stands unless this revision says otherwise.
+>
 > **Revision 11 settles three open IRR-2 findings** - what deleting a series does to its open occurrences (H5), what a timezone change moves (H12), and what happens to scheduled work when the user's scheduling rules get stricter (H13) (Section 11 items 15-17). Everything below about Revisions 9 and 10 still stands unless this revision says otherwise.
 >
 > **Revision 10 settles four scheduling questions** - when a series starts, what "this and future" reaches, who moves a flexible task whose slot is taken, and what happens to a fixed task still waiting on a prerequisite (Section 11 items 10-14). Everything below about Revision 9 still stands.
@@ -32,6 +34,8 @@ Full diffs are in git; IRR-2 (`docs/implementation-readiness-review-2.md`) holds
 | 8 | Closed the last five `[UNCONFIRMED]` items, all confirmed as specified. Markup only, no behaviour change |
 | 9 | Resolved eighteen findings from the second readiness review (IRR-2) - see below |
 | 10 | Recurring-series rules: every occurrence has its own date, a template takes an explicit start date, flexible occurrences are never placed before their date, and "this and future" reaches every open occurrence from the edited one onward. A scheduled flexible task gives way to a fixed one instead of blocking it; a waiting fixed task holds its slot and goes overdue normally - see below |
+| 11 | Deleting a series deletes every open occurrence; a timezone change moves nothing; stricter scheduling rules repair the schedule in the background (6.10) |
+| 12 | IRR-2 Medium findings closed: `custom` recurrence dropped, field validation table (3.13), priority labels on the wire for instances, current external-sync behaviour documented (7), calendar selection and failed-sync visibility recorded as Backlog |
 
 **Revision 9 changelog.** Eighteen IRR-2 findings, following stakeholder decisions taken 2026-08-05 to 2026-08-07. Revision 8's "locked" status meant "no unilateral edits"; it did not mean "verified correct". IRR-2 records what each finding was and why it mattered; this lists only what the specification now says.
 
@@ -147,10 +151,10 @@ interface TaskTemplate {
 
   // --- Recurrence ---
   recurrence: {
-    pattern: "one_time" | "daily" | "weekly" | "monthly" | "custom";
-    interval?: number;              // e.g. every 2 weeks
-    day_of_week?: number;           // for weekly
-    day_of_month?: number;          // for monthly
+    pattern: "one_time" | "daily" | "weekly" | "monthly";  // (Rev 12: `custom` dropped)
+    interval?: number;              // e.g. every 2 weeks; 1-365, default 1 (3.13)
+    day_of_week?: number;           // for weekly; 0 (Monday) - 6 (Sunday)
+    day_of_month?: number;          // for monthly; 1-31, clamped in short months
 
     anchor: "calendar" | "completion";  // (added Rev 9) where the NEXT occurrence lands.
                                      // "calendar": at the next date the rule produces,
@@ -181,7 +185,8 @@ interface TaskTemplate {
                                      // not calendar time; 4320 == 3 days. See 14.1.
                                      // required if type == "flexible"
 
-  priority: "low" | "medium" | "high" | "critical"; // enum in UI
+  priority: "low" | "medium" | "high" | "critical"; // the same labels on the wire for
+                                     // templates and instances alike (Rev 12, IRR-2 M15)
 
   estimated_duration_minutes: number;  // (Rev 9: was `estimated_duration: Duration`)
                                      // see 6.8: validated at save time against the applicable
@@ -209,12 +214,15 @@ interface TaskTemplate {
 
 Notes:
 - `dependencies` is **not** a template field (dependencies apply to `TaskInstance` only, POC). See Backlog 12.12.
-- Numeric priority mapping (internal, not exposed in UI): `low=1, medium=2, high=3, critical=4`.
+- Numeric priority mapping (**internal only** - storage and the scheduling engine; never on the wire, **Rev 12**): `low=1, medium=2, high=3, critical=4`. The API sends, accepts and filters on the label for templates and instances alike, so a client never meets two representations of the same field (IRR-2 M15).
 - `active_hours_override` exists for two conceptually different reasons that share one mechanism: (a) the user's personal flexibility about a specific chore ("filters can wait till late"), or (b) a genuine external constraint (a business's real opening hours). POC ships the mechanism; a proper business-hours registry with task tagging is Backlog item - see scope table.
 - **(Added Revision 6)** `estimated_duration_minutes` is checked at save time against every day-of-week's applicable active-hours window (override if set, else global) - see 6.8. A duration that cannot physically fit any single day is rejected at creation, not silently left to fail scheduling forever.
 - **(Added Revision 7, amended Revision 10)** A "this and future" edit reaches every open instance from the edited one onward, except those that are `detached` - unless the user opts in to overriding them (3.10). The template's new values apply to every instance generated afterwards (9.1) regardless.
 - **(Added Revision 10) `start_date` is what the user means by "starts on".** It is asked for in the creation form alongside every other parameter, never defaulted silently. For a `flexible` template it is the first occurrence's date, so the first instance is not placed before it (9.1); together with `deadline_offset_minutes` it fixes the first occurrence's window. For a `fixed` template it is the date from which the rule produces the first occurrence. A `start_date` earlier than today in the user's timezone is rejected with `invalid_start_date`. **(Clarified post-Revision 10)** So is a flexible template whose first occurrence's window has already ended - a short `deadline_offset_minutes` on a `start_date` of today, since the window counts from the start of the date - which would otherwise be created already `missed`. It is a creation-time input: once the series exists, its dates come from its occurrences (`nominal_date`, 3.3), so later edits to `start_date` are not offered.
 - **`recurrence.anchor` is a type constraint, not a preference.** `anchor: "completion"` requires `type: "flexible"`, and a save that violates this is **rejected** with an `invalid_recurrence_anchor` validation error. The reason is structural rather than stylistic: completion-anchoring only means anything if the resulting occurrence can be *pushed* within a window, and that window is `deadline_offset_minutes` - a field flexible instances have and fixed instances do not (3.3 sets `deadline` for flexible tasks only; a fixed instance carries `scheduled_time` and has nothing to slide against). A fixed task must happen at its defined date and time, so there is nothing for a completion date to re-anchor. A recurring commitment that genuinely should shift with completion - "service the car six months after the last service" - is modelled as a flexible template whose `deadline_offset_minutes` expresses how far it may slip.
+- **(Added Revision 12, IRR-2 M1) There is no `custom` recurrence pattern.** It sat in the enum with no configuring fields and no definition; `interval` already expresses "every N days, weeks or months". It is removed from the model, the API and the UI, and any stored `custom` template became `daily` (the generator already treated it as "every `interval` days").
+- **(Added Revision 12, IRR-2 M2) A monthly `day_of_month` that a month lacks clamps to that month's last day.** A template on the 31st lands on 28/29 February, 30 April and so on; the following month returns to the 31st. The rule applies to the first occurrence and every later one.
+- **(Added Revision 12, IRR-2 M3) A one-time flexible task takes its deadline as an offset, entered on a calendar.** The deadline stays `start_date + deadline_offset_minutes` (9.1) - no new field. The creation form offers "Or pick a due date", which sets the offset to the end of the chosen day, counted in calendar days from `start_date`, and shows what it resolved to in the usual number-and-unit control (8.1a). The user never computes "April 15" by hand, and an absolute deadline never has to be set by editing the occurrence afterwards (which would detach it, 3.10).
 - **All durations are integer minutes.** Minutes are the storage and wire format **only** - the UI must never ask the user to compute them, and must never display a raw minute count. See 8.1a for the required input control and 14.1 for the elapsed-versus-calendar consequence.
 - **`active_hours_override` merges, and its `null` matches 3.7's.** One rule, no exceptions: **per-day `null` always excludes that day**, an **absent** override inherits the global map entirely, and a **partial** override applies per day rather than replacing the map. The API contract must therefore distinguish an absent key from a present-but-`null` key: `{"monday": null}` excludes Monday, `{}` inherits it.
 
@@ -229,7 +237,8 @@ interface TaskInstance {
   description?: string;
   location?: string;
   type: "fixed" | "flexible";
-  priority: number;                 // numeric, copied from template at generation
+  priority: number;                 // numeric INTERNALLY, copied from template at generation;
+                                     // on the wire this is the same label as the template's (Rev 12)
   estimated_duration_minutes: number;  // (Rev 9: was `estimated_duration: Duration`)
                                      // copied from the template at generation and NOT
                                      // rewritten by later template edits once set - this is
@@ -383,7 +392,8 @@ interface UserSettings {
   active_hours: {                   // global default scheduling window, per day of week
     [day: string]: { start: string; end: string } | null;  // null = day fully excluded
   };
-  blackout_dates: { start: Date; end: Date; label?: string }[]; // manual full-day exclusions
+  blackout_dates: { start: Date; end: Date; label?: string }[]; // manual full-day exclusions;
+                                     // `end` is INCLUSIVE (Rev 12) and may not precede `start`
                                      // (POC stand-in for holiday calendars, see Backlog 12.15)
 
   daily_time_budget_minutes: {       // (Rev 9: was `daily_time_budget: {[day]: Duration|null}`)
@@ -402,6 +412,8 @@ interface UserSettings {
                                                             // default: "monday"
 }
 ```
+
+**(Added Revision 12, IRR-2 M4)** A blackout range is **inclusive at both ends**: `start: 2026-03-10, end: 2026-03-12` excludes the 10th, 11th and 12th, and a one-day blackout has `start == end`. A window's `start` and `end` are 24-hour `HH:MM` times on the same day. Overnight windows (`22:00`-`02:00`) and split windows (morning plus evening) are **not** part of the POC's window shape; whether to support them is open (Backlog 12.25), and nothing in the engine is specified for a window whose `end` is not after its `start`.
 
 `first_day_of_week` affects **display only** - it controls the Timeline view's calendar layout (8.1) and the row order of the day-of-week settings below (`active_hours`, `daily_time_budget_minutes`, `blackout_dates`). It has no effect on scheduling algorithm behavior: those fields are already keyed by day name rather than position-in-week, so the algorithm doesn't have a concept of "week" to reorder in the first place.
 
@@ -513,6 +525,28 @@ The distinction is what owns the data.
 
 - **`ExternalEvent` is a cache.** The provider is the source of truth and any purged row is refetchable. The poll (6.4) maintains a **rolling 90-day forward horizon**, and **purges events whose `end` is more than 30 days past** on the same pass. Removals detected at the provider are **soft-deleted** (`deleted_at` set) rather than hard-deleted, so 3.9's `sync_conflict` auto-resolution can observe a row rather than having to reason about absence; soft-deleted rows are purged by the same retention sweep.
 - **`TaskInstance` is the system of record and is never aged out or purged.** Completed and `missed` instances persist indefinitely. 3.3 already makes `completed` terminal and immutable, and 3.8 archives templates rather than hard-deleting them specifically so `template_id` references on historical instances stay valid; a retention policy on instances would cut against both. This is stated explicitly because "keep the database small" is a reasonable-sounding instinct that would destroy primary data, including the estimate-versus-actual history Backlog 12.14 depends on.
+
+### 3.13 Field validation (added Revision 12, IRR-2 M11)
+
+Every request body is bounded. A violation is a `422` with code `validation_error` in the standard envelope, naming the field; nothing is partially applied. The API (`backend/app/api/v1/validation.py`), the form controls and these numbers are the same table - change one and the other two.
+
+| Field | Rule |
+|---|---|
+| `name` | 1-200 characters after trimming surrounding whitespace; whitespace-only is empty |
+| `description` | at most 2000 characters |
+| `location` | at most 200 characters |
+| `estimated_duration_minutes` | integer, 1 to 1440 (24 hours); zero and negative are rejected. Whether it fits the active-hours windows is the separate `infeasible_duration` check (6.8) |
+| `recurrence.interval` | integer, 1 to 365 |
+| `recurrence.day_of_week` | integer, 0 (Monday) to 6 (Sunday) |
+| `recurrence.day_of_month` | integer, 1 to 31 (clamped in shorter months, 3.2) |
+| `deadline_offset_minutes` | integer, 1 to 525600 (365 days) |
+| `reminder_offsets_minutes` | at most 10 entries, each 0 to 43200 (30 days); 0 means at the time itself |
+| `fixed_time_of_day`, active-hours `start` / `end` | 24-hour `HH:MM`, `00:00` to `23:59` |
+| `daily_time_budget_minutes[day]` | integer 0 to 1440, or `null` for unlimited |
+| `blackout_dates[].label` | at most 100 characters |
+| `blackout_dates[]` | `end` on or after `start` (`invalid_field`) |
+
+Rules that span fields stay in the services with their own error codes: `invalid_recurrence_anchor`, `invalid_start_date`, `infeasible_duration`, `cycle_detected`, `creation_conflict`. The limits are generous on purpose - they exist to refuse nonsense (a negative duration, a megabyte name), not to second-guess a user.
 
 ---
 
@@ -843,6 +877,12 @@ Read-only, polling-based (webhooks require a publicly reachable endpoint, confli
 
 **(Added Revision 9)** Fetched events are persisted as `ExternalEvent` rows (3.11) on a rolling 90-day horizon with 30-day past retention (3.12). The scheduler reads the cache, never the provider - see 3.11 for why that matters.
 
+**(Added Revision 12, IRR-2 M6) What the poll does today.** These are the behaviours an operator can rely on; the gaps are recorded as Backlog rather than left unsaid.
+- **One calendar per connection.** Google syncs the account's `primary` calendar; Outlook syncs the account's default calendar view. Selecting other calendars within an account is Backlog 12.26.
+- **Horizon.** Events from now to 90 days ahead are fetched on every poll (3.12 for retention).
+- **Cadence.** One poll per connection every `refresh_interval_minutes`. There is no separate rate-limit or backoff logic: a failed poll is simply retried at the next interval.
+- **A failed poll changes nothing.** If the access token has expired and cannot be refreshed, or the provider fetch fails, the cached events and the schedule stay as they were and the failure is logged. The user sees it as a stale "last synced" time (the staleness rule above). A provider that rotates refresh tokens keeps the newly issued token even when the fetch after it fails, so one failed poll cannot strand the connection. A dedicated failed-sync status or notification is Backlog 12.27.
+
 **Event filtering (added Revision 6):**
 - Events explicitly marked **transparent / "Free"** by the provider (i.e. the calendar owner marked themselves as available during that event) are excluded from the busy-block obstacle set entirely - they never obstruct flexible-task placement (6.2) or fixed-task conflict checks (6.5).
 - **All-day events** are imported and shown on the Timeline, but for POC are treated as **display-only overlays** - they do not block flexible placement and are not automatically converted into `blackout_dates`.
@@ -898,11 +938,8 @@ All durations are stored and transmitted as integer minutes (3.2). **That is a s
 
 ## 9. Architecture & Deployment
 
-- Self-hosted, single deployable unit - modular monolith (backend + scheduling engine + WebUI), not microservices.
-- **Database:** SQLite recommended for POC (single-user, no concurrent-write pressure, no extra container). Revisit if multi-user (Backlog 12.6) lands.
-- **Packaging:** single container image. Home Assistant add-on packaging is Backlog 12.10.
-- **Background jobs:** (a) external calendar poll per connection, (b) reminder scan, (c) dependency-at-risk scan (6.3), (d) overdue scan (6.6), (e) recurring-template instance generation (9.1), (f) deadline-elapsed scan (6.7, added Revision 6). **(Added Revision 9)** (g) next-occurrence generation for `calendar`-anchored templates - a one-off job at the occurrence boundary, since generation there is no longer triggered by a completion event (9.1). Note that `completion`-anchored generation and dependency-unblock placement (6.9) are **event hooks, not jobs**: they fire inside the service method that completed the predecessor. The architecture plan governs how these are scheduled and reconciled.
-- **Auth:** password-based login required for POC (3.6); session/cookie mechanism is an implementation detail but must exist - this is no longer optional per stakeholder confirmation (see 14.2).
+- Self-hosted, single deployable unit - modular monolith (backend + scheduling engine + WebUI), not microservices; packaged as one container image (Home Assistant add-on packaging is Backlog 12.10). Authentication is required (3.6, 14.2).
+- **(Revision 12, IRR-2 M14) Everything else about how it is built lives in `docs/architecture-plan.md`**: the stack, the database and its pragmas (Section 5), the background-job inventory and reconciliation (Section 4), deployment and backup (Section 7). This section used to restate the database, packaging and job list and had already drifted from the architecture plan (the job list, IRR-2 H8); a second copy of a decision is a second place for it to be wrong. What stays here is only what is a *product* decision. The job list's behaviour is specified where it happens: 6.3 (dependency-at-risk), 6.4 (calendar poll), 6.6 (overdue), 6.7 (deadline elapsed), 9.1 (generation).
 
 ### 9.1 Recurring instance generation
 
@@ -915,6 +952,10 @@ Instances are generated **one at a time**, never as a pre-generated rolling wind
 Each instance carries a `nominal_date` (3.3): the date this occurrence belongs to. It is set when the instance is generated and never edited afterwards. Every other date derives from it - the next occurrence's date, a flexible instance's `deadline` (`nominal_date + deadline_offset_minutes`), and a fixed instance's `scheduled_time` (`nominal_date`'s calendar date at `fixed_time_of_day`, 14.1). Nothing is derived from where an occurrence ended up: a "this occurrence" reschedule or custom deadline moves that occurrence only.
 
 **A flexible occurrence is never placed before its `nominal_date`** (6.2's earliest start), the first occurrence included. `deadline_offset_minutes` is therefore the same window for every occurrence: how long the user gives themselves to get it done, counted from its date.
+
+#### A generated occurrence has no dependencies (added Revision 12, IRR-2 M5)
+
+Dependencies belong to one occurrence, not to the series: a successor generated from the template - by the occurrence boundary, by a completion, or by a dismissal - starts with **none**, and does not inherit its predecessor's. Template-level dependencies ("this week's occurrence waits on last week's") would need a rule for which occurrence depends on which, and are Backlog 12.12.
 
 #### The first occurrence (added Revision 10)
 
@@ -1211,7 +1252,17 @@ Revision 9 resolved eighteen findings from a second review (IRR-2). Two of them 
 
 17. ~~**What happens to scheduled work when the scheduling rules get stricter?**~~ **RESOLVED - Revision 11 (IRR-2 H13).** Every scheduled flexible occurrence that no longer fits is placed again, or flagged `unschedulable`; the change itself is never blocked. It runs in the background behind a progress overlay (6.10).
 
-**Section 11 has no open items at Revision 11.** Note this is narrower than Revision 8's claim that the document was "fully locked": IRR-2 findings gating Stage 5 and later (H2, H5–H7, H9–H14, and several Medium items) remain **open against this revision** and are tracked in that register, not here. Section 11 tracks decisions awaiting confirmation; IRR-2 tracks findings awaiting a decision.
+18. ~~**What happens to the undefined `custom` recurrence pattern?**~~ **RESOLVED - Revision 12 (IRR-2 M1).** Dropped. `interval` already covers "every N days/weeks/months", and the generator had always treated `custom` as exactly that (3.2).
+
+19. ~~**What is the wire representation of an instance's priority?**~~ **RESOLVED - Revision 12 (IRR-2 M15).** The label (`low` / `medium` / `high` / `critical`) everywhere externally, for templates and instances; the integer is internal only (3.2, 3.3).
+
+20. ~~**How does a one-time flexible task get an absolute deadline?**~~ **RESOLVED - Revision 12 (IRR-2 M3).** A date picker in the form computes the offset; no new field, no API change (3.2).
+
+21. ~~**Should external sync let the user choose which calendars of an account to read?**~~ **RESOLVED - Revision 12 (IRR-2 M6): not for the POC.** The poll reads one calendar per connection and a failed poll is visible only as a stale "last synced" time; both are written down (7) and the improvements are Backlog 12.26 and 12.27.
+
+22. ~~**Do overnight active-hours windows (`22:00`-`02:00`) belong in the POC?**~~ **DEFERRED - Revision 12 (IRR-2 M4).** Not decided here: the question touches the placement algorithm and is to be discussed on its own (Backlog 12.25). What *is* settled: blackout ranges are inclusive at both ends (3.7).
+
+**Section 11 has no open items at Revision 12** apart from item 22, which is deliberately deferred. Note this is narrower than Revision 8's claim that the document was "fully locked": IRR-2's editorial findings (Section 4 of that register) and the one deferred Medium question above remain open and are tracked there, not here. Section 11 tracks decisions awaiting confirmation; IRR-2 tracks findings awaiting a decision.
 
 Two related items were resolved **without** flagging, since they don't change load-bearing behavior and follow directly from rules already on the books:
 - Instances may be marked `completed` directly without first being `scheduled` (3.3/4) - this is a natural reading of "the user did the task," not a new mechanism.
@@ -1247,6 +1298,9 @@ Two related items were resolved **without** flagging, since they don't change lo
 | 12.22 *(added Rev 9)* | Placing dependents against a prerequisite's *scheduled* time rather than its completion, so whole chains appear on the Timeline in advance | Genuinely better for previewing a plan, but it requires a dependency-invalidation cascade: placements are immovable (6.2), so moving a prerequisite would strand every dependent placed after it, needing re-placement, new job re-wiring, and a bounded exception to the immovability rule. That is a feature with its own design, not a side effect of deleting dead code. POC makes the work visible via the Backlog view (8.1) instead |
 | 12.23 *(added Rev 9)* | User-triggered "re-optimise my schedule" reflow - clear and re-place all `pending`/`scheduled` flexible instances in one global pass | The natural escape hatch for 6.2's accepted greedy corner-painting. Deferred because it must be explicit and user-initiated: an automatic reflow would silently move work the user has already planned around, which 6.2 rules out deliberately |
 | 12.24 *(added and withdrawn in Rev 9)* | ~~Non-destructive `dismiss` for a stale recurring occurrence~~ | **Withdrawn - built into the POC**, not deferred. Section 11 item 8 resolved in favour of a `dismissed` terminal status (3.8, Section 4). Number retained rather than reused, so existing citations do not silently repoint |
+| 12.25 *(added Rev 12)* | Overnight (`22:00`-`02:00`) and split (morning plus evening) active-hours windows | The window shape is a single same-day `{start, end}` (3.7). Supporting either changes placement in 6.2 and the merge in 3.2, so it is discussed separately rather than slipped in under validation work (IRR-2 M4). Until decided, a window whose `end` is not after its `start` is unspecified |
+| 12.26 *(added Rev 12)* | Choose which calendars of a connected account are synced (a `calendar_ids` selection on `ExternalCalendarConnection`) | The POC reads one calendar per connection - Google `primary`, Outlook's default (7). A selection needs a provider call to list calendars, a column and a settings control (IRR-2 M6) |
+| 12.27 *(added Rev 12)* | A failed-sync status or notification, and rate-limit/backoff handling for the poll | A failed poll is logged and shows as a stale "last synced" time; the next interval retries (7). Surfacing it properly wants a new notification type or a status field on the connection (IRR-2 M6) |
 
 ### 12.15 - Open questions to resolve before holiday calendars are taken into active development
 
