@@ -54,24 +54,20 @@ const TERMINAL_STATUSES = new Set(['completed', 'dismissed']);
 /** Occurrences a "this and future" edit from `edited` would skip by default: open ones
  * dated after it that were edited on their own (design doc §3.10, Rev 10). */
 function skippedOccurrences(series: TaskInstance[], edited: TaskInstance): TaskInstance[] {
-  const editedDate = edited.nominal_date ?? edited.generated_at;
+  const editedDate = edited.nominal_date;
   return series
     .filter(
       (occurrence) =>
         occurrence.id !== edited.id &&
         occurrence.detached &&
         !TERMINAL_STATUSES.has(occurrence.status) &&
-        (occurrence.nominal_date ?? occurrence.generated_at) > editedDate
+        occurrence.nominal_date > editedDate
     )
-    .sort((a, b) =>
-      (a.nominal_date ?? a.generated_at) < (b.nominal_date ?? b.generated_at) ? -1 : 1
-    );
+    .sort((a, b) => (a.nominal_date < b.nominal_date ? -1 : 1));
 }
 
 function occurrenceLabel(occurrence: TaskInstance): string {
-  return new Date(
-    occurrence.scheduled_time ?? occurrence.nominal_date ?? occurrence.generated_at
-  ).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+  return new Date(occurrence.scheduled_time ?? occurrence.nominal_date).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
 /** Drops null/undefined/'' so "unset" compares equal however each side spells it. */

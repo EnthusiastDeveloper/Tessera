@@ -15,6 +15,7 @@ const mockedInstances = vi.mocked(taskInstancesApi);
 
 const BASE_TEMPLATE: TaskTemplate = {
   id: 'template-1',
+  start_date: '2026-01-01',
   name: 'Water the plants',
   description: null,
   location: null,
@@ -49,6 +50,7 @@ const BASE_INSTANCE: TaskInstance = {
   dependencies: [],
   completed_at: null,
   generated_at: '2026-01-01T00:00:00Z',
+  nominal_date: '2026-01-01T00:00:00Z',
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-01T00:00:00Z',
   version: 1,

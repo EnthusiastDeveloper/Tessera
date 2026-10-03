@@ -34,8 +34,8 @@ export interface TaskTemplate {
   type: TaskType;
   recurrence: Recurrence;
   /** Local "YYYY-MM-DD" the series starts from (design doc §3.2, Rev 10). Set at creation
-   * only; null on a template created before the field existed. */
-  start_date?: string | null;
+   * only, always present. */
+  start_date: string;
   fixed_time_of_day?: string | null;
   deadline_offset_minutes?: number | null;
   priority: Priority;
@@ -65,7 +65,7 @@ export interface TaskInstance {
   detached: boolean;
   scheduled_time?: string | null;
   deadline?: string | null;
-  nominal_date?: string | null;
+  nominal_date: string;
   status: TaskInstanceStatus;
   status_history: StatusHistoryEntry[];
   dependencies: string[];

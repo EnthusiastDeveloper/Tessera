@@ -10,6 +10,8 @@ type silently going unhandled is a visible test gap, not a silent one.
 
 from __future__ import annotations
 
+from datetime import date
+
 import pytest
 from sqlalchemy.orm import Session
 
@@ -35,6 +37,7 @@ def _persist_instance(db: Session) -> TaskInstance:
     template = TaskTemplateRepository(db).create(
         TaskTemplate(
             id=generate_id(),
+            start_date=date(2026, 1, 1),
             name="Some task",
             type="flexible",
             recurrence=Recurrence(pattern="one_time", anchor="calendar"),
@@ -57,6 +60,7 @@ def _persist_instance(db: Session) -> TaskInstance:
             status="pending",
             status_history=(StatusHistoryEntry(status="pending", at=now),),
             generated_at=now,
+            nominal_date=now,
             created_at=now,
             updated_at=now,
             version=1,

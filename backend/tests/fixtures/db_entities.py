@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import date, timedelta
 from typing import Any
 
 from app.db.base import generate_id, utcnow
@@ -46,6 +46,7 @@ def make_task_template(**overrides: Any) -> TaskTemplate:
         "version": 1,
     }
     defaults.update(overrides)
+    defaults.setdefault("start_date", date(2026, 1, 1))
     return TaskTemplate(**defaults)
 
 
@@ -65,6 +66,7 @@ def make_task_instance(*, template_id: str, **overrides: Any) -> TaskInstance:
         "version": 1,
     }
     defaults.update(overrides)
+    defaults.setdefault("nominal_date", defaults["generated_at"])
     return TaskInstance(**defaults)
 
 

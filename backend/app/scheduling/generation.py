@@ -105,8 +105,6 @@ def _first_nominal_instant(template: TaskTemplate, *, now: datetime, tz: ZoneInf
     - `anchor: "calendar"`, fixed: that date at `fixed_time_of_day`, moved on to the
       rule's next date while that time has already passed.
     """
-    if template.start_date is None:
-        raise ValueError(f"template {template.id} has no start_date to generate its first occurrence from")
     start_of_day = datetime.combine(template.start_date, time(0, 0), tzinfo=tz)
     pattern = template.recurrence.pattern
     if pattern == "one_time" or template.recurrence.anchor == "completion":
@@ -157,24 +155,11 @@ def _predecessor_nominal_date(predecessor: TaskInstance, template: TaskTemplate,
     one occurrence's custom deadline or reschedule can't shift the rest of the series.
     Fixed instances keep only its date and take the template's *current*
     `fixed_time_of_day`, so a this-and-future time change still applies going forward.
-
-    Rows without one (only possible if the migration's backfill skipped them) fall back
-    to the old derivation: flexible `deadline - deadline_offset_minutes`, fixed the date
-    of `scheduled_time`.
     """
-    if predecessor.nominal_date is not None:
-        nominal = predecessor.nominal_date.astimezone(tz)
-        if predecessor.type == "fixed":
-            return project_fixed_time(nominal.date(), template=template, tz=tz)
-        return nominal
-    if predecessor.type == "flexible":
-        if predecessor.deadline is None:
-            raise ValueError(f"flexible predecessor {predecessor.id} has no deadline")
-        offset = template.deadline_offset_minutes or 0
-        return predecessor.deadline.astimezone(tz) - timedelta(minutes=offset)
-    if predecessor.scheduled_time is None:
-        raise ValueError(f"fixed predecessor {predecessor.id} has no scheduled_time")
-    return project_fixed_time(predecessor.scheduled_time.astimezone(tz).date(), template=template, tz=tz)
+    nominal = predecessor.nominal_date.astimezone(tz)
+    if predecessor.type == "fixed":
+        return project_fixed_time(nominal.date(), template=template, tz=tz)
+    return nominal
 
 
 def project_fixed_time(nominal_date: date, *, template: TaskTemplate, tz: ZoneInfo) -> datetime:

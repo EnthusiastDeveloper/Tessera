@@ -30,6 +30,7 @@ def _template(**overrides: object) -> TaskTemplate:
         "version": 1,
     }
     defaults.update(overrides)
+    defaults.setdefault("start_date", date(2026, 1, 1))
     return TaskTemplate(**defaults)
 
 
@@ -49,6 +50,7 @@ def _instance(*, template: TaskTemplate, **overrides: object) -> TaskInstance:
         "version": 1,
     }
     defaults.update(overrides)
+    defaults.setdefault("nominal_date", defaults["generated_at"])
     return TaskInstance(**defaults)
 
 
@@ -83,6 +85,7 @@ class TestExampleO:
             type="flexible",
             status="scheduled",
             deadline=datetime(2026, 3, 6, 0, 0, tzinfo=NY),
+            nominal_date=datetime(2026, 3, 1, 0, 0, tzinfo=NY),  # the deadline less the 5-day offset
         )
 
         result = generate_next_instance(
@@ -108,6 +111,7 @@ class TestExampleP:
             type="fixed",
             status="scheduled",  # never marked complete - stale, but still generates (§9.1)
             scheduled_time=datetime(2026, 3, 2, 9, 0, tzinfo=NY),
+            nominal_date=datetime(2026, 3, 2, 9, 0, tzinfo=NY),
         )
 
         result = generate_next_instance(

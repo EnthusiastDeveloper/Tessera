@@ -6,7 +6,7 @@ auto-resolution (§3.9).
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -67,6 +67,7 @@ def _persist_fixed_instance(db: Session, *, scheduled_time: object, **overrides:
     template = TaskTemplateRepository(db).create(
         TaskTemplate(
             id=generate_id(),
+            start_date=date(2026, 1, 1),
             name="Team sync",
             type="fixed",
             fixed_time_of_day="18:00",
@@ -94,6 +95,7 @@ def _persist_fixed_instance(db: Session, *, scheduled_time: object, **overrides:
         "version": 1,
     }
     defaults.update(overrides)
+    defaults.setdefault("nominal_date", defaults["generated_at"])
     return TaskInstanceRepository(db).create(TaskInstance(**defaults))
 
 
@@ -102,6 +104,7 @@ def _persist_flexible_instance(db: Session, *, scheduled_time: object, deadline:
     template = TaskTemplateRepository(db).create(
         TaskTemplate(
             id=generate_id(),
+            start_date=date(2026, 1, 1),
             name="Deep clean garage",
             type="flexible",
             recurrence=Recurrence(pattern="one_time", anchor="calendar"),
@@ -130,6 +133,7 @@ def _persist_flexible_instance(db: Session, *, scheduled_time: object, deadline:
         "version": 1,
     }
     defaults.update(overrides)
+    defaults.setdefault("nominal_date", defaults["generated_at"])
     return TaskInstanceRepository(db).create(TaskInstance(**defaults))
 
 

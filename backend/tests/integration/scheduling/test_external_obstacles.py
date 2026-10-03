@@ -6,6 +6,7 @@ persisted `ExternalEvent` row rather than a bare `Obstacle` fixture (design doc 
 
 from __future__ import annotations
 
+from datetime import date
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -216,6 +217,7 @@ class TestExampleBFlexiblePlacementAgainstExternalObstacles:
         template = TaskTemplateRepository(db_session).create(
             TaskTemplate(
                 id=generate_id(),
+                start_date=date(2026, 1, 1),
                 name="Replace HVAC filters",
                 type="flexible",
                 recurrence=Recurrence(pattern="monthly", interval=1, anchor="completion"),
@@ -243,6 +245,7 @@ class TestExampleBFlexiblePlacementAgainstExternalObstacles:
                 deadline=ny(2026, 3, 7, 9, 0),
                 status_history=(StatusHistoryEntry(status="pending", at=now),),
                 generated_at=now,
+                nominal_date=now,
                 created_at=now,
                 updated_at=now,
                 version=1,

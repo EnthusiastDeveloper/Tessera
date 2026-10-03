@@ -9,6 +9,7 @@ pipeline, exactly as the example's own "Given" table frames it.
 
 from __future__ import annotations
 
+from datetime import date
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -67,6 +68,7 @@ def test_example_c_sync_eviction_and_replacement(
     template = TaskTemplateRepository(db_session).create(
         TaskTemplate(
             id=generate_id(),
+            start_date=date(2026, 1, 1),
             name="Replace HVAC filters",
             type="flexible",
             recurrence=Recurrence(pattern="monthly", interval=1, anchor="completion"),
@@ -92,6 +94,7 @@ def test_example_c_sync_eviction_and_replacement(
             deadline=ny(2026, 3, 7, 9, 0),
             status_history=(StatusHistoryEntry(status="scheduled", at=now),),
             generated_at=now,
+            nominal_date=ny(2026, 3, 2, 9, 0),  # deadline Mar 7 09:00 less the 5-day offset
             created_at=now,
             updated_at=now,
             version=1,
