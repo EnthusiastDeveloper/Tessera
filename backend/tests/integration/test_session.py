@@ -14,7 +14,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.db.session import get_db, get_engine, get_jobs_engine, get_session_factory, sqlite_url
+from app.db.session import build_engine, get_db, get_engine, get_jobs_engine, get_session_factory, sqlite_url
 
 
 @pytest.fixture(autouse=True)
@@ -59,3 +59,13 @@ def test_get_db_yields_a_usable_session_and_closes_it_afterward(tmp_path: Path, 
 
     with pytest.raises(StopIteration):
         next(generator)  # exhausts the generator, running the `finally: session.close()`
+
+
+def test_every_connection_gets_the_documented_sqlite_pragmas(tmp_path: Path) -> None:
+    """architecture-plan §5.3 (IRR-2 M12): foreign keys on, WAL journal, 5 s busy timeout.
+    A file database, since `:memory:` cannot use WAL."""
+    engine = build_engine(sqlite_url(str(tmp_path / "pragmas.db")))
+    with engine.connect() as connection:
+        assert connection.execute(text("PRAGMA foreign_keys")).scalar() == 1
+        assert connection.execute(text("PRAGMA journal_mode")).scalar() == "wal"
+        assert connection.execute(text("PRAGMA busy_timeout")).scalar() == 5000
