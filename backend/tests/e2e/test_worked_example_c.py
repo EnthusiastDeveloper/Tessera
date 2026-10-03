@@ -54,7 +54,7 @@ def test_example_c_sync_eviction_and_replacement(
         settings.model_copy(
             update={
                 "timezone": "America/New_York",
-                "active_hours": dict.fromkeys(_DAY_NAMES, ActiveHoursWindow(start="18:00", end="21:00")),
+                "active_hours": dict.fromkeys(_DAY_NAMES, [ActiveHoursWindow(start="18:00", end="21:00")]),
                 "daily_time_budget_minutes": dict.fromkeys(_DAY_NAMES, None),
                 "budget_enforcement": "soft",
             }
@@ -73,7 +73,7 @@ def test_example_c_sync_eviction_and_replacement(
             priority="medium",
             estimated_duration_minutes=30,
             deadline_offset_minutes=7200,
-            active_hours_override={"tuesday": ActiveHoursWindow(start="18:00", end="22:30")},
+            active_hours_override={"tuesday": [ActiveHoursWindow(start="18:00", end="22:30")]},
             created_at=now,
             updated_at=now,
             version=1,

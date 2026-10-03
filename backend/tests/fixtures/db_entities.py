@@ -28,7 +28,7 @@ _DAY_NAMES: tuple[DayName, ...] = (
     "saturday",
     "sunday",
 )
-ALL_DAYS_OPEN = dict.fromkeys(_DAY_NAMES, {"start": "00:00", "end": "23:59"})
+ALL_DAYS_OPEN = dict.fromkeys(_DAY_NAMES, [{"start": "00:00", "end": "23:59"}])
 NO_BUDGET = dict.fromkeys(_DAY_NAMES, None)
 
 

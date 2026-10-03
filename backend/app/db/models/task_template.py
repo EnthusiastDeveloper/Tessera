@@ -60,7 +60,7 @@ class TaskTemplateORM(Base):
     estimated_duration_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
     reminder_offsets_minutes: Mapped[list[int]] = mapped_column(JSON, nullable=False, default=list)
 
-    # {day_name: {"start": "HH:MM", "end": "HH:MM"} | null} merged per-day over UserSettings.active_hours.
+    # {day_name: [{"start": "HH:MM", "end": "HH:MM"}, ...] | null} merged per-day over UserSettings.active_hours.
     # NULL (the column itself, not an empty dict) means "no override at all" - distinct from `{}`.
     active_hours_override: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
 

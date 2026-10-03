@@ -42,7 +42,7 @@ def test_example_g_daily_budget_yields_to_deadline() -> None:
     result = schedule_pending_flexible_tasks(
         candidates=[candidate],
         now=ny(2026, 3, 7, 0, 0),
-        active_hours={"saturday": window("09:00", "21:00")},
+        active_hours={"saturday": [window("09:00", "21:00")]},
         blackout_dates=[],
         daily_time_budget_minutes={"saturday": 180},
         budget_enforcement="soft",
@@ -57,10 +57,10 @@ def test_example_g_daily_budget_yields_to_deadline() -> None:
 def test_example_h_pass_two_picks_least_damaging_day_not_earliest() -> None:
     # Sunday 2026-03-01, Monday 03-02, Tuesday 03-03, Wednesday 03-04.
     active_hours = {
-        "sunday": window("19:00", "21:00"),
-        "monday": window("19:00", "21:00"),
-        "tuesday": window("19:00", "21:00"),
-        "wednesday": window("19:00", "21:00"),
+        "sunday": [window("19:00", "21:00")],
+        "monday": [window("19:00", "21:00")],
+        "tuesday": [window("19:00", "21:00")],
+        "wednesday": [window("19:00", "21:00")],
     }
     obstacles = [
         Obstacle(ny(2026, 3, 3, 19, 0), ny(2026, 3, 3, 21, 0)),  # Tuesday fully booked
@@ -94,8 +94,8 @@ def test_example_j_pass_two_slack_tie_break() -> None:
         candidates=[candidate],
         now=ny(2026, 3, 3, 0, 0),
         active_hours={
-            "tuesday": window("18:00", "21:00"),  # 180-minute window
-            "wednesday": window("15:00", "21:00"),  # 360-minute window
+            "tuesday": [window("18:00", "21:00")],  # 180-minute window
+            "wednesday": [window("15:00", "21:00")],  # 360-minute window
         },
         blackout_dates=[],
         daily_time_budget_minutes={"tuesday": 120, "wednesday": 60},
@@ -156,7 +156,7 @@ def test_strict_budget_enforcement_never_runs_pass_two() -> None:
     result = schedule_pending_flexible_tasks(
         candidates=[candidate],
         now=ny(2026, 3, 7, 0, 0),
-        active_hours={"saturday": window("18:00", "21:00")},
+        active_hours={"saturday": [window("18:00", "21:00")]},
         blackout_dates=[],
         daily_time_budget_minutes={"saturday": 10},
         budget_enforcement="strict",
@@ -202,7 +202,7 @@ def test_empty_candidate_list_returns_empty_result() -> None:
 def test_pass_two_three_way_tie_break_prefers_earliest_date() -> None:
     # Monday and Tuesday are configured identically, so overage and remaining
     # slack tie exactly - only the calendar date differs, and it must decide.
-    active_hours = {"monday": window("18:00", "19:00"), "tuesday": window("18:00", "19:00")}
+    active_hours = {"monday": [window("18:00", "19:00")], "tuesday": [window("18:00", "19:00")]}
     candidate = FlexibleTaskCandidate(id="tie", deadline=ny(2026, 3, 3, 21, 0), priority=2, estimated_duration_minutes=20)
 
     result = schedule_pending_flexible_tasks(
@@ -224,7 +224,7 @@ def test_earlier_deadline_is_processed_before_higher_priority() -> None:
     # candidates' only chance is that single Monday slot. If sort order were
     # priority-first instead of deadline-first, "later" (priority 4) would claim
     # it and "urgent" (deadline Monday, priority 1) would wrongly go unscheduled.
-    active_hours = {"monday": window("18:00", "18:30")}
+    active_hours = {"monday": [window("18:00", "18:30")]}
     urgent_low_priority = FlexibleTaskCandidate(
         id="urgent", deadline=ny(2026, 3, 2, 21, 0), priority=1, estimated_duration_minutes=30
     )
@@ -275,7 +275,7 @@ def test_pass_two_skips_a_blacked_out_day() -> None:
     result = schedule_pending_flexible_tasks(
         candidates=[candidate],
         now=ny(2026, 3, 2, 0, 0),
-        active_hours={"monday": window("18:00", "19:00"), "tuesday": window("18:00", "19:00")},
+        active_hours={"monday": [window("18:00", "19:00")], "tuesday": [window("18:00", "19:00")]},
         blackout_dates=[BlackoutDate(start=ny_date(2026, 3, 2), end=ny_date(2026, 3, 2))],
         daily_time_budget_minutes={"monday": 10, "tuesday": 10},
         budget_enforcement="soft",
@@ -287,7 +287,7 @@ def test_pass_two_skips_a_blacked_out_day() -> None:
 
 def test_intra_pass_placement_becomes_an_obstacle_for_the_next_candidate() -> None:
     """A task placed earlier in the same pass must block a same-deadline, lower-priority task from double-booking it."""
-    active_hours = {"monday": window("18:00", "18:30")}  # room for exactly one 30-minute task
+    active_hours = {"monday": [window("18:00", "18:30")]}  # room for exactly one 30-minute task
     first = FlexibleTaskCandidate(id="first", deadline=ny(2026, 3, 2, 21, 0), priority=4, estimated_duration_minutes=30)
     second = FlexibleTaskCandidate(id="second", deadline=ny(2026, 3, 2, 21, 0), priority=1, estimated_duration_minutes=30)
 
@@ -321,7 +321,7 @@ def test_pass_two_slack_tie_break_is_dst_correct() -> None:
     result = schedule_pending_flexible_tasks(
         candidates=[candidate],
         now=ny(2026, 3, 8, 0, 0),
-        active_hours={"sunday": window("01:00", "04:00"), "monday": window("01:00", "03:30")},
+        active_hours={"sunday": [window("01:00", "04:00")], "monday": [window("01:00", "03:30")]},
         blackout_dates=[],
         daily_time_budget_minutes={"sunday": 50, "monday": 50},
         budget_enforcement="soft",
@@ -346,7 +346,7 @@ def test_committed_minutes_are_dst_correct_across_a_spring_forward_obstacle() ->
     result = schedule_pending_flexible_tasks(
         candidates=[candidate],
         now=ny(2026, 3, 8, 0, 0),
-        active_hours={"sunday": window("01:00", "05:00")},
+        active_hours={"sunday": [window("01:00", "05:00")]},
         blackout_dates=[],
         daily_time_budget_minutes={"sunday": 130},
         budget_enforcement="soft",

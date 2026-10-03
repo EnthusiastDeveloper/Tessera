@@ -12,7 +12,7 @@ from tests.fixtures.scheduling import every_day, no_budget, ny, ny_date, window
 def test_example_b_merged_override_and_grid_alignment() -> None:
     """Fails if active_hours_override is a whole-map replacement instead of a per-day merge."""
     global_hours = every_day("18:00", "21:00")
-    override = {"tuesday": window("18:00", "22:30")}
+    override = {"tuesday": [window("18:00", "22:30")]}
     effective_hours = merge_active_hours(global_hours, override)
 
     obstacles = [
@@ -43,7 +43,7 @@ def test_example_c_placement_half_after_sync_eviction() -> None:
     forcing the placement onto Wednesday's plain (non-overridden) window instead.
     """
     global_hours = every_day("18:00", "21:00")
-    override = {"tuesday": window("18:00", "22:30")}
+    override = {"tuesday": [window("18:00", "22:30")]}
     effective_hours = merge_active_hours(global_hours, override)
 
     obstacles = [
@@ -189,7 +189,7 @@ def test_zero_remaining_budget_day_is_skipped() -> None:
         duration_minutes=15,
         not_before=ny(2026, 3, 2, 0, 0),
         not_after=ny(2026, 3, 2, 21, 0),
-        allowed_hours={"monday": window("18:00", "21:00")},
+        allowed_hours={"monday": [window("18:00", "21:00")]},
         excluded_dates=[],
         daily_time_budget_minutes=budget,
         obstacles=obstacles,
@@ -284,7 +284,7 @@ def test_overlapping_obstacles_are_not_double_counted_toward_budget() -> None:
         duration_minutes=30,
         not_before=ny(2026, 3, 2, 0, 0),
         not_after=ny(2026, 3, 2, 21, 0),
-        allowed_hours={"monday": window("18:00", "21:00")},
+        allowed_hours={"monday": [window("18:00", "21:00")]},
         excluded_dates=[],
         daily_time_budget_minutes={"monday": 150},
         obstacles=obstacles,

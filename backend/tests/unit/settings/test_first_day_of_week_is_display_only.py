@@ -37,7 +37,7 @@ def _make_settings(*, first_day_of_week: str) -> UserSettings:
 
 
 def _to_engine_active_hours(settings: UserSettings) -> ActiveHoursMap:
-    return {day: (window(w.start, w.end) if w is not None else None) for day, w in settings.active_hours.items()}
+    return {day: ([window(x.start, x.end) for x in w] if w is not None else None) for day, w in settings.active_hours.items()}
 
 
 def test_find_first_free_slot_is_identical_regardless_of_first_day_of_week() -> None:

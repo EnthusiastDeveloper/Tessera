@@ -74,14 +74,14 @@ class TestMergeActiveHours:
         # Example B: override names only Tuesday. Every other day must keep the
         # global window - a whole-map replacement would wipe them out instead.
         global_hours = every_day("18:00", "21:00")
-        override = {"tuesday": window("18:00", "22:30")}
+        override = {"tuesday": [window("18:00", "22:30")]}
 
         merged = merge_active_hours(global_hours, override)
 
-        assert merged["tuesday"] == window("18:00", "22:30")
-        assert merged["monday"] == window("18:00", "21:00")
-        assert merged["wednesday"] == window("18:00", "21:00")
-        assert merged["sunday"] == window("18:00", "21:00")
+        assert merged["tuesday"] == [window("18:00", "22:30")]
+        assert merged["monday"] == [window("18:00", "21:00")]
+        assert merged["wednesday"] == [window("18:00", "21:00")]
+        assert merged["sunday"] == [window("18:00", "21:00")]
 
     def test_override_can_exclude_a_day_with_explicit_null(self) -> None:
         global_hours = every_day("18:00", "21:00")
@@ -90,13 +90,13 @@ class TestMergeActiveHours:
         merged = merge_active_hours(global_hours, override)
 
         assert merged["monday"] is None
-        assert merged["tuesday"] == window("18:00", "21:00")
+        assert merged["tuesday"] == [window("18:00", "21:00")]
 
     def test_original_maps_are_not_mutated(self) -> None:
         global_hours = every_day("18:00", "21:00")
-        override = {"tuesday": window("18:00", "22:30")}
+        override = {"tuesday": [window("18:00", "22:30")]}
 
         merge_active_hours(global_hours, override)
 
-        assert global_hours["tuesday"] == window("18:00", "21:00")
-        assert override == {"tuesday": window("18:00", "22:30")}
+        assert global_hours["tuesday"] == [window("18:00", "21:00")]
+        assert override == {"tuesday": [window("18:00", "22:30")]}

@@ -24,7 +24,7 @@ class UserSettingsORM(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=generate_id)
     timezone: Mapped[str] = mapped_column(String, nullable=False)
 
-    # {day_name: {"start": "HH:MM", "end": "HH:MM"} | null}. Per-day null == excluded (§3.7).
+    # {day_name: [{"start": "HH:MM", "end": "HH:MM"}, ...] | null}. Per-day null == excluded (§3.7).
     active_hours: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
 
     # [{"start": "YYYY-MM-DD", "end": "YYYY-MM-DD", "label": str | null}, ...]

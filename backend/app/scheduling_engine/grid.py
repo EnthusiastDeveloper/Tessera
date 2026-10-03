@@ -40,8 +40,17 @@ def usable_minutes(window: ActiveHoursWindow, grid_minutes: int = DEFAULT_GRID_M
     starting on a grid point, so a window whose start isn't grid-aligned (e.g.
     18:07) is effectively shorter than its raw span for feasibility purposes.
     Built on `ceil_to_grid` rather than re-deriving the rounding rule, so the two
-    can't drift apart as that rule evolves.
+    can't drift apart as that rule evolves. An overnight window (`end` before `start`)
+    runs to the next morning.
     """
-    grid_start = ceil_to_grid(datetime.combine(_REFERENCE_DAY, window.start), grid_minutes)
-    window_end = datetime.combine(_REFERENCE_DAY, window.end)
-    return max(0, int((window_end - grid_start).total_seconds() // 60))
+    if window.end == window.start:
+        return 0
+    end_day = _REFERENCE_DAY if window.end > window.start else _REFERENCE_DAY + timedelta(days=1)
+    return usable_minutes_between(
+        datetime.combine(_REFERENCE_DAY, window.start), datetime.combine(end_day, window.end), grid_minutes
+    )
+
+
+def usable_minutes_between(start: datetime, end: datetime, grid_minutes: int = DEFAULT_GRID_MINUTES) -> int:
+    """Minutes of the stretch [start, end) a task could occupy, from the first grid point at/after `start`."""
+    return max(0, int((end - ceil_to_grid(start, grid_minutes)).total_seconds() // 60))

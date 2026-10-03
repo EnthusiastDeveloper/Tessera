@@ -13,10 +13,10 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime, tzinfo
+from datetime import date, datetime, time, tzinfo
 
-from app.scheduling_engine.calendar_rules import day_name, merge_active_hours
-from app.scheduling_engine.placement import committed_minutes_for_day, eligible_window_for_day
+from app.scheduling_engine.calendar_rules import day_name, day_range, eligible_intervals, merge_active_hours
+from app.scheduling_engine.placement import committed_minutes_for_day
 from app.scheduling_engine.types import ActiveHoursMap, BlackoutDate, BudgetEnforcement, Obstacle
 
 
@@ -43,9 +43,9 @@ def placements_that_no_longer_fit(
 ) -> tuple[str, ...]:
     """The ids in `placed` that §6.10 says must be placed again, in the order to handle them.
 
-    A placement no longer fits if its slot isn't entirely inside its day's effective
-    active-hours window (the task's override merged over `active_hours`), or the day is
-    excluded or blacked out. With `budget_enforcement == "strict"`, a day whose committed
+    A placement no longer fits if its slot isn't entirely inside the eligible time - the
+    windows of the task's override merged over `active_hours`, less any blacked-out date.
+    With `budget_enforcement == "strict"`, a day whose committed
     minutes - `other_obstacles` (fixed tasks, started work, external events) plus the
     placements still on it, counted as §6.2 counts them - exceed its budget sheds
     placements in the reverse of §6.2's placement order (latest deadline first, then
@@ -63,9 +63,15 @@ def placements_that_no_longer_fit(
     if budget_enforcement != "strict":
         return tuple(outside)
 
+    # A task counts on every calendar date it touches (§6.2 budget accounting): one that
+    # runs past midnight is on two. Dates are handled in order and a task shed from one
+    # date is gone from the next.
+    kept_ids = {task.id for task in remaining}
     by_day: dict[date, list[PlacedFlexibleTask]] = defaultdict(list)
     for task in remaining:
-        by_day[task.start.date()].append(task)
+        for day in day_range(task.start.date(), task.end.date()):
+            if task.end > datetime.combine(day, time.min, tzinfo=task.start.tzinfo):
+                by_day[day].append(task)
 
     over_budget: list[str] = []
     for day in sorted(by_day):
@@ -73,22 +79,22 @@ def placements_that_no_longer_fit(
         if budget is None:
             continue
         # Kept in placement order, so shedding from the end sheds what §6.2 would place last.
-        kept = sorted(by_day[day], key=lambda task: (task.deadline, -task.priority))
+        kept = sorted((task for task in by_day[day] if task.id in kept_ids), key=lambda task: (task.deadline, -task.priority))
+        if not kept:
+            continue
         tz = kept[0].start.tzinfo
         while kept and _committed(day, other_obstacles, kept, tz) > budget:
-            over_budget.append(kept.pop().id)
+            shed = kept.pop()
+            kept_ids.discard(shed.id)
+            over_budget.append(shed.id)
     return (*outside, *over_budget)
 
 
 def _fits_its_window(task: PlacedFlexibleTask, *, active_hours: ActiveHoursMap, blackout_dates: Sequence[BlackoutDate]) -> bool:
-    day = task.start.date()
-    window = eligible_window_for_day(day, merge_active_hours(active_hours, task.active_hours_override), blackout_dates)
-    if window is None:
-        return False
-    tz = task.start.tzinfo
-    return datetime.combine(day, window.start, tzinfo=tz) <= task.start and task.end <= datetime.combine(
-        day, window.end, tzinfo=tz
-    )
+    """Whether the whole slot sits inside one stretch of eligible time (§6.10)."""
+    hours = merge_active_hours(active_hours, task.active_hours_override)
+    stretches = eligible_intervals(task.start.date(), task.end.date(), hours, blackout_dates, task.start.tzinfo)
+    return any(start <= task.start and task.end <= end for start, end in stretches)
 
 
 def _committed(day: date, other_obstacles: Sequence[Obstacle], kept: Sequence[PlacedFlexibleTask], tz: tzinfo | None) -> int:

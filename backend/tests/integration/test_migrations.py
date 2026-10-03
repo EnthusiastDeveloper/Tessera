@@ -162,3 +162,63 @@ def test_dropping_custom_recurrence_rewrites_existing_rows_to_daily(tmp_path: Pa
             pass
         else:  # pragma: no cover - the assertion is the point
             raise AssertionError("`custom` is still accepted by the recurrence_pattern CHECK constraint")
+
+
+def test_active_hours_become_window_lists_and_empty_windows_exclude_the_day(tmp_path: Path) -> None:
+    """a2b7e5c19d36 (design doc §3.7, Rev 13): each day's single window becomes a one-item
+    list. A window with no length placed nothing before, so it becomes an excluded day
+    instead of turning into an overnight window; the downgrade keeps one window per day."""
+    import json
+
+    db_path = tmp_path / "windows.db"
+    _run_alembic("upgrade", "f4a1c7d93b52", database_path=db_path)
+
+    ts = "2026-03-01 12:00:00.000000"
+    old_settings = {
+        "monday": {"start": "09:00", "end": "17:00"},
+        "tuesday": None,
+        "wednesday": {"start": "18:00", "end": "18:00"},
+    }
+    old_override = {"friday": {"start": "22:00", "end": "02:00"}, "saturday": {"start": "08:00", "end": "12:00"}}
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "INSERT INTO user_settings (id, timezone, active_hours, blackout_dates, daily_time_budget_minutes,"
+            " budget_enforcement, first_day_of_week) VALUES ('s', 'UTC', ?, '[]', '{}', 'soft', 'monday')",
+            (json.dumps(old_settings),),
+        )
+        conn.execute(
+            "INSERT INTO task_templates (id, name, type, recurrence_pattern, recurrence_anchor, priority,"
+            " estimated_duration_minutes, deadline_offset_minutes, reminder_offsets_minutes, archived,"
+            " active_hours_override, created_at, updated_at, version)"
+            " VALUES ('t', 'x', 'flexible', 'daily', 'calendar', 2, 30, 1440, '[]', 0, ?, ?, ?, 1)",
+            (json.dumps(old_override), ts, ts),
+        )
+
+    _run_alembic("upgrade", "head", database_path=db_path)
+    with sqlite3.connect(db_path) as conn:
+        settings = json.loads(conn.execute("SELECT active_hours FROM user_settings").fetchone()[0])
+        override = json.loads(conn.execute("SELECT active_hours_override FROM task_templates").fetchone()[0])
+    assert settings == {"monday": [{"start": "09:00", "end": "17:00"}], "tuesday": None, "wednesday": None}
+    # An overnight window is a new capability; the old schema never had one, so nothing to convert.
+    assert override == {"friday": None, "saturday": [{"start": "08:00", "end": "12:00"}]}
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE user_settings SET active_hours = ?",
+            (
+                json.dumps(
+                    {
+                        "monday": [
+                            {"start": "22:00", "end": "02:00"},
+                            {"start": "09:00", "end": "12:00"},
+                            {"start": "13:00", "end": "15:00"},
+                        ]
+                    }
+                ),
+            ),
+        )
+    _run_alembic("downgrade", "f4a1c7d93b52", database_path=db_path)
+    with sqlite3.connect(db_path) as conn:
+        assert json.loads(conn.execute("SELECT active_hours FROM user_settings").fetchone()[0]) == {
+            "monday": {"start": "09:00", "end": "12:00"}
+        }

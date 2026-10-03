@@ -10,9 +10,9 @@ from sqlalchemy.orm import Session
 
 from app.api.dependencies import DB_SESSION, get_request_job_scheduler
 from app.api.errors import AppError
-from app.api.v1.validation import DailyBudgetMinutes
+from app.api.v1.validation import DailyBudgetMinutes, DayWindows
 from app.db.repositories import ScheduleRepairRepository
-from app.db.schemas import ActiveHoursWindow, BlackoutDate, DayName, UserSettings
+from app.db.schemas import BlackoutDate, DayName, UserSettings
 from app.jobs.interface import JobScheduler
 from app.settings import service
 
@@ -29,7 +29,7 @@ class SettingsPatchRequest(BaseModel):
     """
 
     timezone: str | None = None
-    active_hours: dict[DayName, ActiveHoursWindow | None] | None = None
+    active_hours: dict[DayName, DayWindows | None] | None = None
     blackout_dates: list[BlackoutDate] | None = None
     daily_time_budget_minutes: dict[DayName, DailyBudgetMinutes | None] | None = None
     budget_enforcement: Literal["strict", "soft"] | None = None

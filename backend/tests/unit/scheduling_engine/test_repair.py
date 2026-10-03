@@ -56,9 +56,9 @@ def test_an_excluded_day_or_blackout_date_no_longer_fits() -> None:
 
 
 def test_the_tasks_own_override_is_merged_over_the_global_hours() -> None:
-    evening = _task("evening", ny(2026, 3, 2, 19, 0), active_hours_override={"monday": window("18:00", "21:00")})
+    evening = _task("evening", ny(2026, 3, 2, 19, 0), active_hours_override={"monday": [window("18:00", "21:00")]})
     assert _check([evening]) == ()
-    narrowed = _task("evening", ny(2026, 3, 2, 19, 0), active_hours_override={"monday": window("18:00", "19:30")})
+    narrowed = _task("evening", ny(2026, 3, 2, 19, 0), active_hours_override={"monday": [window("18:00", "19:30")]})
     assert _check([narrowed]) == ("evening",)
 
 

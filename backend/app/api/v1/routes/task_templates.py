@@ -15,6 +15,7 @@ from app.api.v1.validation import (
     ClockTime,
     DayOfMonth,
     DayOfWeek,
+    DayWindows,
     DeadlineOffsetMinutes,
     Description,
     DurationMinutes,
@@ -26,7 +27,6 @@ from app.api.v1.validation import (
 from app.db.base import utcnow
 from app.db.schemas import (
     INT_TO_PRIORITY,
-    ActiveHoursWindow,
     DayName,
     Priority,
     Recurrence,
@@ -63,7 +63,7 @@ class CreateTemplateRequest(BaseModel):
     fixed_time_of_day: ClockTime | None = None
     deadline_offset_minutes: DeadlineOffsetMinutes | None = None
     reminder_offsets_minutes: ReminderOffsets = ()
-    active_hours_override: dict[DayName, ActiveHoursWindow | None] | None = None
+    active_hours_override: dict[DayName, DayWindows | None] | None = None
     dependencies: tuple[str, ...] = ()
 
 
@@ -85,7 +85,7 @@ class PatchTemplateRequest(BaseModel):
     priority: Priority | None = None
     estimated_duration_minutes: DurationMinutes | None = None
     reminder_offsets_minutes: ReminderOffsets | None = None
-    active_hours_override: dict[DayName, ActiveHoursWindow | None] | None = None
+    active_hours_override: dict[DayName, DayWindows | None] | None = None
     recurrence: RecurrenceIn | None = None
 
 

@@ -158,3 +158,73 @@ class TestSettings:
             json={"blackout_dates": [{"start": "2030-05-01", "end": "2030-05-01", "label": "x" * 101}]},
         )
         assert too_long.status_code == 422, too_long.text
+
+
+class TestActiveHoursWindowLists:
+    """Design doc §3.7 (Rev 13): a day holds a list of windows; an overnight window ends the next morning."""
+
+    DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+
+    def _hours(self, **days: Any) -> dict[str, Any]:
+        base: dict[str, Any] = {day: [{"start": "09:00", "end": "17:00"}] for day in self.DAYS}
+        base.update(days)
+        return base
+
+    def test_split_and_overnight_windows_are_accepted_and_returned_as_lists(self, app_client: TestClient) -> None:
+        _login(app_client)
+        hours = self._hours(
+            monday=[{"start": "08:00", "end": "12:00"}, {"start": "18:00", "end": "22:00"}],
+            friday=[{"start": "22:00", "end": "02:00"}],
+        )
+        response = app_client.patch("/api/v1/settings", json={"active_hours": hours})
+        assert response.status_code == 200, response.text
+        assert response.json()["active_hours"]["monday"] == hours["monday"]
+        assert response.json()["active_hours"]["friday"] == [{"start": "22:00", "end": "02:00"}]
+
+    @pytest.mark.parametrize(
+        ("windows", "code"),
+        [
+            ([], "validation_error"),
+            ([{"start": "09:00", "end": "10:00"}] * 9, "validation_error"),
+            ({"start": "09:00", "end": "17:00"}, "validation_error"),  # the pre-Rev 13 single-window shape
+            ([{"start": "09:00", "end": "09:00"}], "invalid_field"),
+            ([{"start": "08:00", "end": "12:00"}, {"start": "11:00", "end": "14:00"}], "invalid_field"),
+        ],
+    )
+    def test_malformed_day_lists_are_rejected(self, app_client: TestClient, windows: Any, code: str) -> None:
+        _login(app_client)
+        response = app_client.patch("/api/v1/settings", json={"active_hours": self._hours(monday=windows)})
+        assert response.status_code == 422, response.text
+        assert response.json()["code"] == code
+
+    def test_a_template_override_follows_the_same_rules(self, app_client: TestClient) -> None:
+        _login(app_client)
+        ok = app_client.post(
+            "/api/v1/task-templates",
+            json=_template(
+                active_hours_override={"monday": [{"start": "08:00", "end": "10:00"}, {"start": "18:00", "end": "20:00"}]}
+            ),
+        )
+        assert ok.status_code == 201, ok.text
+        overlapping = app_client.post(
+            "/api/v1/task-templates",
+            json=_template(
+                active_hours_override={"monday": [{"start": "08:00", "end": "12:00"}, {"start": "10:00", "end": "14:00"}]}
+            ),
+        )
+        assert overlapping.status_code == 422, overlapping.text
+        assert overlapping.json()["code"] == "invalid_field"
+        empty = app_client.post("/api/v1/task-templates", json=_template(active_hours_override={"monday": []}))
+        assert empty.status_code == 422
+        assert empty.json()["code"] == "validation_error"
+
+    def test_feasibility_measures_the_longest_stretch(self, app_client: TestClient) -> None:
+        """An overnight window is one stretch (4 h); split windows are measured one by one."""
+        _login(app_client)
+        only_overnight = {day: None for day in self.DAYS} | {"monday": [{"start": "22:00", "end": "02:00"}]}
+        assert app_client.patch("/api/v1/settings", json={"active_hours": only_overnight}).status_code == 200
+        fits = app_client.post("/api/v1/task-templates", json=_template(estimated_duration_minutes=240))
+        assert fits.status_code == 201, fits.text
+        too_long = app_client.post("/api/v1/task-templates", json=_template(estimated_duration_minutes=241))
+        assert too_long.status_code == 422
+        assert too_long.json()["code"] == "infeasible_duration"
