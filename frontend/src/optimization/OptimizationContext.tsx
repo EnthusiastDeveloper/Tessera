@@ -33,6 +33,8 @@ export type Notice =
 
 interface OptimizationContextValue {
   latest: ScheduleOptimization | null;
+  /** The latest state has been read at least once - until then `locked` may be a false "no". */
+  loaded: boolean;
   /** An optimization is running: the schedule is read-only (design doc §6.11). */
   locked: boolean;
   /** It has run longer than the server's "taking longer than expected" threshold. */
@@ -56,6 +58,7 @@ const noop = async (): Promise<void> => undefined;
 /** Without a provider (a page rendered on its own, in a test) nothing is ever locked. */
 const DEFAULT_VALUE: OptimizationContextValue = {
   latest: null,
+  loaded: true,
   locked: false,
   slow: false,
   scheduleRevision: 0,
@@ -82,6 +85,7 @@ export function useOptimization(): OptimizationContextValue {
  * approval comes back. */
 export function OptimizationProvider({ children }: { children: ReactNode }): JSX.Element {
   const [latest, setLatest] = useState<ScheduleOptimization | null>(null);
+  const [loaded, setLoaded] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [scheduleRevision, setScheduleRevision] = useState(0);
   const [slow, setSlow] = useState(false);
@@ -137,6 +141,8 @@ export function OptimizationProvider({ children }: { children: ReactNode }): JSX
         if (first?.status === 'running') void watch(first.id);
       } catch {
         // No optimization state to show; the rest of the app works without it.
+      } finally {
+        if (!cancelled) setLoaded(true);
       }
     })();
     return () => {
@@ -215,6 +221,7 @@ export function OptimizationProvider({ children }: { children: ReactNode }): JSX
   const value = useMemo<OptimizationContextValue>(
     () => ({
       latest,
+      loaded,
       locked: latest?.status === 'running',
       slow,
       scheduleRevision,
@@ -232,6 +239,7 @@ export function OptimizationProvider({ children }: { children: ReactNode }): JSX
     }),
     [
       latest,
+      loaded,
       slow,
       scheduleRevision,
       notice,

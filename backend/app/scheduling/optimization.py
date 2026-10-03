@@ -235,11 +235,12 @@ def mark_failed(db: Session, optimization_id: str, *, reason: str, now: datetime
         repo.update(row.model_copy(update={"status": "failed", "finished_at": now or utcnow(), "reason": reason}))
 
 
-def build_plan(db: Session, settings: UserSettings, *, now: datetime) -> OptimizationPlan:
+def build_plan(db: Session, settings: UserSettings, *, now: datetime, take_write_lock: bool = True) -> OptimizationPlan:
     """§6.11: every `scheduled` and `pending` flexible instance is a candidate, with its own slot
     taken out of the obstacle set; fixed instances (a blocked one holds its slot), `in_progress`
-    work and external events stay where they are. Takes the write lock (via `gather_obstacles`),
-    so what was read is what is applied."""
+    work and external events stay where they are. By default takes the write lock (via
+    `gather_obstacles`), so what was read is what is applied; `take_write_lock=False` is for
+    `opportunity`, which only reads."""
     tz = ZoneInfo(settings.timezone)
     instances = TaskInstanceRepository(db)
     templates = TaskTemplateRepository(db)
@@ -247,7 +248,7 @@ def build_plan(db: Session, settings: UserSettings, *, now: datetime) -> Optimiz
     current: dict[str, CurrentSlot] = {}
     obstacles = tuple(
         Obstacle(start=o.start.astimezone(tz), end=o.end.astimezone(tz))
-        for o in gather_obstacles(db, include_scheduled_flexible=False)
+        for o in gather_obstacles(db, include_scheduled_flexible=False, take_write_lock=take_write_lock)
     )
     for instance in instances.list_by_statuses(("scheduled", "pending")):
         if instance.type != "flexible" or instance.deadline is None or is_deadline_elapsed(instance.deadline, now):
@@ -369,6 +370,44 @@ def _version(instances: TaskInstanceRepository, task_id: str) -> int:
     instance = instances.get(task_id)
     assert instance is not None
     return instance.version
+
+
+# --- Is it worth it? ---
+
+
+@dataclass(frozen=True)
+class Opportunity:
+    """What pressing "Optimize Schedule" would achieve right now (design doc §6.11, "the button
+    says whether it is worth pressing"). `gain` is the net number of *more* tasks that would be
+    scheduled than are today (never negative); that is the value. Moves alone are churn, and a
+    swap - one task gains a slot while another loses its own - places no more tasks than today,
+    so neither is advertised."""
+
+    gain: int
+    newly_scheduled: int
+    lost: int
+    over_budget: int
+    moved: int
+    needs_approval: bool
+    worthwhile: bool
+
+
+def opportunity(db: Session, *, now: datetime | None = None) -> Opportunity:
+    """Runs the plan - the very computation a real run starts with, so the two cannot disagree
+    about the rules - **without taking the write lock and without writing anything**."""
+    now = now or utcnow()
+    plan = build_plan(db, require_settings(db), now=now, take_write_lock=False)
+    result, _ = plan.classify()
+    gain = max(0, plan.placed_after - plan.placed_before)
+    return Opportunity(
+        gain=gain,
+        newly_scheduled=len(plan.newly_scheduled),
+        lost=len(plan.lost),
+        over_budget=len(plan.over_budget_ids),
+        moved=len(plan.moved),
+        needs_approval=result == "needs_approval",
+        worthwhile=gain > 0 and result in ("applied", "needs_approval"),
+    )
 
 
 # --- Undo ------------------------------------------------------------------------------------
@@ -551,6 +590,7 @@ __all__ = [
     "PLAN_VALID_FOR",
     "UNDO_WINDOW",
     "Limits",
+    "Opportunity",
     "OptimizationError",
     "approve",
     "build_plan",
@@ -561,6 +601,7 @@ __all__ = [
     "latest",
     "limits",
     "mark_failed",
+    "opportunity",
     "plan_to_json",
     "request_optimization",
     "run",

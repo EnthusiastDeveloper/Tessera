@@ -283,3 +283,51 @@ input[type='password'] {
   width: 100%;
 }
 
+
+/* "Optimize Schedule" when pressing it would get more tasks scheduled (design doc §6.11, §8.1):
+   a rainbow that travels round the button's border, the one deliberately attention-seeking element
+   in the app. Reduced-motion users get the same border, still. */
+@property --optimize-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+
+button.optimize-button--attention {
+  border: 2px solid transparent;
+  background:
+    linear-gradient(var(--color-surface), var(--color-surface)) padding-box,
+    conic-gradient(
+        from var(--optimize-angle),
+        #ff4d4d,
+        #ffb84d,
+        #ffe14d,
+        #4dff88,
+        #4dc3ff,
+        #8a4dff,
+        #ff4dd2,
+        #ff4d4d
+      )
+      border-box;
+  animation: optimize-spin 3s linear infinite;
+}
+
+@keyframes optimize-spin {
+  to {
+    --optimize-angle: 360deg;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button.optimize-button--attention {
+    animation: none;
+  }
+}
+
+.optimize-hint {
+  font-size: var(--font-size-sm);
+}
+
+.optimize-hint--muted {
+  color: var(--color-text-muted);
+}
