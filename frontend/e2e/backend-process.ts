@@ -58,6 +58,12 @@ export async function startBackend(): Promise<{ setupToken: string }> {
     DATABASE_PATH: join(dbDir, 'tessera.db'),
     SECRET_KEY: 'e2e-test-secret-key-not-for-production-use',
     SESSION_COOKIE_SECURE: 'false',
+    // Tessera's timezone follows the machine running the suite - the same one the browser
+    // reports - not the backend's own UTC default. A create form's "today" and a task's
+    // wall-clock time are read in the browser's zone but resolved in Tessera's, so with the
+    // two apart (e.g. a laptop at 02:00 local, which is the previous UTC day) a task could
+    // land in a different calendar week than the Timeline being asserted on.
+    TZ: process.env.TZ ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
     // APP_BASE_URL (backend's own origin, matching the single-container same-origin
     // deployment topology - see CLAUDE.md's "FastAPI serves them directly") + fake
     // Google OAuth client credentials, both needed only so settings.spec.ts's real
