@@ -5,11 +5,11 @@ Mon 2026-03-02 .. Sun 2026-03-08, New York. A day holds a list of windows; a win
 by the calendar date the time falls on.
 """
 
-from datetime import timedelta
+from datetime import UTC, timedelta
 
 from app.scheduling_engine.calendar_rules import eligible_intervals, validate_day_windows
 from app.scheduling_engine.feasibility import validate_feasible_duration
-from app.scheduling_engine.grid import usable_minutes
+from app.scheduling_engine.grid import add_elapsed, usable_minutes
 from app.scheduling_engine.placement import find_first_free_slot, schedule_pending_flexible_tasks
 from app.scheduling_engine.repair import PlacedFlexibleTask, placements_that_no_longer_fit
 from app.scheduling_engine.types import BlackoutDate, FlexibleTaskCandidate, Obstacle
@@ -232,3 +232,55 @@ class TestRepair:
             self._placed(ny(2026, 3, 2, 23, 30)), hours, daily_time_budget_minutes=budget, budget_enforcement="strict"
         )
         assert result == ("t",)
+
+
+class TestAcrossDaylightSaving:
+    """An overnight window is wall-clock at both ends (§14.1), so across a clock change its
+    real length differs from `end - start`: 2026-03-08 (spring forward, 02:00 -> 03:00) is a
+    23-hour day and 2026-11-01 (fall back, 02:00 -> 01:00) a 25-hour one."""
+
+    def _minutes(self, start, end) -> int:  # type: ignore[no-untyped-def]
+        return int((end.astimezone(UTC) - start.astimezone(UTC)).total_seconds() // 60)
+
+    def test_the_spring_forward_night_is_an_hour_shorter_than_its_clock_span(self) -> None:
+        hours = {"saturday": [window("22:00", "06:00")]}  # Sat 2026-03-07 22:00 -> Sun 03-08 06:00
+        (stretch,) = eligible_intervals(ny_date(2026, 3, 7), ny_date(2026, 3, 8), hours, [], NY)
+        assert stretch == (ny(2026, 3, 7, 22), ny(2026, 3, 8, 6))
+        assert self._minutes(*stretch) == 7 * 60  # 8 on the clock, 7 elapsed
+
+        kwargs = {"start": ny(2026, 3, 7, 12), "end": ny(2026, 3, 8, 12)}
+        assert _slot(420, hours, **kwargs) == ny(2026, 3, 7, 22)
+        assert _slot(421, hours, **kwargs) is None
+
+    def test_the_fall_back_night_is_an_hour_longer(self) -> None:
+        hours = {"saturday": [window("22:00", "06:00")]}  # Sat 2026-10-31 22:00 -> Sun 11-01 06:00
+        (stretch,) = eligible_intervals(ny_date(2026, 10, 31), ny_date(2026, 11, 1), hours, [], NY)
+        assert self._minutes(*stretch) == 9 * 60  # 8 on the clock, 9 elapsed
+
+        kwargs = {"start": ny(2026, 10, 31, 12), "end": ny(2026, 11, 1, 12)}
+        assert _slot(540, hours, **kwargs) == ny(2026, 10, 31, 22)
+        assert _slot(541, hours, **kwargs) is None
+
+    def test_a_task_after_an_obstacle_lands_on_a_real_grid_point_across_the_missing_hour(self) -> None:
+        hours = {"saturday": [window("22:00", "06:00")]}
+        busy = [Obstacle(start=ny(2026, 3, 7, 22), end=ny(2026, 3, 8, 1, 30))]
+        slot = _slot(60, hours, start=ny(2026, 3, 7, 12), end=ny(2026, 3, 8, 12), obstacles=busy)
+        assert slot == ny(2026, 3, 8, 1, 30)
+        # 01:30 EST + 60 real minutes is 03:30 EDT: 02:30 never happens that night.
+        assert add_elapsed(slot, timedelta(minutes=60)) == ny(2026, 3, 8, 3, 30)
+
+    def test_repair_keeps_a_task_inside_an_overnight_window_across_the_change(self) -> None:
+        hours = {"saturday": [window("22:00", "06:00")]}
+        start = ny(2026, 3, 8, 3, 30)  # after the skipped hour
+        placed = PlacedFlexibleTask(id="t", start=start, end=start + timedelta(minutes=120), deadline=ny(2026, 3, 9), priority=2)
+        assert (
+            placements_that_no_longer_fit(
+                [placed],
+                active_hours=hours,
+                blackout_dates=[],
+                daily_time_budget_minutes=no_budget(),
+                budget_enforcement="soft",
+                other_obstacles=[],
+            )
+            == ()
+        )

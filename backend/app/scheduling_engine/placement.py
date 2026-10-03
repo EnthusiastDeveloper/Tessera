@@ -22,7 +22,7 @@ from datetime import date, datetime, time, timedelta, timezone, tzinfo
 
 from app.scheduling_engine.calendar_rules import Interval, day_name, day_range, eligible_intervals, merge_active_hours
 from app.scheduling_engine.fixed_conflicts import intervals_overlap
-from app.scheduling_engine.grid import DEFAULT_GRID_MINUTES, ceil_to_grid
+from app.scheduling_engine.grid import DEFAULT_GRID_MINUTES, add_elapsed, ceil_to_grid
 from app.scheduling_engine.types import (
     ActiveHoursMap,
     BlackoutDate,
@@ -136,7 +136,9 @@ def schedule_pending_flexible_tasks(
 
         if slot is not None:
             placements.append(Placement(task_id=task.id, scheduled_start=slot, budget_overridden=budget_overridden))
-            working_obstacles.append(Obstacle(start=slot, end=slot + timedelta(minutes=task.estimated_duration_minutes)))
+            working_obstacles.append(
+                Obstacle(start=slot, end=add_elapsed(slot, timedelta(minutes=task.estimated_duration_minutes)))
+            )
         else:
             unschedulable.append(task.id)
 
@@ -254,7 +256,7 @@ def _candidates(
                     break
                 if limit <= next_day_start:
                     break
-                search_from = slot + timedelta(minutes=grid_minutes)
+                search_from = add_elapsed(slot, timedelta(minutes=grid_minutes))
 
 
 def _first_slot(
@@ -270,23 +272,23 @@ def _first_slot(
     """The earliest grid-aligned start in [search_from, start_before) that fits `duration` clear of obstacles.
 
     The chosen start `t` satisfies `t >= gap_start`, `t + duration <= gap_end` and
-    `t + duration <= limit` (the stretch's end or the deadline, whichever is first) -
+    `t + duration <= limit` (real elapsed time, `add_elapsed`) (the stretch's end or the deadline, whichever is first) -
     exactly §6.2's placement-grid rule. `obstacles` must already be sorted by `start`.
     """
     cursor = ceil_to_grid(search_from, grid_minutes)
-    if cursor >= start_before or cursor + duration > limit:
+    if cursor >= start_before or add_elapsed(cursor, duration) > limit:
         return None
 
     relevant = [obstacle for obstacle in obstacles if intervals_overlap(search_from, stretch_end, obstacle.start, obstacle.end)]
     for obstacle in relevant:
-        if cursor + duration <= obstacle.start:
+        if add_elapsed(cursor, duration) <= obstacle.start:
             break
         if obstacle.end > cursor:
             cursor = ceil_to_grid(obstacle.end, grid_minutes)
-        if cursor >= start_before or cursor + duration > limit:
+        if cursor >= start_before or add_elapsed(cursor, duration) > limit:
             return None
 
-    return cursor if cursor < start_before and cursor + duration <= limit else None
+    return cursor if cursor < start_before and add_elapsed(cursor, duration) <= limit else None
 
 
 def _budget_overage(slot: datetime, duration: timedelta, budget: Mapping[str, int | None], obstacles: Sequence[Obstacle]) -> int:
@@ -296,7 +298,7 @@ def _budget_overage(slot: datetime, duration: timedelta, budget: Mapping[str, in
     on each date for the minutes it spends there. A date with no cap contributes nothing.
     """
     tz = slot.tzinfo
-    end = slot + duration
+    end = add_elapsed(slot, duration)
     overage = 0
     for day in day_range(slot.date(), end.date()):
         day_start = datetime.combine(day, time.min, tzinfo=tz)

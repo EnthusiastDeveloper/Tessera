@@ -7,6 +7,7 @@ Active hours take a **list of windows per day**, and a window may run **overnigh
 - A day can be split (`08:00`-`10:00` and `18:00`-`22:00`) and a window whose end is before its start ends the next morning (`22:00`-`02:00`). Tasks may straddle midnight inside one. A blackout date cuts at midnight and the daily budget counts the calendar date.
 - **API change:** `active_hours` (`PATCH /settings`) and a template's `active_hours_override` are `{day: [{start, end}, ...] | null}` instead of `{day: {start, end} | null}`. An empty list or the old single-object shape is `422 validation_error`; a zero-length or overlapping window is `422 invalid_field`. A migration wraps stored windows in lists; a window that never had any length becomes an excluded day, which behaves as it did.
 - The Settings scheduling window and a task's override both edit a list of windows per day.
+- Fix: placement now measures a task's length in real elapsed time. Around a daylight-saving change the old wall-clock arithmetic mis-sized a window by an hour (a task could overrun the short spring-forward night, or be refused on the long fall-back one); it mattered little for daytime windows and a lot for overnight ones.
 
 ### Earlier in this release train
 
