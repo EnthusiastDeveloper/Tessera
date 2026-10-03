@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Docs: **design for schedule re-optimisation** (design doc Revision 14, section 6.11; architecture plan Revision 9) - one user-triggered action that re-places every flexible task in a global pass, applied at once when it takes nothing away, held for the user's approval when it would take a scheduled task out of the schedule, always with a summary of the changes and a 10-minute Undo. Design only: nothing is built yet.
+
 - Docs: the last editorial findings of IRR-2 (L1-L10) are closed. The status-lifecycle diagram (design doc 4) now shows every transition into and out of `blocked` and `missed`, and its stale rule that a blocked instance never has a `scheduled_time` is corrected for fixed ones; the holiday-calendar subsection no longer shares the number 12.15 with its backlog row.
 - CI: the container smoke test runs on a named volume and checks the admin account survives recreating the container.
 - `docker-compose.yml` drops the obsolete `version` key.
