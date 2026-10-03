@@ -446,10 +446,10 @@ Items deferred by a stage above and picked up after `v0.1.0-poc`, oldest deferra
 
 **Depends on:** Stage 8 - building UI against a moving API wastes rework.
 **Design doc refs:** §8 (full UI scope), §9.2 (virtual/ghost projections)
-**Architecture doc refs:** §1 (React/Vite/FullCalendar); **frontend-design skill is a hard prerequisite before any sub-stage below**
+**Architecture doc refs:** §1 (React/Vite/FullCalendar); the design system the sub-stages were built against is recorded in `frontend/DESIGN.md` (an earlier draft named a `frontend-design` skill as a hard prerequisite; it was never part of this repository's environment)
 **Branch:** `stage-09a` … `stage-09f`, each individually gated
 
-**Decision to make explicitly (not specified by either source doc):** where virtual/ghost projections (§9.2) are computed - client-side from the template's recurrence pattern, or served by a small read-only backend endpoint. Either is valid; pick one in 9d and document why, don't leave it implicit.
+**Decision (made in 9d, see below):** virtual/ghost projections (§9.2) are computed server-side, by `GET /api/v1/task-templates/projections`, not in the client.
 
 **9a - App shell, routing, API client, Login** (§8.1 screen 1) - **Done**
 Tests: login form component states (success/failure), mocked-API integration, one real Playwright test against the live Stage 8 backend.

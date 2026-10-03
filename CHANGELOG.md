@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Docs: the last editorial findings of IRR-2 (L1-L10) are closed. The status-lifecycle diagram (design doc 4) now shows every transition into and out of `blocked` and `missed`, and its stale rule that a blocked instance never has a `scheduled_time` is corrected for fixed ones; the holiday-calendar subsection no longer shares the number 12.15 with its backlog row.
+- CI: the container smoke test runs on a named volume and checks the admin account survives recreating the container.
+- `docker-compose.yml` drops the obsolete `version` key.
+
 ## 0.3.0
 
 Design doc Revisions 12 and 13: the IRR-2 Medium findings, and a list of active-hours windows per day with overnight windows. **Two API changes and a database reset - read both notes.**
