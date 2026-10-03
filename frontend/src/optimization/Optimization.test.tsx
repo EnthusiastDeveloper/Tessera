@@ -8,7 +8,11 @@ import { OptimizationProvider } from './OptimizationContext';
 import { OptimizeControls } from './OptimizeControls';
 import { OptimizingBanner } from './OptimizingBanner';
 import { AppShell } from '../views/shell/AppShell';
-import type { OptimizationSummary, ScheduleOptimization } from '../types/optimization';
+import type {
+  OptimizationOpportunity,
+  OptimizationSummary,
+  ScheduleOptimization,
+} from '../types/optimization';
 
 vi.mock('../api/scheduleOptimizations');
 vi.mock('../auth/AuthContext', () => ({
@@ -87,6 +91,23 @@ function optimization(overrides: Partial<ScheduleOptimization>): ScheduleOptimiz
   };
 }
 
+const WORTHWHILE: OptimizationOpportunity = {
+  gain: 1,
+  newly_scheduled: 1,
+  lost: 0,
+  over_budget: 0,
+  moved: 2,
+  needs_approval: false,
+  worthwhile: true,
+};
+const NOTHING: OptimizationOpportunity = {
+  ...WORTHWHILE,
+  gain: 0,
+  newly_scheduled: 0,
+  moved: 0,
+  worthwhile: false,
+};
+
 const IN_TEN_MINUTES = (): string => new Date(Date.now() + 10 * 60_000).toISOString();
 
 function renderUI(): ReturnType<typeof render> {
@@ -103,12 +124,21 @@ describe('Optimize Schedule', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocked.getLatestOptimization.mockResolvedValue(null);
+    mocked.getOptimizationOpportunity.mockResolvedValue(WORTHWHILE);
   });
 
   it('starts a run, pauses editing while it runs, then shows the summary with an Undo', async () => {
+    // Before: the button invites the press - the gain, and the attention-seeking border.
+    mocked.getOptimizationOpportunity
+      .mockResolvedValueOnce({ ...WORTHWHILE, gain: 3 })
+      .mockResolvedValue(NOTHING);
     mocked.startOptimization.mockResolvedValue(optimization({ status: 'running' }));
     renderUI();
 
+    expect(await screen.findByText('3 more tasks could be scheduled')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Optimize Schedule' })).toHaveClass(
+      'optimize-button--attention'
+    );
     await userEvent.click(await screen.findByRole('button', { name: 'Optimize Schedule' }));
     expect(await screen.findByText(/Optimizing your schedule/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Optimize Schedule' })).toBeDisabled();
@@ -132,6 +162,10 @@ describe('Optimize Schedule', () => {
     expect(within(dialog).getByText(/Water the plants/)).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Undo' })).toBeInTheDocument();
     expect(screen.queryByText(/Optimizing your schedule/)).not.toBeInTheDocument();
+
+    // After: it did what it could, so the opportunity is asked again and the button is grayed out.
+    expect(await screen.findByText('Nothing to improve right now')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Optimize Schedule' })).toBeDisabled();
   });
 
   it('undoes an applied run and says the schedule was restored', async () => {
@@ -157,7 +191,8 @@ describe('Optimize Schedule', () => {
     expect(screen.queryByRole('button', { name: /Undo optimization/ })).not.toBeInTheDocument();
   });
 
-  it('offers no Undo button once undoing is no longer safe, and none after a decline', async () => {
+  it('offers no Undo once undoing is no longer safe, and grays the button out when there is nothing to improve', async () => {
+    mocked.getOptimizationOpportunity.mockResolvedValue(NOTHING);
     mocked.getLatestOptimization.mockResolvedValue(
       optimization({
         status: 'applied',
@@ -167,8 +202,16 @@ describe('Optimize Schedule', () => {
       })
     );
     renderUI();
-    await screen.findByRole('button', { name: 'Optimize Schedule' });
+
+    const button = await screen.findByRole('button', { name: 'Optimize Schedule' });
+    expect(await screen.findByText('Nothing to improve right now')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Undo/ })).not.toBeInTheDocument();
+    // Still there (discoverable) but disabled, without the border, saying why - and a click does nothing.
+    expect(button).toBeDisabled();
+    expect(button).not.toHaveClass('optimize-button--attention');
+    expect(button.parentElement).toHaveAttribute('title', 'Nothing to improve right now');
+    await userEvent.click(button);
+    expect(mocked.startOptimization).not.toHaveBeenCalled();
   });
 
   it('asks for approval when a plan would lose something, lists what first, and applies on Apply', async () => {
@@ -180,8 +223,18 @@ describe('Optimize Schedule', () => {
       })
     );
     mocked.approveOptimization.mockResolvedValue(optimization({ status: 'running' }));
+    mocked.getOptimizationOpportunity.mockResolvedValue({
+      ...WORTHWHILE,
+      gain: 1,
+      lost: 1,
+      needs_approval: true,
+    });
     renderUI();
 
+    // The hint already says approval will be asked for (and "task", not "tasks", for one).
+    expect(
+      await screen.findByText('1 more task could be scheduled - needs your approval')
+    ).toBeInTheDocument();
     const dialog = await screen.findByRole('dialog', { name: /approval needed/ });
     const sections = within(dialog)
       .getAllByRole('heading', { level: 4 })
@@ -298,9 +351,11 @@ describe('Optimize Schedule', () => {
     );
     renderUI();
     expect(await screen.findByText(/Optimizing your schedule/)).toBeInTheDocument();
+    expect(mocked.getOptimizationOpportunity).not.toHaveBeenCalled(); // no point asking while it runs
   });
 
-  it('reopens the summary from "What changed" while Undo is offered', async () => {
+  it('reopens the summary from "What changed" while Undo is offered, and stays an ordinary button if the opportunity cannot be had', async () => {
+    mocked.getOptimizationOpportunity.mockRejectedValue(new Error('offline'));
     mocked.getLatestOptimization.mockResolvedValue(
       optimization({
         status: 'applied',
@@ -312,6 +367,10 @@ describe('Optimize Schedule', () => {
     renderUI();
     await userEvent.click(await screen.findByRole('button', { name: 'What changed' }));
     expect(await screen.findByRole('dialog', { name: 'Schedule optimized' })).toBeInTheDocument();
+    const button = screen.getByRole('button', { name: 'Optimize Schedule' });
+    expect(button).toBeEnabled();
+    expect(button).not.toHaveClass('optimize-button--attention');
+    expect(screen.queryByText(/could be scheduled|Nothing to improve/)).not.toBeInTheDocument();
   });
 });
 

@@ -73,6 +73,36 @@ def request_optimization_endpoint(
     return _respond(db, row)
 
 
+class OpportunityResponse(BaseModel):
+    """What Optimize Schedule would achieve right now (design doc §6.11): `gain` is how many more
+    tasks would be scheduled than today (net, never negative). `worthwhile` is `gain > 0`; moves
+    alone and swaps are not value, and a plan placing fewer tasks than today is never one."""
+
+    gain: int
+    newly_scheduled: int
+    lost: int
+    over_budget: int
+    moved: int
+    needs_approval: bool
+    worthwhile: bool
+
+
+@router.get("/opportunity")
+def optimization_opportunity_endpoint(db: Session = DB_SESSION) -> OpportunityResponse:
+    """Read-only: runs the plan without the write lock and writes nothing, so the Timeline can ask
+    on every load without getting in anyone's way."""
+    found = optimization.opportunity(db)
+    return OpportunityResponse(
+        gain=found.gain,
+        newly_scheduled=found.newly_scheduled,
+        lost=found.lost,
+        over_budget=found.over_budget,
+        moved=found.moved,
+        needs_approval=found.needs_approval,
+        worthwhile=found.worthwhile,
+    )
+
+
 @router.get("/latest")
 def latest_optimization_endpoint(db: Session = DB_SESSION) -> OptimizationResponse | None:
     """The most recent optimization, or `null`. Polled while one runs, and read after a reload so

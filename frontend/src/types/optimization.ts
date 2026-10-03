@@ -44,3 +44,15 @@ export interface ScheduleOptimization {
   timeout_seconds: number;
   summary: OptimizationSummary | null;
 }
+
+/** `GET /schedule-optimizations/opportunity`: what pressing Optimize Schedule would achieve right
+ * now (design doc §6.11). `gain` is how many more tasks would be scheduled than today. */
+export interface OptimizationOpportunity {
+  gain: number;
+  newly_scheduled: number;
+  lost: number;
+  over_budget: number;
+  moved: number;
+  needs_approval: boolean;
+  worthwhile: boolean;
+}

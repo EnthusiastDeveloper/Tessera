@@ -90,6 +90,7 @@ class TestStarting:
         for response in (
             client.post(BASE),
             client.get(f"{BASE}/latest"),
+            client.get(f"{BASE}/opportunity"),
             client.post(f"{BASE}/x/approve"),
             client.post(f"{BASE}/x/decline"),
             client.post(f"{BASE}/x/undo"),
@@ -133,6 +134,7 @@ class TestTheServerSideEditLock:
         assert client.get("/api/v1/task-instances").status_code == 200
         assert client.get("/api/v1/settings").status_code == 200
         assert client.get("/api/v1/notifications").status_code == 200
+        assert client.get(f"{BASE}/opportunity").status_code == 200  # asking is a read
 
     def test_edits_work_again_as_soon_as_it_finishes(self, client: TestClient, running: str) -> None:
         instance_id = client.instance_id  # type: ignore[attr-defined]
@@ -153,6 +155,9 @@ class TestRunningIt:
         self, client: TestClient, recorder: RecordingJobScheduler
     ) -> None:
         _task(client)
+        # Asking whether it is worth it says no, and is not itself an optimization.
+        assert client.get(f"{BASE}/opportunity").json()["worthwhile"] is False
+        assert client.get(f"{BASE}/latest").json() is None
         started = client.post(BASE).json()
         _run_job(started["id"])
 
@@ -169,11 +174,16 @@ class TestRunningIt:
             assert current is not None
             repo.update(current.model_copy(update={"status": "pending", "scheduled_time": None}))
 
+        assert client.get(f"{BASE}/opportunity").json() == {
+            "gain": 1, "newly_scheduled": 1, "lost": 0, "over_budget": 0, "moved": 0,
+            "needs_approval": False, "worthwhile": True,
+        }  # fmt: skip
         started = client.post(BASE).json()
         _run_job(started["id"])
 
         latest = client.get(f"{BASE}/latest").json()
         assert latest["status"] == "applied" and latest["undo_available"] is True
+        assert client.get(f"{BASE}/opportunity").json()["worthwhile"] is False  # it did what it could
         assert latest["summary"]["counts"]["newly_scheduled"] == 1
         assert latest["summary"]["newly_scheduled"][0]["name"] == "Water the plants"
         assert client.get("/api/v1/task-instances").json()[0]["status"] == "scheduled"

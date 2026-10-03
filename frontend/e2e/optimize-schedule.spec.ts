@@ -92,7 +92,13 @@ test.describe('Optimize Schedule against the real backend (design doc §6.11)', 
     expect((await instanceNamed(page, 'Optimize X')).status).toBe('scheduled');
     expect((await instanceNamed(page, 'Optimize Y')).status).toBe('pending');
 
-    await page.getByRole('button', { name: 'Optimize Schedule' }).click();
+    // The button invites the press: it names the gain and wears the attention-seeking border.
+    await page.goto('/');
+    const optimizeButton = page.getByRole('button', { name: 'Optimize Schedule' });
+    await expect(page.getByText(/\d+ more tasks? could be scheduled/)).toBeVisible();
+    await expect(optimizeButton).toBeEnabled();
+    await expect(optimizeButton).toHaveClass(/optimize-button--attention/);
+    await optimizeButton.click();
 
     const dialog = page.getByRole('dialog', { name: 'Schedule optimized' });
     await expect(dialog).toBeVisible({ timeout: 15_000 });
@@ -104,10 +110,16 @@ test.describe('Optimize Schedule against the real backend (design doc §6.11)', 
     expect(dateOf(await instanceNamed(page, 'Optimize Y'))).toBe(day);
     expect(dateOf(await instanceNamed(page, 'Optimize X'))).toBe(nextDay);
 
-    // Editing is unlocked again, and Undo puts everything back.
+    // Editing is unlocked again; it did what it could, so the button is grayed out - but still there.
     await expect(page.getByRole('link', { name: 'New task' })).toBeVisible();
+    await expect(page.getByText('Nothing to improve right now')).toBeVisible();
+    await expect(optimizeButton).toBeDisabled();
+
+    // Undo puts everything back, and the opportunity comes back with it.
     await dialog.getByRole('button', { name: 'Undo' }).click();
     await expect(page.getByRole('dialog', { name: 'Schedule restored' })).toBeVisible();
+    await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click();
+    await expect(page.getByText(/\d+ more tasks? could be scheduled/)).toBeVisible();
     expect((await instanceNamed(page, 'Optimize Y')).status).toBe('pending');
     expect(dateOf(await instanceNamed(page, 'Optimize X'))).toBe(day);
   });
@@ -117,37 +129,50 @@ test.describe('Optimize Schedule against the real backend (design doc §6.11)', 
   }) => {
     await login(page);
     const day = localDate(40);
-    // A (low) holds most of the day; B (high, same deadline) cannot fit beside it. Globally B ranks
-    // first and takes the morning, which leaves no room for A.
+    // Long (low) arrives first and fills most of the day; Urgent (high) and Short (low) then have
+    // no room. Globally the two short ones fit and Long does not: a net gain of one task, at the
+    // price of Long's place - so it needs the user's approval.
     await createTask(page, {
-      name: 'Approve A',
-      minutes: 300,
+      name: 'Approve Long',
+      minutes: 420,
       priority: 'low',
       startDate: day,
       deadlineOffsetMinutes: 1440,
     });
     await createTask(page, {
-      name: 'Approve B',
-      minutes: 240,
+      name: 'Approve Urgent',
+      minutes: 120,
       priority: 'high',
       startDate: day,
       deadlineOffsetMinutes: 1440,
     });
-    expect((await instanceNamed(page, 'Approve A')).status).toBe('scheduled');
-    expect((await instanceNamed(page, 'Approve B')).status).toBe('pending');
+    await createTask(page, {
+      name: 'Approve Short',
+      minutes: 120,
+      priority: 'low',
+      startDate: day,
+      deadlineOffsetMinutes: 1440,
+    });
+    expect((await instanceNamed(page, 'Approve Long')).status).toBe('scheduled');
+    expect((await instanceNamed(page, 'Approve Urgent')).status).toBe('pending');
+    expect((await instanceNamed(page, 'Approve Short')).status).toBe('pending');
 
+    await page.goto('/');
+    await expect(
+      page.getByText(/\d+ more tasks? could be scheduled - needs your approval/)
+    ).toBeVisible();
     await page.getByRole('button', { name: 'Optimize Schedule' }).click();
 
     const approval = page.getByRole('dialog', { name: /approval needed/ });
     await expect(approval).toBeVisible({ timeout: 15_000 });
     await expect(approval.getByRole('heading', { name: 'Would lose their place' })).toBeVisible();
-    await expect(approval.getByText('Approve A')).toBeVisible();
+    await expect(approval.getByText('Approve Long')).toBeVisible();
     await expect(approval.getByText(/Nothing has changed yet/)).toBeVisible();
-    expect((await instanceNamed(page, 'Approve A')).status).toBe('scheduled'); // nothing written yet
+    expect((await instanceNamed(page, 'Approve Long')).status).toBe('scheduled'); // nothing written yet
 
     await approval.getByRole('button', { name: 'Cancel' }).click();
     await expect(page.getByRole('dialog')).toHaveCount(0);
-    expect((await instanceNamed(page, 'Approve A')).status).toBe('scheduled');
+    expect((await instanceNamed(page, 'Approve Long')).status).toBe('scheduled');
     await expect(page.getByRole('button', { name: /Undo optimization/ })).toHaveCount(0); // nothing to undo
 
     // Asking again and approving applies it.
@@ -157,8 +182,9 @@ test.describe('Optimize Schedule against the real backend (design doc §6.11)', 
     await again.getByRole('button', { name: 'Apply' }).click();
     const result = page.getByRole('dialog', { name: 'Schedule optimized' });
     await expect(result).toBeVisible({ timeout: 15_000 });
-    expect((await instanceNamed(page, 'Approve B')).status).toBe('scheduled');
-    expect((await instanceNamed(page, 'Approve A')).status).toBe('pending');
+    expect((await instanceNamed(page, 'Approve Urgent')).status).toBe('scheduled');
+    expect((await instanceNamed(page, 'Approve Short')).status).toBe('scheduled');
+    expect((await instanceNamed(page, 'Approve Long')).status).toBe('pending');
     await result.getByRole('button', { name: 'Close' }).click();
     await expect(
       page.getByRole('button', { name: /Undo optimization \(\d+:\d\d\)/ })

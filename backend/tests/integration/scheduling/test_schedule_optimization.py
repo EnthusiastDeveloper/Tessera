@@ -89,6 +89,10 @@ def _request_and_run(db: Session, jobs: RecordingJobScheduler):  # type: ignore[
     return ScheduleOptimizationRepository(db).get(row.id)
 
 
+def _refuse_the_lock(*_args: object, **_kwargs: object) -> None:
+    raise AssertionError("asking whether optimizing is worth it must not take the write lock")
+
+
 def _example_s(db: Session, jobs: RecordingJobScheduler) -> dict[str, TaskInstance]:
     return {
         "B": _task(db, jobs, "B", 30, "high", 2),
@@ -109,11 +113,22 @@ class TestACleanOptimizationAppliesAtOnce:
     """Example S."""
 
     def test_it_applies_without_asking_and_records_the_summary_and_undo(
-        self, db_session: Session, jobs: RecordingJobScheduler
+        self, db_session: Session, jobs: RecordingJobScheduler, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         tasks = _example_s(db_session, jobs)
         assert _slot(db_session, tasks["B"].id) == ("scheduled", "Mon 18:00")
         assert _slot(db_session, tasks["A"].id)[0] == "pending"
+
+        # The button's hint knows beforehand: one more task would be scheduled - and asking is
+        # read-only: no write lock, no row, no job, nothing moved.
+        with monkeypatch.context() as no_lock:
+            no_lock.setattr("app.scheduling.adapter.acquire_write_lock", _refuse_the_lock)
+            found = optimization.opportunity(db_session, now=_NOW)
+        assert (found.gain, found.newly_scheduled, found.moved, found.lost, found.needs_approval) == (1, 1, 2, 0, False)
+        assert found.worthwhile
+        assert _slot(db_session, tasks["B"].id) == ("scheduled", "Mon 18:00")
+        assert ScheduleOptimizationRepository(db_session).latest() is None
+        assert not [k for k, _ in jobs.scheduled if k.startswith("schedule_optimization:")]
 
         row = optimization.request_optimization(db_session, jobs, now=_NOW)
         db_session.commit()
@@ -136,6 +151,7 @@ class TestACleanOptimizationAppliesAtOnce:
             "newly_scheduled": 1, "moved": 2, "lost": 0, "over_budget": 0, "unchanged": 0, "still_unplaced": 0,
         }  # fmt: skip
         assert [m["name"] for m in summary["moved"]] == ["C", "B"]  # chronological by new time
+        assert not optimization.opportunity(db_session, now=_NOW).worthwhile  # it did what it could
 
     def test_every_moved_task_has_its_jobs_re_pointed_and_the_placed_one_gets_them(
         self, db_session: Session, jobs: RecordingJobScheduler
@@ -174,6 +190,10 @@ class TestADegradationNeedsApproval:
 
         assert row is not None and row.status == "awaiting_approval"
         assert row.valid_until == _NOW + optimization.PLAN_VALID_FOR
+        # A swap (C gets a slot, A loses its own) places no more tasks than today: not advertised.
+        found = optimization.opportunity(db_session, now=_NOW)
+        assert (found.gain, found.newly_scheduled, found.lost, found.needs_approval) == (0, 1, 1, True)
+        assert not found.worthwhile
         assert _slot(db_session, tasks["A"].id) == ("scheduled", "Mon 19:00")  # still has its place
         assert _slot(db_session, tasks["C"].id)[0] == "pending"
         summary = optimization.build_summary(db_session, row)
@@ -275,6 +295,7 @@ class TestNothingToDo:
             "C": _task(db_session, jobs, "C", 60, "low", 0),
             "A": _task(db_session, jobs, "A", 90, "high", 0),
         }
+        assert not optimization.opportunity(db_session, now=_NOW).worthwhile
         row = _request_and_run(db_session, jobs)
 
         assert row is not None and row.status == "nothing_to_do" and row.reason == "would_place_fewer"
@@ -284,6 +305,8 @@ class TestNothingToDo:
 
     def test_an_already_best_schedule_changes_nothing(self, db_session: Session, jobs: RecordingJobScheduler) -> None:
         task = _task(db_session, jobs, "Only", 60, "medium", 0)
+        found = optimization.opportunity(db_session, now=_NOW)
+        assert (found.gain, found.moved, found.lost) == (0, 0, 0) and not found.worthwhile
         row = _request_and_run(db_session, jobs)
         assert row is not None and row.status == "nothing_to_do" and row.reason == "identical"
         assert _slot(db_session, task.id) == ("scheduled", "Mon 18:00")
@@ -503,3 +526,27 @@ class TestUndo:
         with pytest.raises(OptimizationError) as error:
             optimization.undo(db_session, jobs, first.id, now=_NOW)  # a newer one replaced it
         assert error.value.code == "undo_unavailable"
+
+
+class TestTheButtonsOpportunityBeyondTheExamples:
+    """What the examples above do not cover (design doc §6.11, "the button says whether it is worth
+    pressing"): a net gain that costs a task, and reshuffles that gain nothing."""
+
+    def test_a_gain_that_costs_a_task_is_worthwhile_and_says_it_needs_approval(
+        self, db_session: Session, jobs: RecordingJobScheduler
+    ) -> None:
+        """One 120-minute task fills the evening; a plan that fits two short ones instead is a net
+        gain of one task, at the price of the long one's place."""
+        _task(db_session, jobs, "Long", 120, "low", 0)
+        _task(db_session, jobs, "Urgent", 30, "high", 0)
+        _task(db_session, jobs, "Short", 30, "low", 0)
+        found = optimization.opportunity(db_session, now=_NOW)
+        assert (found.gain, found.newly_scheduled, found.lost, found.needs_approval) == (1, 2, 1, True)
+        assert found.worthwhile
+
+    def test_moves_alone_are_churn_not_value(self, db_session: Session, jobs: RecordingJobScheduler) -> None:
+        """Both tasks are placed; a global pass would only swap which comes first."""
+        _task(db_session, jobs, "Later deadline", 60, "low", 1)
+        _task(db_session, jobs, "Earlier deadline", 60, "low", 0)
+        found = optimization.opportunity(db_session, now=_NOW)
+        assert found.gain == 0 and not found.worthwhile
