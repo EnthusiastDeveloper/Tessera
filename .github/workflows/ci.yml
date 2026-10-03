@@ -173,14 +173,45 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Test container image
+        # Runs against a named volume, the way a real deployment does, and recreates the
+        # container in the middle: an account created before must still exist after, which
+        # a database kept in the container's own writable layer (or `:memory:`) would fail.
         run: |
           docker build -f docker/Dockerfile -t tessera:test .
-          docker run --rm -d \
-            --name tessera-test \
-            -e SECRET_KEY=test-key \
-            -e DATABASE_PATH=/app/data/ci-smoke-test.db \
-            -p 8000:8000 \
-            tessera:test
-          sleep 5
-          curl -f http://localhost:8000/health || exit 1
-          docker stop tessera-test || true
+          docker volume create tessera-ci-data
+
+          start() {
+            docker run -d --name tessera-test \
+              -e SECRET_KEY=test-key \
+              -e DATABASE_PATH=/app/data/tessera.db \
+              -v tessera-ci-data:/app/data \
+              -p 8000:8000 \
+              tessera:test
+            for _ in $(seq 1 30); do
+              curl -sf http://localhost:8000/health && return 0
+              sleep 1
+            done
+            docker logs tessera-test
+            return 1
+          }
+          status_of() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
+          JSON='content-type: application/json'
+          PASSWORD=correcthorsebatterystaple
+
+          start || exit 1
+          TOKEN=$(docker logs tessera-test 2>&1 | sed -n 's/.*Setup token[^:]*: //p' | head -1)
+          code=$(status_of -X POST http://localhost:8000/api/v1/auth/setup -H "$JSON" \
+            -d "{\"token\":\"$TOKEN\",\"password\":\"$PASSWORD\"}")
+          [ "$code" = 201 ] || { echo "first-run setup returned $code"; docker logs tessera-test; exit 1; }
+
+          docker rm -f tessera-test
+          start || exit 1
+          code=$(status_of -X POST http://localhost:8000/api/v1/auth/setup -H "$JSON" \
+            -d "{\"token\":\"unused\",\"password\":\"$PASSWORD\"}")
+          [ "$code" = 410 ] || { echo "setup after recreate returned $code, expected 410 (account lost?)"; exit 1; }
+          code=$(status_of -X POST http://localhost:8000/api/v1/auth/login -H "$JSON" \
+            -d "{\"username\":\"admin\",\"password\":\"$PASSWORD\"}")
+          [ "$code" = 200 ] || { echo "login after recreate returned $code"; exit 1; }
+
+          docker rm -f tessera-test
+          docker volume rm tessera-ci-data

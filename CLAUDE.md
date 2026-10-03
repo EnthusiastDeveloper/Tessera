@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Key References
 - **Product specification:** `docs/design-doc.md` (Revision 13) - this is the authoritative source for what the system *does*
 - **Implementation plan:** `docs/architecture-plan.md` (Revision 7) - defines how it's structured and built
-- **Findings register / decision log:** `docs/implementation-readiness-review-2.md` (IRR-2) - why Revisions 9 and 3 say what they say (Revision 10's through 13's decisions are recorded in design-doc Section 11); every High and Medium finding is now decided - only the editorial items remain
+- **Findings register / decision log:** `docs/implementation-readiness-review-2.md` (IRR-2) - why Revisions 9 and 3 say what they say (Revision 10's through 13's decisions are recorded in design-doc Section 11); every finding in it - High, Medium and editorial - is now resolved
 - **Architecture enforcement:** `backend/pyproject.toml` has an `import-linter` configuration that blocks layering violations at CI
 
 ### Common Commands

@@ -1,7 +1,7 @@
 # Tessera - Architecture & Implementation Plan
 ### Revision 7 - companion to: Tessera - Design Document (POC), Revision 13
 
-> **Open review:** `docs/implementation-readiness-review-2.md` (IRR-2) is the findings register behind Revisions 9 and 3. Every High and Medium finding in it is now decided and drafted into these documents (M12 - the SQLite pragmas - in Section 5.3); Only the editorial items in IRR-2 Section 4 remain. (The overnight-window question left open at Revision 6 is settled in design doc Revision 13.)
+> **Open review:** `docs/implementation-readiness-review-2.md` (IRR-2) is the findings register behind Revisions 9 and 3. Every High and Medium finding in it is now decided and drafted into these documents (M12 - the SQLite pragmas - in Section 5.3); IRR-2 has nothing left open (the overnight-window question left open at Revision 6 is settled in design doc Revision 13, and its editorial items are all resolved).
 
 ## 0. Purpose of this document
 

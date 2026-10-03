@@ -579,31 +579,34 @@ Rules that span fields stay in the services with their own error codes: `invalid
                         │ scheduling algorithm finds a slot    │ external sync invalidates, or
                         ▼                                      │ overdue flexible task auto-reschedules
                  ┌─────────────┐                               │
-      ┌─────────►│  scheduled  │───────────────────────────────┘
-      │          └──────┬──────┘
-      │                 │ user marks "in progress" (optional step)
-      │                 ▼
-      │          ┌──────────────┐
-      │          │ in_progress  │
-      │          └──────┬───────┘
-      │                 │ user marks complete
-      │                 ▼
-      │          ┌──────────────┐
-      │          │  completed   │  ◄── terminal, immutable
-      │          └──────────────┘
-      │
-      │  all remaining dependencies complete
-      │  (including via dependency removal on deletion, 3.8)
-      │
-┌─────┴──────┐
+                 │  scheduled  │───────────────────────────────┘
+                 └──────┬──────┘
+                        │ user marks "in progress" (optional step)
+                        ▼
+                 ┌──────────────┐
+                 │ in_progress  │
+                 └──────┬───────┘
+                        │ user marks complete
+                        ▼
+                 ┌──────────────┐
+                 │  completed   │  ◄── terminal, immutable
+                 └──────────────┘
+
+  pending ── deadline elapses before it is scheduled or completed (flexible only, 6.7) ──► missed
+
+┌────────────┐
 │  blocked   │  ◄── instance has ≥1 incomplete dependency;
 └─────┬──────┘      cannot enter scheduling pool while blocked
       │
-      │  deadline elapses before scheduled/completed (flexible only, 6.7)
-      ▼
+      │  all remaining dependencies complete
+      │  (including via dependency removal on deletion, 3.8)
+      ├── flexible ──► pending     (placed by 6.2 in the same transaction, 6.9)
+      ├── fixed ─────► scheduled   (it kept its time while waiting, 6.5, 6.9)
+      └── deadline elapses first (flexible only, 6.7) ──► missed
+
 ┌────────────┐
-│   missed   │  ◄── flexible only; excluded from scheduling candidates
-└─────┬──────┘      until the user acts
+│   missed   │  ◄── flexible only; reachable from pending or blocked;
+└─────┬──────┘      excluded from scheduling candidates until the user acts
       │
       ├── user extends deadline ─────────► back to pending
       ├── user marks complete ───────────► completed
@@ -625,7 +628,7 @@ Rules:
 - **(Added Revision 6)** `missed` is reachable from `pending` or `blocked` (flexible instances only) when the deadline elapses before the instance is scheduled or completed. See 6.7 for the full trigger logic and resolution paths. **[CONFIRMED - Revision 7, Section 11 item 6 - no change from the Revision 6 design.]**
 - **(Added Revision 7)** `detached` (3.3/3.10) is orthogonal to `status` - it does not add, remove, or gate any transition in this diagram. An instance can be `detached` in any non-terminal status.
 - **(Added Revision 9)** `dismissed` is a **second terminal state** alongside `completed`, reachable from any non-terminal status. It means "this occurrence is not going to happen; close it out" - the counterpart to `completed`'s "it did". Like `completed` it is immutable and cannot be reversed; unlike `completed` it **does not satisfy a dependency** - a downstream instance depending on a `dismissed` one stays `blocked`, exactly as for `missed` (3.3). See 3.8 for the action and its side effects.
-- **(Added Revision 9)** `blocked` is mutually exclusive with having a `scheduled_time`. The `blocked` → `pending` transition fires its placement **in the same transaction as the completion that unblocked it** (6.9), not on a later sweep.
+- **(Added Revision 9, amended Revision 10)** A `blocked` **flexible** instance has no `scheduled_time` - it is not placed until its dependencies are done. A `blocked` **fixed** instance keeps the time it was created with and holds that slot (6.5). The `blocked` → `pending` transition (flexible) fires its placement **in the same transaction as the completion that unblocked it** (6.9), not on a later sweep.
 - **(Added Revision 9)** `blocked`, `missed`, and `pending`-with-an-active-`unschedulable`-notification are the three states surfaced in the Backlog view (8.1). That view is a query over this same state machine, not a parallel one - no instance is moved, copied, or given a different status by appearing in it.
 
 ---
@@ -1323,7 +1326,7 @@ Revision 9 resolved eighteen findings from a second review (IRR-2). Two of them 
 
 22. ~~**Do overnight active-hours windows (`22:00`-`02:00`) belong in the POC, and what about split days?**~~ **RESOLVED - Revision 13 (IRR-2 M4, Backlog 12.25 built).** Yes, both. A day holds a list of windows and a window may end the next morning; placement works on stretches of absolute time, a blackout cuts at midnight, and budgets count the calendar date (3.7, 6.2). A list rather than a single overnight-capable window, because the user's days are split and fluid and a list expresses that directly. The wire shape of `active_hours` / `active_hours_override` becomes `{day: [window, ...] | null}`.
 
-**Section 11 has no open items at Revision 13.** Note this is narrower than Revision 8's claim that the document was "fully locked": IRR-2's editorial findings (Section 4 of that register) and the one deferred Medium question above remain open and are tracked there, not here. Section 11 tracks decisions awaiting confirmation; IRR-2 tracks findings awaiting a decision.
+**Section 11 has no open items at Revision 13.** Note this is narrower than Revision 8's claim that the document was "fully locked": nothing in IRR-2 remains open either: its High, Medium and editorial findings are all resolved, and its register keeps each one's reasoning. Section 11 tracks decisions awaiting confirmation; IRR-2 tracks findings awaiting a decision - and from here, a new finding would start a new register rather than reopen that one.
 
 Two related items were resolved **without** flagging, since they don't change load-bearing behavior and follow directly from rules already on the books:
 - Instances may be marked `completed` directly without first being `scheduled` (3.3/4) - this is a natural reading of "the user did the task," not a new mechanism.
@@ -1363,7 +1366,7 @@ Two related items were resolved **without** flagging, since they don't change lo
 | 12.26 *(added Rev 12)* | Choose which calendars of a connected account are synced (a `calendar_ids` selection on `ExternalCalendarConnection`) | The POC reads one calendar per connection - Google `primary`, Outlook's default (7). A selection needs a provider call to list calendars, a column and a settings control (IRR-2 M6) |
 | 12.27 *(added Rev 12)* | A failed-sync status or notification, and rate-limit/backoff handling for the poll | A failed poll is logged and shows as a stale "last synced" time; the next interval retries (7). Surfacing it properly wants a new notification type or a status field on the connection (IRR-2 M6) |
 
-### 12.15 - Open questions to resolve before holiday calendars are taken into active development
+### Open questions for 12.15 - resolve before holiday calendars are taken into active development
 
 1. **Which calendars, and how many simultaneously?** Single selection, or can a user follow multiple traditions' calendars at once?
 2. **Data source and computation.** Fixed-date/Easter-offset math is simple for some traditions; lunisolar calendars (e.g. Jewish) require a proper library, not hand-rolled logic.
