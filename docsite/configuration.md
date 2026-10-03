@@ -17,6 +17,8 @@ Set these in `.env` before bringing the container up (see `.env.example` in the 
 | `ENABLE_API_DOCS` | No | `false` | Whether the interactive `/api/v1/docs`, `/api/v1/redoc` and `/api/v1/openapi.json` routes exist at all. Leave off in production - even though they're already auth-guarded, this is defense-in-depth against exposing the full API surface. Turn on locally if you want to browse the OpenAPI schema. |
 | `PORT` | No | `8000` | Port the app listens on inside the container. |
 | `LOG_LEVEL` | No | `info` | Application log verbosity. |
+| `OPTIMIZATION_SLOW_AFTER_SECONDS` | No | `10` | How long **Optimize Schedule** runs before the screen says it is taking longer than expected. |
+| `OPTIMIZATION_TIMEOUT_SECONDS` | No | `30` | How long it may run before it is declared failed: nothing is changed and editing is unlocked again. Must be greater than the value above. |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Only for Google Calendar sync | - | OAuth credentials for Google Calendar. |
 | `OUTLOOK_CLIENT_ID` / `OUTLOOK_CLIENT_SECRET` | Only for Outlook sync | - | OAuth credentials for Outlook/Microsoft 365 Calendar. |
 

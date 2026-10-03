@@ -10,7 +10,7 @@ the traceability mechanism per architecture-plan §9, not just a convention.
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
@@ -252,7 +252,30 @@ class ScheduleRepair(_Frozen):
     finished_at: datetime | None = None
 
 
+OptimizationStatus = Literal[
+    "running", "awaiting_approval", "applied", "nothing_to_do", "declined", "undone", "expired", "failed"
+]
+
+
+class ScheduleOptimization(_Frozen):
+    """An "Optimize Schedule" operation (design doc §6.11, architecture-plan §5.4)."""
+
+    id: str
+    status: OptimizationStatus
+    requested_at: datetime
+    finished_at: datetime | None = None
+    approved: bool = False
+    plan_changed: bool = False
+    valid_until: datetime | None = None
+    undo_until: datetime | None = None
+    reason: str | None = None
+    plan: dict[str, Any] | None = None
+    applied_versions: dict[str, Any] | None = None
+
+
 __all__ = [
+    "OptimizationStatus",
+    "ScheduleOptimization",
     "ActiveHoursWindow",
     "AdminPasswordResetMarker",
     "BlackoutDate",

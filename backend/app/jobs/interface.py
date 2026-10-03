@@ -108,6 +108,12 @@ def schedule_repair_job_key(repair_id: str) -> str:
     return f"schedule_repair:{repair_id}"
 
 
+def schedule_optimization_job_key(optimization_id: str) -> str:
+    """Design doc §6.11's background "Optimize Schedule" run (architecture-plan §4, Rev 9) - one
+    one-off job per request or approval, run now."""
+    return f"schedule_optimization:{optimization_id}"
+
+
 #: Singleton key for the §6.7 periodic deadline-elapsed safety-net sweep - one recurring
 #: job for the whole table, not per-instance (the inline gate + the one-off per-instance
 #: job are the primary mechanism; this just catches anything they missed).

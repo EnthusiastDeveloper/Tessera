@@ -382,6 +382,8 @@ Design doc 14.2 requires a guard around the entire app and 14.2 now enumerates t
 | `OUTLOOK_CLIENT_ID` / `OUTLOOK_CLIENT_SECRET` | Operator's registered Outlook OAuth app credentials | Required if using Outlook sync |
 | `PORT` | Port the app listens on | Optional, sensible default |
 | `LOG_LEVEL` | Logging verbosity | Optional, sensible default |
+| `OPTIMIZATION_SLOW_AFTER_SECONDS` *(added Rev 9)* | Seconds before the UI shows "taking longer than expected" for an optimization (design doc 6.11); default `10` | Optional |
+| `OPTIMIZATION_TIMEOUT_SECONDS` *(added Rev 9)* | Hard limit in seconds; an optimization still running then is marked `failed`, nothing applied, edits unlocked; default `30`, must exceed the previous | Optional |
 
 ### 7.2 Local development
 

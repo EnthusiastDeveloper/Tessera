@@ -19,7 +19,7 @@ service modules all depend on, rather than either sibling owning it on the other
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from datetime import datetime, time, timedelta, tzinfo
 from typing import cast
 from zoneinfo import ZoneInfo
@@ -123,7 +123,11 @@ def gather_external_obstacles(db: Session) -> tuple[Obstacle, ...]:
 
 
 def gather_obstacles(
-    db: Session, *, exclude_instance_id: str | None = None, include_scheduled_flexible: bool = True
+    db: Session,
+    *,
+    exclude_instance_id: str | None = None,
+    exclude_instance_ids: Collection[str] = (),
+    include_scheduled_flexible: bool = True,
 ) -> tuple[Obstacle, ...]:
     """Every `scheduled`/`in_progress` instance, both types, plus every filtered external
     busy-block (§7) - the full §6.2 obstacle set. `include_scheduled_flexible=False`
@@ -137,7 +141,12 @@ def gather_obstacles(
     repo = TaskInstanceRepository(db)
     obstacles: list[Obstacle] = []
     for instance in repo.list_by_statuses(_SLOT_HOLDING_STATUSES):
-        if instance.id == exclude_instance_id or instance.scheduled_time is None or not holds_slot(instance):
+        if (
+            instance.id == exclude_instance_id
+            or instance.id in exclude_instance_ids
+            or instance.scheduled_time is None
+            or not holds_slot(instance)
+        ):
             continue
         if not include_scheduled_flexible and instance.type == "flexible" and instance.status == "scheduled":
             continue

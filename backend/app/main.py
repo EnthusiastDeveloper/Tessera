@@ -17,6 +17,7 @@ from app.api.v1.routes.auth import router as auth_router
 from app.api.v1.routes.calendar_connections import router as calendar_connections_router
 from app.api.v1.routes.external_events import router as external_events_router
 from app.api.v1.routes.notifications import router as notifications_router
+from app.api.v1.routes.schedule_optimizations import router as schedule_optimizations_router
 from app.api.v1.routes.settings import router as settings_router
 from app.api.v1.routes.task_instances import router as task_instances_router
 from app.api.v1.routes.task_templates import router as task_templates_router
@@ -129,6 +130,7 @@ app.include_router(settings_router)
 app.include_router(task_templates_router)
 app.include_router(task_instances_router)
 app.include_router(notifications_router)
+app.include_router(schedule_optimizations_router)
 app.include_router(calendar_connections_router)
 app.include_router(external_events_router)
 
