@@ -10,7 +10,7 @@ Placement runs whenever something changes that could affect it: a new flexible t
 
 **This is the most important thing to understand about the algorithm:** a scheduling pass places only the new or changed task into gaps left by everything already committed. **Existing placements are never moved by a later pass.** Adding a task never silently reshuffles what's already on your timeline.
 
-The consequence - accepted as correct behavior, not a bug - is what the design doc calls **greedy corner-painting**: a later task can come back `unschedulable` even though some global rearrangement of the week *would* have fitted it. The alternative (a scheduler that quietly moves things you've already planned around) is worse. A user-triggered "re-optimize everything" reflow is a possible future feature, not something the core algorithm does.
+The consequence - accepted as correct behavior, not a bug - is what the design doc calls **greedy corner-painting**: a later task can come back `unschedulable` even though some global rearrangement of the week *would* have fitted it. The alternative (a scheduler that quietly moves things you've already planned around) is worse. The way out when you do want a different arrangement is **Optimize Schedule** (below) - a button you press, never something the core algorithm does on its own.
 
 ## What counts as an obstacle
 
@@ -19,6 +19,17 @@ When looking for a free slot, the algorithm treats all of the following as occup
 - Every `TaskInstance` currently `scheduled` or `in_progress` - **both** fixed and flexible
 - Every flexible task already placed earlier in the *same* pass (so a single event that unblocks several tasks at once doesn't double-book them against each other)
 - External calendar events (after the transparent/all-day filtering rules - see [Capabilities](capabilities.md#external-calendar-sync))
+
+## Optimize Schedule
+
+Because placement never moves what is already planned, a busy week can leave a task with no slot even though a different arrangement of the same week would fit everything. The **Optimize Schedule** button on the Timeline asks for that different arrangement: it re-places every scheduled and pending flexible task in one pass, using exactly the rules above. Fixed tasks, tasks you have started and external calendar events stay where they are.
+
+- **It runs in the background.** While it does - a few seconds - a banner says "Optimizing your schedule…" and the Timeline and task screens are read-only: **New task** and every task action are disabled, and clicking one tells you why. If it takes longer than expected the banner says so; past the hard limit it gives up, changes nothing and unlocks editing (both limits are configurable, see [Configuration](configuration.md)).
+- **If it takes nothing away, it just applies.** Tasks may move, and tasks that had no slot may get one, but no scheduled task loses its place and none ends up over its day's time budget.
+- **If it would take something away, it asks first.** When a scheduled task would lose its place, or a task would be pushed over its day's budget, nothing changes until you approve - one decision for the whole plan, listing what would be lost first. **Cancel** changes nothing at all. If the schedule changes while you are deciding, you are shown the new plan rather than applying a stale one.
+- **A plan that would place fewer tasks than you have today is never offered.** You are told no better arrangement exists.
+- **You always see what changed:** how many tasks were newly scheduled, moved, lost or over budget, and each one by name and time.
+- **Undo for ten minutes.** After an optimization is applied (with or without your approval), an **Undo optimization** button counts down in the Timeline toolbar. It is there only while undoing is still safe - if you have edited, completed or moved any of the affected tasks since, or something else now occupies a slot that would be restored, the button disappears. Only the latest optimization can be undone, and a declined plan has nothing to undo.
 
 ## The two-pass placement
 
