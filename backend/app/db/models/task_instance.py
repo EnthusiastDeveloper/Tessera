@@ -47,7 +47,7 @@ class TaskInstanceORM(Base):
 
     scheduled_time: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     deadline: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
-    nominal_date: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    nominal_date: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
 
     status: Mapped[str] = mapped_column(
         Enum(

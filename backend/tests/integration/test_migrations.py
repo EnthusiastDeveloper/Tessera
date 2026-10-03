@@ -95,8 +95,8 @@ def test_database_level_constraints_survive_in_the_baseline(tmp_path: Path) -> N
     ts = "2026-03-01 12:00:00.000000"
     insert = (
         "INSERT INTO task_templates (id, name, type, recurrence_pattern, recurrence_anchor, priority,"
-        " estimated_duration_minutes, reminder_offsets_minutes, archived, created_at, updated_at, version)"
-        " VALUES ('t', 'x', 'flexible', ?, 'calendar', 2, 30, '[]', 0, ?, ?, 1)"
+        " estimated_duration_minutes, reminder_offsets_minutes, archived, start_date, created_at, updated_at, version)"
+        " VALUES ('t', 'x', 'flexible', ?, 'calendar', 2, 30, '[]', 0, '2026-03-01', ?, ?, 1)"
     )
     with sqlite3.connect(db_path) as conn:
         conn.execute(insert, ("daily", ts, ts))

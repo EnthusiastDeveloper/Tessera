@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Iterator
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -100,6 +100,7 @@ def _seed_fixed_instance(*, scheduled_time: datetime) -> TaskInstance:
         template = TaskTemplateRepository(db).create(
             TaskTemplate(
                 id=generate_id(),
+                start_date=date(2026, 1, 1),
                 name="Doctor's appointment",
                 type="fixed",
                 fixed_time_of_day="09:00",
@@ -123,6 +124,7 @@ def _seed_fixed_instance(*, scheduled_time: datetime) -> TaskInstance:
                 scheduled_time=scheduled_time,
                 status_history=(StatusHistoryEntry(status="scheduled", at=now),),
                 generated_at=now,
+                nominal_date=now,
                 created_at=now,
                 updated_at=now,
                 version=1,

@@ -473,9 +473,8 @@ def _reached_occurrences(
 
 
 def _occurrence_date(instance: TaskInstance) -> datetime:
-    """§3.10 orders occurrences by `nominal_date`; `generated_at` stands in on the (only
-    theoretically possible) row the nominal-date backfill skipped."""
-    return instance.nominal_date or instance.generated_at
+    """§3.10 orders occurrences by `nominal_date`."""
+    return instance.nominal_date
 
 
 def _local_label(instance: TaskInstance, *, settings: UserSettings) -> str:
@@ -579,9 +578,6 @@ def _recomputed_deadline(instance: TaskInstance, *, previous: TaskTemplate, temp
         return None
     if template.deadline_offset_minutes == previous.deadline_offset_minutes:
         return None
-    if instance.nominal_date is None:
-        delta = (template.deadline_offset_minutes or 0) - (previous.deadline_offset_minutes or 0)
-        return instance.deadline + timedelta(minutes=delta)
     recomputed = instance.nominal_date + timedelta(minutes=template.deadline_offset_minutes or 0)
     return None if recomputed == instance.deadline else recomputed
 

@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import date, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -31,6 +31,7 @@ def _persist_template(db: Session, **overrides: object) -> TaskTemplate:
         "version": 1,
     }
     defaults.update(overrides)
+    defaults.setdefault("start_date", date(2026, 1, 1))
     return TaskTemplateRepository(db).create(TaskTemplate(**defaults))
 
 
@@ -51,6 +52,7 @@ def _persist_pending_instance(db: Session, *, template: TaskTemplate, **override
         "version": 1,
     }
     defaults.update(overrides)
+    defaults.setdefault("nominal_date", defaults["generated_at"])
     return TaskInstanceRepository(db).create(TaskInstance(**defaults))
 
 

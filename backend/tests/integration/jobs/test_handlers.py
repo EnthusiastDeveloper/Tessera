@@ -4,7 +4,7 @@ See design doc §6.3, §6.6, §6.7; architecture-plan §4's job breakdown table.
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import date, timedelta
 
 import pytest
 from sqlalchemy.orm import Session
@@ -43,6 +43,7 @@ def _persist_template(db: Session, **overrides: object) -> TaskTemplate:
         "version": 1,
     }
     defaults.update(overrides)
+    defaults.setdefault("start_date", date(2026, 1, 1))
     return TaskTemplateRepository(db).create(TaskTemplate(**defaults))
 
 
@@ -63,6 +64,7 @@ def _persist_instance(db: Session, *, template: TaskTemplate, status: str, **ove
         "version": 1,
     }
     defaults.update(overrides)
+    defaults.setdefault("nominal_date", defaults["generated_at"])
     return TaskInstanceRepository(db).create(TaskInstance(**defaults))
 
 

@@ -10,6 +10,7 @@ const mocked = vi.mocked(taskInstancesApi);
 
 const TEMPLATE: TaskTemplate = {
   id: 'template-1',
+  start_date: '2026-01-01',
   name: 'Water the plants',
   type: 'flexible',
   recurrence: { pattern: 'daily', interval: 1, anchor: 'calendar' },
@@ -35,6 +36,7 @@ function occurrence(id: string, status: TaskInstance['status']): TaskInstance {
     status_history: [],
     dependencies: [],
     generated_at: '2026-01-01T00:00:00Z',
+    nominal_date: '2026-01-01T00:00:00Z',
     created_at: '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',
     version: 1,

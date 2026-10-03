@@ -46,9 +46,8 @@ class TaskTemplateORM(Base):
         Enum("calendar", "completion", name="recurrence_anchor", create_constraint=True), nullable=False
     )
 
-    # Local "YYYY-MM-DD" the first occurrence is derived from (§3.2, §9.1, Rev 10). Nullable
-    # only for templates created before it existed; the API requires it on create.
-    start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Local "YYYY-MM-DD" the first occurrence is derived from (§3.2, §9.1, Rev 10).
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
 
     # --- Fixed-type scheduling ---
     fixed_time_of_day: Mapped[str | None] = mapped_column(String, nullable=True)  # wall-clock "HH:MM", §14.1

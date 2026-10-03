@@ -197,7 +197,7 @@ def build_candidate(db: Session, instance: TaskInstance, template: TaskTemplate,
         estimated_duration_minutes=instance.estimated_duration_minutes,
         active_hours_override=to_engine_active_hours(template.active_hours_override),
         dependency_completed_at=tuple(dependency_completed_at),
-        not_before=instance.nominal_date.astimezone(tz) if instance.nominal_date is not None else None,
+        not_before=instance.nominal_date.astimezone(tz),
     )
 
 

@@ -7,7 +7,7 @@ style as test_generation.py.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 from app.db.base import generate_id
@@ -33,6 +33,7 @@ def _template(**overrides: object) -> TaskTemplate:
         "archived": False,
     }
     defaults.update(overrides)
+    defaults.setdefault("start_date", date(2026, 1, 1))
     return TaskTemplate(**defaults)
 
 
@@ -52,6 +53,7 @@ def _instance(*, template: TaskTemplate, **overrides: object) -> TaskInstance:
         "version": 1,
     }
     defaults.update(overrides)
+    defaults.setdefault("nominal_date", defaults["generated_at"])
     return TaskInstance(**defaults)
 
 
@@ -68,7 +70,11 @@ class TestCalendarAnchorProjection:
             deadline_offset_minutes=None,
         )
         latest = _instance(
-            template=template, type="fixed", status="scheduled", scheduled_time=datetime(2026, 3, 2, 9, 0, tzinfo=NY)
+            template=template,
+            type="fixed",
+            status="scheduled",
+            scheduled_time=datetime(2026, 3, 2, 9, 0, tzinfo=NY),
+            nominal_date=datetime(2026, 3, 2, 9, 0, tzinfo=NY),
         )
         now = datetime(2026, 3, 3, 10, 0, tzinfo=NY)  # a Tuesday, mid-week
 
@@ -99,6 +105,7 @@ class TestCalendarAnchorProjection:
             type="fixed",
             status="scheduled",  # never completed - stale, per Example P
             scheduled_time=datetime(2026, 3, 9, 9, 0, tzinfo=NY),
+            nominal_date=datetime(2026, 3, 9, 9, 0, tzinfo=NY),
         )
         now = datetime(2026, 3, 10, 0, 0, tzinfo=NY)
 
@@ -124,6 +131,7 @@ class TestCompletionAnchorProjection:
             template=template,
             status="pending",
             deadline=datetime(2026, 4, 12, 14, 20, tzinfo=NY),  # nominal 2026-04-07 14:20 + 5 days
+            nominal_date=datetime(2026, 4, 7, 14, 20, tzinfo=NY),
         )
         now = datetime(2026, 4, 1, 0, 0, tzinfo=NY)  # before N+1's nominal date - not yet overdue
 
@@ -147,6 +155,7 @@ class TestCompletionAnchorProjection:
             template=template,
             status="pending",
             deadline=datetime(2026, 4, 12, 14, 20, tzinfo=NY),  # nominal 2026-04-07 14:20 - now in the past
+            nominal_date=datetime(2026, 4, 7, 14, 20, tzinfo=NY),
         )
         now = datetime(2026, 4, 20, 9, 0, tzinfo=NY)
 
@@ -181,7 +190,11 @@ class TestHorizonBoundary:
             deadline_offset_minutes=None,
         )
         latest = _instance(
-            template=template, type="fixed", status="scheduled", scheduled_time=datetime(2026, 3, 1, 9, 0, tzinfo=NY)
+            template=template,
+            type="fixed",
+            status="scheduled",
+            scheduled_time=datetime(2026, 3, 1, 9, 0, tzinfo=NY),
+            nominal_date=datetime(2026, 3, 1, 9, 0, tzinfo=NY),
         )
         now = datetime(2026, 3, 1, 9, 0, tzinfo=NY)
 
@@ -199,7 +212,11 @@ class TestHorizonBoundary:
             deadline_offset_minutes=None,
         )
         latest = _instance(
-            template=template, type="fixed", status="scheduled", scheduled_time=datetime(2026, 3, 1, 9, 0, tzinfo=NY)
+            template=template,
+            type="fixed",
+            status="scheduled",
+            scheduled_time=datetime(2026, 3, 1, 9, 0, tzinfo=NY),
+            nominal_date=datetime(2026, 3, 1, 9, 0, tzinfo=NY),
         )
         now = datetime(2026, 3, 1, 9, 0, tzinfo=NY)
 
@@ -220,7 +237,11 @@ class TestExclusions:
             archived=True,
         )
         latest = _instance(
-            template=template, type="fixed", status="scheduled", scheduled_time=datetime(2026, 3, 2, 9, 0, tzinfo=NY)
+            template=template,
+            type="fixed",
+            status="scheduled",
+            scheduled_time=datetime(2026, 3, 2, 9, 0, tzinfo=NY),
+            nominal_date=datetime(2026, 3, 2, 9, 0, tzinfo=NY),
         )
         now = datetime(2026, 3, 3, 0, 0, tzinfo=NY)
 

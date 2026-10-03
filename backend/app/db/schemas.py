@@ -73,9 +73,8 @@ class TaskTemplate(_Frozen):
     location: str | None = None
     type: TaskType
     recurrence: Recurrence
-    # Local calendar date the series starts from (§3.2, Rev 10). Required at creation;
-    # `None` only on a template created before the field existed.
-    start_date: date | None = None
+    # Local calendar date the series starts from (§3.2, Rev 10). Always set.
+    start_date: date
     fixed_time_of_day: str | None = None  # required if type == "fixed"
     deadline_offset_minutes: int | None = None  # required if type == "flexible"
     priority: Priority
@@ -114,8 +113,8 @@ class TaskInstance(_Frozen):
     # The occurrence's intended date from its recurrence rule (§9.1), fixed at generation.
     # Unlike `scheduled_time`/`deadline` it never changes with a this-occurrence edit, so
     # advancing the series from it can't be shifted by one occurrence's override. Also
-    # the completion anchor's earliest-start gate.
-    nominal_date: datetime | None = None
+    # the completion anchor's earliest-start gate. Always set.
+    nominal_date: datetime
     status: TaskInstanceStatus
     status_history: tuple[StatusHistoryEntry, ...] = ()
     dependencies: tuple[str, ...] = ()  # TaskInstance ids this instance is waiting on

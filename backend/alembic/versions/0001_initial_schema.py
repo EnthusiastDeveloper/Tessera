@@ -98,7 +98,7 @@ def upgrade() -> None:
             sa.Enum("calendar", "completion", name="recurrence_anchor", create_constraint=True),
             nullable=False,
         ),
-        sa.Column("start_date", sa.Date(), nullable=True),
+        sa.Column("start_date", sa.Date(), nullable=False),
         sa.Column("fixed_time_of_day", sa.String(), nullable=True),
         sa.Column("deadline_offset_minutes", sa.Integer(), nullable=True),
         sa.Column("priority", sa.Integer(), nullable=False),
@@ -186,7 +186,7 @@ def upgrade() -> None:
         sa.Column("detached", sa.Boolean(), nullable=False),
         sa.Column("scheduled_time", UTCDateTime(), nullable=True),
         sa.Column("deadline", UTCDateTime(), nullable=True),
-        sa.Column("nominal_date", UTCDateTime(), nullable=True),
+        sa.Column("nominal_date", UTCDateTime(), nullable=False),
         sa.Column(
             "status",
             sa.Enum(
