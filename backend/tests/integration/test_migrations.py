@@ -14,6 +14,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from sqlalchemy import create_engine, inspect
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
@@ -68,157 +69,38 @@ def test_upgrade_downgrade_upgrade_round_trip(tmp_path: Path) -> None:
     assert EXPECTED_TABLES <= _table_names(db_path)
 
 
-def test_nominal_date_backfill_reproduces_the_old_derivation(tmp_path: Path) -> None:
-    """b7d2c41e9a10 stores each instance's nominal date. Existing rows get exactly what the
-    code used to derive, so no series moves: flexible `deadline - deadline_offset_minutes`,
-    fixed `scheduled_time`.
-    """
-    db_path = tmp_path / "backfill.db"
-    _run_alembic("upgrade", "e03f2aeaad85", database_path=db_path)
-
-    ts = "2026-03-01 12:00:00.000000"
-    with sqlite3.connect(db_path) as conn:
-        for template_id, type_, offset in (("t-flex", "flexible", 1440), ("t-fixed", "fixed", None)):
-            conn.execute(
-                "INSERT INTO task_templates (id, name, type, recurrence_pattern, recurrence_anchor, priority,"
-                " estimated_duration_minutes, deadline_offset_minutes, reminder_offsets_minutes, archived,"
-                " created_at, updated_at, version) VALUES (?, 'x', ?, 'daily', 'calendar', 2, 30, ?, '[]', 0, ?, ?, 1)",
-                (template_id, type_, offset, ts, ts),
-            )
-        for instance_id, template_id, type_, scheduled, deadline in (
-            ("i-flex", "t-flex", "flexible", None, "2026-03-10 14:00:00.000000"),
-            ("i-fixed", "t-fixed", "fixed", "2026-03-05 23:00:00.000000", None),
-        ):
-            conn.execute(
-                "INSERT INTO task_instances (id, template_id, name, type, priority, estimated_duration_minutes, detached,"
-                " scheduled_time, deadline, status, status_history, generated_at, created_at, updated_at, version)"
-                " VALUES (?, ?, 'x', ?, 2, 30, 0, ?, ?, 'scheduled', '[]', ?, ?, ?, 1)",
-                (instance_id, template_id, type_, scheduled, deadline, ts, ts, ts),
-            )
-
+def test_the_baseline_matches_the_models_exactly(tmp_path: Path) -> None:
+    """`alembic check` finds nothing to autogenerate: the models and the migration have not
+    drifted apart. The baseline is edited by hand alongside the models (see its docstring), so
+    this is what keeps the two honest."""
+    db_path = tmp_path / "drift.db"
     _run_alembic("upgrade", "head", database_path=db_path)
-
-    with sqlite3.connect(db_path) as conn:
-        nominal = dict(conn.execute("SELECT id, nominal_date FROM task_instances").fetchall())
-    assert nominal["i-flex"].startswith("2026-03-09 14:00:00")  # deadline minus one day
-    assert nominal["i-fixed"].startswith("2026-03-05 23:00:00")  # scheduled_time
+    _run_alembic("check", database_path=db_path)
 
 
-def test_start_date_backfill_uses_the_earliest_occurrence_else_the_creation_day(tmp_path: Path) -> None:
-    """c5a8e2f41d07 (design doc §3.2, Rev 10): an existing template's `start_date` is the
-    local date of its earliest occurrence, or the day it was created if it has none."""
-    db_path = tmp_path / "start_date.db"
-    _run_alembic("upgrade", "b7d2c41e9a10", database_path=db_path)
+def test_there_is_exactly_one_migration(tmp_path: Path) -> None:
+    """Until the first release holding data worth keeping, the schema is one baseline that is
+    edited in place (its docstring says when that stops). A second file appearing is that
+    policy changing - make it a decision, not an accident."""
+    versions = sorted(path.name for path in (BACKEND_DIR / "alembic" / "versions").glob("*.py"))
+    assert versions == ["0001_initial_schema.py"]
 
-    ts = "2026-03-01 12:00:00.000000"
-    with sqlite3.connect(db_path) as conn:
-        for template_id in ("t-series", "t-empty"):
-            conn.execute(
-                "INSERT INTO task_templates (id, name, type, recurrence_pattern, recurrence_anchor, priority,"
-                " estimated_duration_minutes, deadline_offset_minutes, reminder_offsets_minutes, archived,"
-                " created_at, updated_at, version) VALUES (?, 'x', 'flexible', 'daily', 'calendar', 2, 30, 1440, '[]', 0, ?, ?, 1)",
-                (template_id, ts, ts),
-            )
-        for instance_id, nominal in (("i-later", "2026-03-09 05:00:00.000000"), ("i-first", "2026-03-04 05:00:00.000000")):
-            conn.execute(
-                "INSERT INTO task_instances (id, template_id, name, type, priority, estimated_duration_minutes, detached,"
-                " deadline, nominal_date, status, status_history, generated_at, created_at, updated_at, version)"
-                " VALUES (?, 't-series', 'x', 'flexible', 2, 30, 0, ?, ?, 'pending', '[]', ?, ?, ?, 1)",
-                (instance_id, nominal, nominal, ts, ts, ts),
-            )
 
+def test_database_level_constraints_survive_in_the_baseline(tmp_path: Path) -> None:
+    """The CHECK constraints come from `sa.Enum(create_constraint=True)`; autogenerate emits
+    them again as separate constraints, which the baseline leaves out - so make sure each is
+    still enforced, once."""
+    db_path = tmp_path / "constraints.db"
     _run_alembic("upgrade", "head", database_path=db_path)
-
-    with sqlite3.connect(db_path) as conn:
-        start_dates = dict(conn.execute("SELECT id, start_date FROM task_templates").fetchall())
-    assert start_dates == {"t-series": "2026-03-04", "t-empty": "2026-03-01"}
-
-
-def test_dropping_custom_recurrence_rewrites_existing_rows_to_daily(tmp_path: Path) -> None:
-    """f4a1c7d93b52 removes `custom` (IRR-2 M1). The generator treated it as "every
-    `interval` days", so existing rows become `daily` - same behaviour - and the CHECK
-    constraint no longer admits the value.
-    """
-    db_path = tmp_path / "custom.db"
-    _run_alembic("upgrade", "d91f3b6c2e84", database_path=db_path)
-
     ts = "2026-03-01 12:00:00.000000"
+    insert = (
+        "INSERT INTO task_templates (id, name, type, recurrence_pattern, recurrence_anchor, priority,"
+        " estimated_duration_minutes, reminder_offsets_minutes, archived, created_at, updated_at, version)"
+        " VALUES ('t', 'x', 'flexible', ?, 'calendar', 2, 30, '[]', 0, ?, ?, 1)"
+    )
     with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            "INSERT INTO task_templates (id, name, type, recurrence_pattern, recurrence_interval, "
-            "recurrence_anchor, priority, estimated_duration_minutes, reminder_offsets_minutes, "
-            "archived, created_at, updated_at, version) "
-            "VALUES ('t1', 'x', 'flexible', 'custom', 3, 'calendar', 2, 30, '[]', 0, ?, ?, 1)",
-            (ts, ts),
-        )
-
-    _run_alembic("upgrade", "head", database_path=db_path)
-
-    with sqlite3.connect(db_path) as conn:
-        assert conn.execute("SELECT recurrence_pattern, recurrence_interval FROM task_templates").fetchall() == [("daily", 3)]
-        try:
-            conn.execute("UPDATE task_templates SET recurrence_pattern = 'custom'")
-        except sqlite3.IntegrityError:
-            pass
-        else:  # pragma: no cover - the assertion is the point
-            raise AssertionError("`custom` is still accepted by the recurrence_pattern CHECK constraint")
-
-
-def test_active_hours_become_window_lists_and_empty_windows_exclude_the_day(tmp_path: Path) -> None:
-    """a2b7e5c19d36 (design doc §3.7, Rev 13): each day's single window becomes a one-item
-    list. A window with no length placed nothing before, so it becomes an excluded day
-    instead of turning into an overnight window; the downgrade keeps one window per day."""
-    import json
-
-    db_path = tmp_path / "windows.db"
-    _run_alembic("upgrade", "f4a1c7d93b52", database_path=db_path)
-
-    ts = "2026-03-01 12:00:00.000000"
-    old_settings = {
-        "monday": {"start": "09:00", "end": "17:00"},
-        "tuesday": None,
-        "wednesday": {"start": "18:00", "end": "18:00"},
-    }
-    old_override = {"friday": {"start": "22:00", "end": "02:00"}, "saturday": {"start": "08:00", "end": "12:00"}}
-    with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            "INSERT INTO user_settings (id, timezone, active_hours, blackout_dates, daily_time_budget_minutes,"
-            " budget_enforcement, first_day_of_week) VALUES ('s', 'UTC', ?, '[]', '{}', 'soft', 'monday')",
-            (json.dumps(old_settings),),
-        )
-        conn.execute(
-            "INSERT INTO task_templates (id, name, type, recurrence_pattern, recurrence_anchor, priority,"
-            " estimated_duration_minutes, deadline_offset_minutes, reminder_offsets_minutes, archived,"
-            " active_hours_override, created_at, updated_at, version)"
-            " VALUES ('t', 'x', 'flexible', 'daily', 'calendar', 2, 30, 1440, '[]', 0, ?, ?, ?, 1)",
-            (json.dumps(old_override), ts, ts),
-        )
-
-    _run_alembic("upgrade", "head", database_path=db_path)
-    with sqlite3.connect(db_path) as conn:
-        settings = json.loads(conn.execute("SELECT active_hours FROM user_settings").fetchone()[0])
-        override = json.loads(conn.execute("SELECT active_hours_override FROM task_templates").fetchone()[0])
-    assert settings == {"monday": [{"start": "09:00", "end": "17:00"}], "tuesday": None, "wednesday": None}
-    # An overnight window is a new capability; the old schema never had one, so nothing to convert.
-    assert override == {"friday": None, "saturday": [{"start": "08:00", "end": "12:00"}]}
-
-    with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            "UPDATE user_settings SET active_hours = ?",
-            (
-                json.dumps(
-                    {
-                        "monday": [
-                            {"start": "22:00", "end": "02:00"},
-                            {"start": "09:00", "end": "12:00"},
-                            {"start": "13:00", "end": "15:00"},
-                        ]
-                    }
-                ),
-            ),
-        )
-    _run_alembic("downgrade", "f4a1c7d93b52", database_path=db_path)
-    with sqlite3.connect(db_path) as conn:
-        assert json.loads(conn.execute("SELECT active_hours FROM user_settings").fetchone()[0]) == {
-            "monday": {"start": "09:00", "end": "12:00"}
-        }
+        conn.execute(insert, ("daily", ts, ts))
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(insert.replace("'t'", "'u'"), ("custom", ts, ts))
+        (sql,) = conn.execute("SELECT sql FROM sqlite_master WHERE name = 'task_templates'").fetchone()
+    assert sql.count("CONSTRAINT recurrence_pattern") == 1

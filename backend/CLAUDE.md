@@ -44,3 +44,12 @@ Routes take their DB session as `db: Session = DB_SESSION` (`app/api/dependencie
 Job calls are **commit-bound**: routes (`get_request_job_scheduler`), fired jobs (`_dispatch`) and startup reconciliation all hand services a `TransactionalJobScheduler` (`app/jobs/transactional.py`), which buffers calls and replays them only after the DB transaction commits. A rollback discards them. Keep calling the scheduler from inside the service method as usual; don't reorder calls to "commit first".
 
 **Startup reconciliation (architecture-plan 4.2):** On app start, before serving traffic, reconcile the job store against `TaskInstance` rows - recreate any missing jobs, cancel any orphaned ones. This guards against crashes mid-batch leaving them out of sync.
+
+## Database schema & migrations
+
+The whole schema is **one baseline migration**, `backend/alembic/versions/0001_initial_schema.py`. No deployment has ever held data worth carrying forward, so while that stays true:
+
+- Change the schema by editing the models **and** that file together. A test (`test_the_baseline_matches_the_models_exactly`, i.e. `alembic check`) fails when they drift, and another (`test_there_is_exactly_one_migration`) fails if a second file appears.
+- A database created by an earlier build can't be brought forward - delete it and run the setup wizard again.
+
+**From the first release that real data lives on, stop.** Never edit `0001` again: an existing database records its version in `alembic_version` and can only be moved forward by *new* steps. Add one migration per change (`alembic revision --autogenerate`, then review it - SQLite needs `batch_alter_table`, and autogenerate emits every `Enum`'s CHECK constraint again as a redundant `CheckConstraint`), write its downgrade, test it against a database holding real rows, and delete `test_there_is_exactly_one_migration`.
