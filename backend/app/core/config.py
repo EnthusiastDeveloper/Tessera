@@ -5,6 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 SessionCookieSecureSetting = Literal["auto", "true", "false"]
@@ -33,11 +34,23 @@ class Settings(BaseSettings):
     # --- Settings (Stage 4) ---
     tz: str | None = None  # default timezone for the first-run UserSettings row, design doc §14.1
 
+    # --- Schedule optimization (design doc §6.11, Rev 14) ---
+    # How long "Optimize Schedule" may run before the UI says it is taking longer than
+    # expected, and before it is declared failed (nothing applied, edits unlocked).
+    optimization_slow_after_seconds: int = Field(default=10, ge=1)
+    optimization_timeout_seconds: int = Field(default=30, ge=1)
+
     # --- Calendar sync (Stage 7) ---
     google_client_id: str | None = None
     google_client_secret: str | None = None
     outlook_client_id: str | None = None
     outlook_client_secret: str | None = None
+
+    @model_validator(mode="after")
+    def _timeout_follows_the_slow_notice(self) -> Settings:
+        if self.optimization_timeout_seconds <= self.optimization_slow_after_seconds:
+            raise ValueError("OPTIMIZATION_TIMEOUT_SECONDS must be greater than OPTIMIZATION_SLOW_AFTER_SECONDS")
+        return self
 
     def resolve_session_cookie_secure(self) -> bool:
         """Whether the session cookie should carry `Secure`. See architecture-plan §6.1.

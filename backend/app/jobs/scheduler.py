@@ -113,6 +113,8 @@ def _dispatch(job_key: str) -> None:
                 handlers.run_deadline_elapsed_sweep(db, jobs)
             elif kind == "calendar_poll":
                 handlers.run_calendar_poll(db, jobs, connection_id=parts[1])
+            elif kind == "schedule_optimization":
+                handlers.run_schedule_optimization(db, jobs, optimization_id=parts[1])
             elif kind == "schedule_repair":
                 handlers.run_schedule_repair(db, jobs, repair_id=parts[1])
             else:

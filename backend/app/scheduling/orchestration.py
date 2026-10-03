@@ -102,22 +102,11 @@ def place_or_defer(
 
     if result.placements:
         placement = result.placements[0]
-        updated = TaskInstanceRepository(db).update(
-            instance.model_copy(
-                update={
-                    "status": _status("scheduled"),
-                    "scheduled_time": placement.scheduled_start,
-                    "status_history": (*instance.status_history, _status_entry("scheduled", now)),
-                }
-            )
-        )
-        resolve_notifications(db, instance_id=instance.id, types=(UNSCHEDULABLE,), now=now)
+        updated = place_instance_at(db, jobs, instance=instance, template=template, start=placement.scheduled_start, now=now)
         if placement.budget_overridden:
             create_notification(
                 db, type_=BUDGET_EXCEEDED, instance_id=instance.id, message=_budget_exceeded_message(template), now=now
             )
-        jobs.cancel(job_key=deadline_elapsed_job_key(instance.id))
-        schedule_reminder_and_overdue_jobs(jobs, updated, template.reminder_offsets_minutes)
         return updated
 
     # unschedulable - stays pending, but flag it if this is a newly-surfaced condition.
@@ -132,6 +121,28 @@ def place_or_defer(
     if instance.deadline is not None:
         jobs.schedule_at(job_key=deadline_elapsed_job_key(instance.id), run_at=instance.deadline)
     return instance
+
+
+def place_instance_at(
+    db: Session, jobs: JobScheduler, *, instance: TaskInstance, template: TaskTemplate, start: datetime, now: datetime
+) -> TaskInstance:
+    """`pending` -> `scheduled` at `start`: the status and history, the instance's now-stale
+    `unschedulable` notification resolved, and its deadline-elapsed job swapped for the
+    reminder and overdue jobs of its slot. The one implementation behind placing from
+    `place_or_defer` and from schedule optimization (design doc §6.11)."""
+    updated = TaskInstanceRepository(db).update(
+        instance.model_copy(
+            update={
+                "status": _status("scheduled"),
+                "scheduled_time": start,
+                "status_history": (*instance.status_history, _status_entry("scheduled", now)),
+            }
+        )
+    )
+    resolve_notifications(db, instance_id=instance.id, types=(UNSCHEDULABLE,), now=now)
+    jobs.cancel(job_key=deadline_elapsed_job_key(instance.id))
+    schedule_reminder_and_overdue_jobs(jobs, updated, template.reminder_offsets_minutes)
+    return updated
 
 
 def generate_and_place_next_instance(
