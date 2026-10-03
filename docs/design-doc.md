@@ -1,6 +1,8 @@
 # Tessera - Design Document (POC)
-### Revision 13
+### Revision 14
 
+> **Revision 14 designs the user-triggered schedule re-optimisation (Backlog 12.23, now Section 6.11) - design only, nothing is built yet.** One button re-places every flexible task in a single global pass, which is the escape hatch for 6.2's accepted greedy corner-painting. The user stays in control: if the new arrangement would take a task that is currently scheduled out of the schedule, nothing happens until the user approves it; if it takes nothing away, it applies at once; either way the user sees a summary of every change, and a short-lived Undo follows. Section 11 items 23-24 record the two decisions made by the stakeholder; items 25-28 are proposals made while drafting that await sign-off. Everything below about Revisions 9 to 13 still stands unless this revision says otherwise.
+>
 > **Revision 13 gives every day a list of active-hours windows, and lets a window run overnight** (Section 11 item 22, Backlog 12.25 built). A day can now be split - a morning and an evening window - and a window whose end is before its start ends the next morning. Placement works on the resulting stretches of absolute time (6.2), feasibility and schedule repair measure the same stretches (6.8, 6.10), a blackout date cuts at midnight, and the daily budget counts the calendar date the time falls on (3.7). The wire shape of `active_hours` and `active_hours_override` changes from one window per day to a list (architecture plan 3). A day's single window behaves exactly as before. Everything below about Revisions 9 to 12 still stands unless this revision says otherwise.
 >
 > **Revision 12 closes the Medium findings of IRR-2 (M1-M16).** Most were already decided or built and are now stated where the next reader will look; the rest are decided here (Section 11 items 18-22): the undefined `custom` recurrence pattern is dropped (3.2), field validation limits are tabulated (new 3.13), instances speak the same priority labels as templates (3.2, 3.3), and what external sync does today is written down (7). Nothing about scheduling behaviour changes. Everything below about Revisions 9, 10 and 11 still stands unless this revision says otherwise.
@@ -39,6 +41,7 @@ Full diffs are in git; IRR-2 (`docs/implementation-readiness-review-2.md`) holds
 | 11 | Deleting a series deletes every open occurrence; a timezone change moves nothing; stricter scheduling rules repair the schedule in the background (6.10) |
 | 12 | IRR-2 Medium findings closed: `custom` recurrence dropped, field validation table (3.13), priority labels on the wire for instances, current external-sync behaviour documented (7), calendar selection and failed-sync visibility recorded as Backlog |
 | 13 | Active hours are a **list of windows per day**, and a window may run **overnight**; a blackout cuts at midnight and budgets count the calendar date (3.7, 6.2, 6.8, 6.10); Worked Examples Q and R |
+| 14 | **Design only:** user-triggered schedule re-optimisation (6.11) - a global re-placement of flexible work that needs the user's approval only when it would take a scheduled task out of the schedule, always shows a summary, and can be undone for a short time; Worked Examples S-V; Section 11 items 23-28; Backlog 12.28-12.30 |
 
 **Revision 9 changelog.** Eighteen IRR-2 findings, following stakeholder decisions taken 2026-08-05 to 2026-08-07. Revision 8's "locked" status meant "no unilateral edits"; it did not mean "verified correct". IRR-2 records what each finding was and why it mattered; this lists only what the specification now says.
 
@@ -646,6 +649,8 @@ Rules:
 | `budget_exceeded` | A flexible task was placed by overriding its day's `daily_time_budget_minutes` because no compliant slot existed before the deadline (see 6.2) | Informational; user may relax the deadline, move another task off that day, or accept it |
 | `deadline_missed` *(added Rev 6)* | A flexible instance's `deadline` elapses while status is `pending` or `blocked` (see 6.7) | User extends deadline, marks complete, or deletes the instance/template - auto-resolves when any of those happen (3.9) |
 
+**(Revision 14)** Re-optimisation (6.11) adds no notification type. The `unschedulable` and `budget_exceeded` notifications it raises are the ordinary ones for those facts; its summary is shown by the screen that triggered it, not stored as a notification.
+
 All types support auto-resolution per 3.9, **except `budget_exceeded`**: it records something that already happened (the task was placed over budget), not an ongoing condition that can clear on its own - it's dismissed like a normal informational notice, never auto-resolved.
 
 ---
@@ -780,7 +785,7 @@ Notes:
 - Single fixed greedy algorithm for POC (Backlog 12.9 covers alternatives). The minimum-overage comparison in Pass 2 is a bounded, deterministic tie-break rule, not a pluggable/alternate algorithm - it stays within that scope.
 - "Obstacles" accumulate within a single pass, preventing self-collision among flexible tasks placed in the same run. **(Rev 9)** This note now describes only the intra-pass increment; instances placed in *previous* passes are obstacles by virtue of their `scheduled`/`in_progress` status, per the corrected obstacle set above.
 - `allowed_hours`, `excluded_dates`, and `daily_time_budget_minutes` apply to flexible placement only - never to fixed tasks (3.7).
-- **(Added Revision 9) Greedy corner-painting is accepted behaviour, not a defect.** Because earlier placements are immovable, a later task can be reported `unschedulable` even though some global re-arrangement of the week would have fitted it. This is the price of placement stability, and it is deliberate: a scheduler that silently moves work you have already planned around is worse than one that occasionally tells you it cannot fit something. A user-triggered "re-optimise my schedule" reflow is the natural escape hatch and is Backlog 12.23, not POC.
+- **(Added Revision 9) Greedy corner-painting is accepted behaviour, not a defect.** Because earlier placements are immovable, a later task can be reported `unschedulable` even though some global re-arrangement of the week would have fitted it. This is the price of placement stability, and it is deliberate: a scheduler that silently moves work you have already planned around is worse than one that occasionally tells you it cannot fit something. A user-triggered "re-optimise my schedule" reflow is the natural escape hatch; it is designed in 6.11 (Revision 14) and is not built yet.
 - Budget accounting includes fixed tasks and external events, not just flexible ones (3.7) - a day already full of meetings shouldn't also absorb a stack of chores just because no *flexible* task has been placed there yet.
 - **The daily budget's strictness is configurable via `budget_enforcement`** (3.7). In `"strict"` mode, Pass 2 never runs - a Pass-1 failure becomes `unschedulable` directly, even if a physically free slot exists elsewhere in the window. In `"soft"` mode (default), Pass 2 runs and picks the least-damaging day as described above.
 - `unschedulable` is reserved for the case where no slot exists **even after ignoring the budget** (in `"soft"` mode), or where Pass 1 simply fails (in `"strict"` mode) - i.e. there's genuinely no acceptable time before the deadline under the configured policy.
@@ -909,6 +914,59 @@ Placement is an incremental fit (6.2): a valid placement is never moved. But a p
 **The repair.** Each occurrence that no longer fits returns to `pending` and is placed again by 6.2 under the new rules - an added entry point into 6.2, not a new mechanism - or is flagged `unschedulable` if nothing fits before its deadline. A task whose duration no longer fits *any* day (6.8) ends up `unschedulable` this way rather than being rejected: the settings change is legitimate and is never blocked.
 
 **Progress is visible (8.1).** A repair can touch many occurrences, so it runs in the background after the settings are saved rather than inside the save. While it runs, the UI covers the screen with an overlay reading "Fixing the calendar (*n*/*total*)…", updated as each occurrence is handled, so the user can see the system is working and not stuck; when it ends, the overlay closes with a summary (how many were moved, how many could not be placed - those are in Notifications). A settings change that invalidates nothing shows no overlay. A template's own override change repairs its occurrences as part of the edit itself (3.10), since there are at most a handful.
+
+### 6.11 Schedule re-optimisation (added Revision 14 - designed, not yet built)
+
+Placement is an incremental fit (6.2): each task is placed once, into the gaps that exist at that moment, and is never moved by a later pass. That is deliberate, and its price is accepted: after weeks of arrivals a task can be `unschedulable` although a different arrangement of the same week would have fitted it. Re-optimisation is the user's way to ask for that different arrangement. It is Backlog 12.23, promoted.
+
+**Explicit, never automatic.** It runs only when the user asks (a "Re-optimise schedule" action, 8.1). It is never scheduled, never a side effect of an edit, a sync or a settings change, and never run on the user's behalf - silently moving work someone has planned around is exactly what 6.2 rules out. (A rule change that strands placements is 6.10's repair, a different and narrower thing.)
+
+**What it considers.**
+- **Candidates - the work that may move:** every `scheduled` flexible instance, and every `pending` flexible instance, including those currently flagged `unschedulable`, which get another chance.
+- **Obstacles - what stays exactly where it is:** `fixed` instances (a `blocked` one holds its slot, 6.5), `in_progress` instances of either type, and filtered external events (7). `blocked` flexible instances have no placement to move; `completed`, `missed` and `dismissed` ones are not candidates.
+- **Rules - identical to 6.2, with nothing new:** earliest start (`now`, dependencies' `completed_at`, `nominal_date`), the effective windows and blackout dates (3.7), the 15-minute grid, the daily budget and `budget_enforcement` with Pass 1 and Pass 2, and the order `deadline ASC, priority DESC`. Re-optimisation changes **when the placement algorithm runs, not how it decides.** A candidate's `detached` flag is irrelevant here (it concerns template edits, 3.10) and moving a task never sets it.
+
+**The plan.** First a pure computation that writes nothing: the placement algorithm runs over the candidates with their own current placements removed from the obstacle set. Each candidate's result is compared with its present state:
+
+| Outcome | Meaning |
+|---|---|
+| unchanged | placed in the same slot as now |
+| **moved** | `scheduled` before and after, in a different slot |
+| **newly scheduled** | `pending` before, placed now |
+| **lost** | `scheduled` before, no slot now - it would return to `pending` and be flagged `unschedulable` |
+| still unplaced | `pending` before and after |
+| **newly over budget** | placed now only by Pass 2's budget override (6.2) where it was not before |
+
+*Degradation* means **lost** or **newly over budget** - something the user had that they would no longer have.
+
+**What happens with the plan.** Exactly one of three results:
+1. **Nothing to do.** The plan is identical to today's schedule, or it would place *fewer* flexible tasks in total than are placed today (a global greedy pass can do worse than the history that produced the current schedule - Example U). A plan that is no improvement is not offered. Nothing is written; the user is told no better arrangement exists.
+2. **Applied.** At least one change and no degradation: nothing the user had is taken away, so the plan is applied immediately, without a confirmation. The user sees the summary and can undo (below).
+3. **Needs approval.** At least one degradation: nothing is written. The user is shown the plan - the tasks that would lose their place first, each with the reason, then everything else - and chooses **Apply** or **Cancel**. Cancelling changes nothing.
+
+**An approval has a short life.** A plan waiting for approval is good for 10 minutes. On approval the server recomputes the plan; if it is not the plan the user was shown (an event synced, a task was edited, time passed) nothing is applied and the new plan is shown for approval instead (`plan_changed`). The user therefore only ever approves what will actually happen.
+
+**Applying.** One transaction, all or nothing, using the same placement-change path as every other re-placement (6.4, 6.5, 6.10) rather than a second mechanism:
+- **moved:** `scheduled_time` changes; its reminder, overdue and deadline-elapsed jobs are re-pointed (architecture plan 4.1).
+- **newly scheduled:** `pending` -> `scheduled`; its `unschedulable` notification auto-resolves (3.9).
+- **lost:** `scheduled` -> `pending`; its jobs are cancelled and an `unschedulable` notification is raised, de-duplicated like any other (3.4).
+- **newly over budget:** placed, with a `budget_exceeded` notification as in 6.2.
+- Status changes append to `status_history` as usual; a plain move changes only `scheduled_time`. Each changed row's `version` advances (architecture plan 5).
+- It refuses to start while a 6.10 repair is still running (`repair_in_progress`), so the two never rearrange the same tasks at once.
+
+**The summary - always.** Whatever the result, the user sees what changed: at a glance how many tasks were newly scheduled, moved, lost or now over budget and how many were left alone; then, in chronological order of their new time, **newly scheduled** (name, time), **moved** (name, old time -> new time), **lost** (name, deadline, reason - no free slot before the deadline) and **over budget** (name, day). For a plan awaiting approval it is the plan; after applying it is the record, kept readable for as long as the Undo is offered. It is **not** a `Notification`: a re-optimisation would otherwise bury the panel, and the notifications it *does* raise (`unschedulable`, `budget_exceeded`) are the ordinary ones for those facts.
+
+**Undo.** Re-optimisation can surprise, so an applied one - clean or approved - can be taken back for **10 minutes**, in one step (one level, the whole operation). It is available only while it is still safe, namely when **all** of these hold, and refused with the reasons (`undo_unavailable`) when not:
+- the 10 minutes have not passed and it has not already been undone;
+- every instance it changed still has the `version` it had when the operation finished - nobody edited, moved, completed, dismissed or deleted it since;
+- every slot about to be restored is still free of obstacles - apart from the instances the operation itself changed, which are being put back together, nothing else, not a task placed meanwhile and not a newly synced event, now sits there.
+
+Undoing puts every changed instance back as it was (newly scheduled ones to `pending`, lost ones to `scheduled` in their old slot, moved ones to their old slot) through the same transaction, job re-wiring and notification reconciliation as applying - a restore of *placements*, never a copy-back of rows. Undo is not itself undoable. After the window the action disappears; the summary stays readable as the latest result.
+
+**What it is not.** Not a partial reflow (a date range, or chosen tasks: Backlog 12.28); not churn-averse (it may move tasks that did not strictly need to move, since the greedy order decides: Backlog 12.29); not a history of past runs (Backlog 12.30); and not a change to any placement rule.
+
+---
+
 ## 7. External Calendar Integration (POC scope)
 
 Read-only, polling-based (webhooks require a publicly reachable endpoint, conflicting with LAN-only self-hosting - deferred, Backlog 12.5). Configured per-provider in Settings: connect account (OAuth), set `refresh_interval_minutes`. Staleness between polls should be visible to the user (e.g. "Calendar last synced: 4 minutes ago"), not hidden.
@@ -938,6 +996,7 @@ WebUI only (Backlog 12.2 for IM bot).
 0. **First-run setup screen (added Rev 9)** - shown only while zero `User` rows exist (3.6). Takes the **setup token** printed in the container log, and sets the admin password (minimum 12 characters, confirmed twice). The screen must say where to find the token. Unreachable once an account exists; every other screen redirects here until one does.
 1. **Login screen** - username/password (see 3.6, 14.2).
 2. **Timeline / Task list view** - calendar-style view of `scheduled` instances and **(Rev 10) `blocked` fixed instances**, plus **display-only virtual/"ghost" projections of upcoming recurring occurrences (9.2, added Revision 6)**, external busy-blocks overlaid read-only and visually distinguished (post-filtering per Section 7), blackout dates visibly marked.
+   - **(Rev 14, designed) "Re-optimise schedule" action** (6.11) in the Timeline's toolbar. It may open one of three things: **"No better arrangement"** (a short message; nothing changed); the **approval dialog** when the plan would take a scheduled task out of the schedule - the affected tasks first, each with its reason, then the other changes, buttons *Apply* and *Cancel*, naming how long the plan stays valid; or, when it applied at once, the **summary** with an **Undo** button counting down its 10 minutes (and, if undo has become unsafe, saying why instead of failing silently). The summary is reachable again after a reload for as long as the Undo is offered. The Backlog view (5a) offers the same action next to its `unschedulable` items, since that is where the pain shows.
    - **(Rev 11) Timezone mismatch notice** (14.1): when the device's timezone differs from the timezone setting, a persistent label says so, naming both.
    - **(Rev 10) Waiting fixed tasks are shown, not hidden.** A `blocked` fixed instance holds its time while it waits (6.5), so leaving it off would make that slot look free. It is drawn at its time but visibly distinct from a ready task - a dashed border on a half-transparent fill - and labelled with what it is waiting on. Like any Timeline item it opens the task detail view. It is also listed in the Backlog view (5a).
 3. **Task creation/edit form** - for a new task, or when editing a one-time (`recurrence: one_time`) template, edits the `TaskTemplate` directly as in Revision 6. **(Rev 10)** Creation asks for the **start date** (`start_date`, 3.2) with the other parameters, and for a flexible task presents `deadline_offset_minutes` as how long each occurrence may take to get done, counted from its date. **(Rev 7)** For an existing recurring task, first prompts for edit scope - **"this occurrence"** vs. **"this and future occurrences"** (3.10) - before applying the edit; includes the optional active-hours override (3.2); surfaces the archival/deletion warning (3.8); surfaces the feasibility validation error on save if applicable (6.8, added Revision 6).
@@ -1284,11 +1343,45 @@ This is the case that makes 9.1's occurrence-boundary rule necessary: gating gen
 - **Daily budgets Monday 30 min and Tuesday 30 min, no obstacle, a 60-minute task:** 22:00 would put 60 minutes on Monday, so Pass 1 settles on **23:30**, which spends 30 on each date. Had Tuesday's budget been 20, no split fits; in `soft` mode Pass 2 then places at 22:00 (30 over on Monday beats 40 over on Tuesday).
 - **Feasibility (6.8):** a 240-minute task is accepted against this window alone and a 241-minute one is rejected, since the overnight window is one four-hour stretch.
 
+
+**Example S - A re-optimisation that takes nothing away (6.11 - added Rev 14).**
+
+| Given | |
+|---|---|
+| Timezone, `now` | America/New_York, Mon 2026-04-06 12:00 |
+| Active hours | every day `[{18:00, 20:00}]`; no budget; no obstacles |
+| Tasks, created in this order | **B** 30 min, deadline Wed 20:00, high priority; **C** 60 min, deadline Tue 20:00, low; **A** 60 min, deadline Mon 20:00, low |
+| Schedule today (6.2, one at a time) | B Mon 18:00, C Mon 18:30; **A is `unschedulable`** - only 30 minutes of Monday remain, and Monday 20:00 is its deadline |
+
+**Plan:** order by deadline, then priority: A, C, B. A takes Mon 18:00-19:00, C Mon 19:00-20:00, and B (deadline Wednesday) falls to **Tue 18:00**. **Expected:** A newly scheduled; B moved Mon 18:00 -> Tue 18:00; C moved Mon 18:30 -> Mon 19:00; nobody lost. No degradation, so it **applies at once**, without a confirmation, and the summary offers Undo.
+
+**Example T - A re-optimisation that needs approval (6.11).**
+
+| Given | |
+|---|---|
+| Active hours, `now` | as Example S |
+| Tasks, created in this order | **B** 60 min, high; **A** 60 min, low; **C** 60 min, medium - all with deadline Mon 20:00 |
+| Schedule today | B Mon 18:00, A Mon 19:00; **C is `unschedulable`** (the window was full when it arrived) |
+
+**Plan:** order by priority within the shared deadline: B, C, A. B stays at 18:00, C takes 19:00, and **A has nowhere to go**. The same number of tasks is placed as today, but a task the user had - A - would be lost. **Expected:** nothing is written; the approval dialog lists **A** first ("no free slot before its deadline, Mon 20:00"), then C newly scheduled. *Cancel* leaves the schedule untouched. *Apply* schedules C, returns A to `pending` with an `unschedulable` notification, and offers Undo.
+
+**Example U - A plan that is not offered (6.11).**
+
+| Given | |
+|---|---|
+| Active hours, `now` | as Example S |
+| Tasks, created in this order | **B** 60 min, medium; **C** 60 min, low; **A** 90 min, high - all with deadline Mon 20:00 |
+| Schedule today | B Mon 18:00, C Mon 19:00; A is `unschedulable` (it arrived after the window was full) |
+
+**Plan:** A ranks first and takes 18:00-19:30; neither B nor C then fits before 20:00. Two tasks placed today become one. **Expected:** **nothing to do** - the plan would place fewer tasks than today, so it is not offered, nothing is written, and the user is told no better arrangement exists. (Without this rule the user would be asked to approve a strictly worse schedule.)
+
+**Example V - Undo, and when it is refused (6.11).** Example S has just been applied at 12:05. **At 12:08** the user presses Undo: every changed task is as the operation left it and every old slot is free, so A returns to `pending`, B to Mon 18:00 and C to Mon 18:30, jobs and notifications following. **Variation 1:** at 12:06 the user marked C complete - C's `version` moved, so Undo is refused (`undo_unavailable`, "C was changed after the re-optimisation") and nothing is restored. **Variation 2:** at 12:06 a calendar sync added an event on Mon 18:00-18:30, B's old slot - the restore would collide, so Undo is refused naming B and the event. **Variation 3:** at 12:16 the 10 minutes have passed; the action has gone and the schedule stays as it is.
+
 ---
 
 ## 11. Open Questions Requiring Stakeholder Sign-off
 
-**Status as of Revision 13: no open items.** See the closing note below for why that is not the same as "the document is fully verified".
+**Status as of Revision 14: no open items, apart from four proposals (25-28) that await the stakeholder's sign-off.** See the closing note below for why that is not the same as "the document is fully verified".
 
 Items 1–7 were raised by the first readiness review and resolved in Revisions 7 and 8; their outcomes are stated in the body of this document rather than restated here, and the full text is in git history. One is worth naming, because it was a **reversal** and a future reader is otherwise liable to reinstate the original position:
 
@@ -1326,7 +1419,19 @@ Revision 9 resolved eighteen findings from a second review (IRR-2). Two of them 
 
 22. ~~**Do overnight active-hours windows (`22:00`-`02:00`) belong in the POC, and what about split days?**~~ **RESOLVED - Revision 13 (IRR-2 M4, Backlog 12.25 built).** Yes, both. A day holds a list of windows and a window may end the next morning; placement works on stretches of absolute time, a blackout cuts at midnight, and budgets count the calendar date (3.7, 6.2). A list rather than a single overnight-capable window, because the user's days are split and fluid and a list expresses that directly. The wire shape of `active_hours` / `active_hours_override` becomes `{day: [window, ...] | null}`.
 
-**Section 11 has no open items at Revision 13.** Note this is narrower than Revision 8's claim that the document was "fully locked": nothing in IRR-2 remains open either: its High, Medium and editorial findings are all resolved, and its register keeps each one's reasoning. Section 11 tracks decisions awaiting confirmation; IRR-2 tracks findings awaiting a decision - and from here, a new finding would start a new register rather than reopen that one.
+23. ~~**When does re-optimising need the user's approval?**~~ **RESOLVED - Revision 14 (stakeholder direction).** Only when a task that is currently scheduled would be taken out of the schedule and become unschedulable. If the new arrangement takes nothing away, it is applied at once (6.11). Approval is for the plan the user was shown: if anything changes before they approve, they are shown the new plan instead.
+
+24. ~~**Must the user see what a re-optimisation did, and can they take it back?**~~ **RESOLVED - Revision 14 (stakeholder direction).** Always a summary of every change, whether or not approval was needed; and a short-lived Undo is to be provided (6.11).
+
+25. **PROPOSED, awaiting sign-off - does going over budget count as a loss that needs approval?** Proposed **yes**: a task that moves from within its day's budget to Pass 2's budget override is something the user had and no longer has (and raises a `budget_exceeded` notification), so it is a degradation like a lost placement. The alternative is to treat it as an ordinary move and only mention it in the summary.
+
+26. **PROPOSED, awaiting sign-off - may a plan that places fewer tasks than today be offered?** Proposed **no**: it is reported as "no better arrangement" and nothing is asked or written (Example U). A global greedy pass can do worse than the history that produced the current schedule, and asking the user to approve a strictly worse schedule helps nobody.
+
+27. **PROPOSED, awaiting sign-off - the length and conditions of Undo.** Proposed **10 minutes**, one level, available only while no changed task has been touched and no restored slot has been taken (6.11). The window is a hardcoded constant, like the 30-day projection horizon (9.2), not a setting. A longer window, or several levels, would need a much richer notion of "still safe" and is Backlog 12.30.
+
+28. **PROPOSED, awaiting sign-off - run it synchronously in one transaction, not as a background job.** Proposed: **synchronous**. The user is waiting for an answer, the work is bounded by the number of open flexible tasks, and a single all-or-nothing transaction is what makes Undo's before-and-after record trustworthy. 6.10's repair runs in the background because a settings save must not be held up and its progress overlay is the feedback; re-optimisation has neither reason. If the task count ever makes it slow, the apply step can move behind the same overlay without changing what it does.
+
+**Section 11 has no open items at Revision 13 other than the proposals above.** Note this is narrower than Revision 8's claim that the document was "fully locked": nothing in IRR-2 remains open either: its High, Medium and editorial findings are all resolved, and its register keeps each one's reasoning. Section 11 tracks decisions awaiting confirmation; IRR-2 tracks findings awaiting a decision - and from here, a new finding would start a new register rather than reopen that one.
 
 Two related items were resolved **without** flagging, since they don't change load-bearing behavior and follow directly from rules already on the books:
 - Instances may be marked `completed` directly without first being `scheduled` (3.3/4) - this is a natural reading of "the user did the task," not a new mechanism.
@@ -1360,11 +1465,14 @@ Two related items were resolved **without** flagging, since they don't change lo
 | 12.20 | Automatic splitting/chunking of a flexible task into multiple sub-slots when its duration exceeds any single day's active-hours window | Real capability, but needs partial-completion semantics, resumption logic, and its own notification design. POC ships a creation-time hard block instead (6.8, Rev 6) |
 | 12.21 | Per-template fixed-UTC-instant option for `fixed_time_of_day`, for tasks that should NOT re-project on a timezone change (e.g. a global webinar at a genuinely fixed absolute moment) | Additive to the wall-clock rule (14.1), not a replacement - layers on cleanly later as a per-template flag. Not requested for POC; raised and deliberately deferred during Section 11 item 5's resolution (Rev 8) |
 | 12.22 *(added Rev 9)* | Placing dependents against a prerequisite's *scheduled* time rather than its completion, so whole chains appear on the Timeline in advance | Genuinely better for previewing a plan, but it requires a dependency-invalidation cascade: placements are immovable (6.2), so moving a prerequisite would strand every dependent placed after it, needing re-placement, new job re-wiring, and a bounded exception to the immovability rule. That is a feature with its own design, not a side effect of deleting dead code. POC makes the work visible via the Backlog view (8.1) instead |
-| 12.23 *(added Rev 9)* | User-triggered "re-optimise my schedule" reflow - clear and re-place all `pending`/`scheduled` flexible instances in one global pass | The natural escape hatch for 6.2's accepted greedy corner-painting. Deferred because it must be explicit and user-initiated: an automatic reflow would silently move work the user has already planned around, which 6.2 rules out deliberately |
+| 12.23 *(added Rev 9, designed Rev 14)* | User-triggered "re-optimise my schedule" reflow - clear and re-place all `pending`/`scheduled` flexible instances in one global pass | **Designed in Revision 14 (6.11), not yet built.** Explicit and user-initiated, with approval when it would take a scheduled task out, an always-shown summary, and a short Undo |
 | 12.24 *(added and withdrawn in Rev 9)* | ~~Non-destructive `dismiss` for a stale recurring occurrence~~ | **Withdrawn - built into the POC**, not deferred. Section 11 item 8 resolved in favour of a `dismissed` terminal status (3.8, Section 4). Number retained rather than reused, so existing citations do not silently repoint |
 | 12.25 *(added Rev 12, built Rev 13)* | ~~Overnight and split active-hours windows~~ | **Built - Revision 13** (3.7, 6.2). Section 11 item 22 |
 | 12.26 *(added Rev 12)* | Choose which calendars of a connected account are synced (a `calendar_ids` selection on `ExternalCalendarConnection`) | The POC reads one calendar per connection - Google `primary`, Outlook's default (7). A selection needs a provider call to list calendars, a column and a settings control (IRR-2 M6) |
 | 12.27 *(added Rev 12)* | A failed-sync status or notification, and rate-limit/backoff handling for the poll | A failed poll is logged and shows as a stale "last synced" time; the next interval retries (7). Surfacing it properly wants a new notification type or a status field on the connection (IRR-2 M6) |
+| 12.28 *(added Rev 14)* | Re-optimise only part of the schedule: a date range, or tasks the user picks | 6.11 is all-or-nothing over every flexible task, which keeps the plan, the approval and the undo easy to reason about |
+| 12.29 *(added Rev 14)* | A churn-averse re-optimisation that prefers to leave a task where it is when it need not move | 6.11 re-runs the greedy order, so it may move tasks that did not strictly need to move; a stability preference means a second objective and a different plan algorithm |
+| 12.30 *(added Rev 14)* | A history of re-optimisations, and Undo beyond the 10-minute single step | 6.11 keeps only the latest operation and one level of undo; more needs a richer notion of when a restore is still safe |
 
 ### Open questions for 12.15 - resolve before holiday calendars are taken into active development
 
