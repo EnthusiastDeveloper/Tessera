@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ApiError, toApiError } from '../../api/client';
+import { useOptimization } from '../../optimization/OptimizationContext';
 import {
   completeInstance,
   dismissInstance,
@@ -64,6 +65,8 @@ function formatStatus(status: TaskInstanceStatus): string {
 export function TaskDetailPage(): JSX.Element {
   const { instanceId } = useParams<{ instanceId: string }>();
   const navigate = useNavigate();
+  // Read-only while "Optimize Schedule" runs (design doc §6.11).
+  const { locked } = useOptimization();
   const [state, setState] = useState<LoadState>('loading');
   const [instances, setInstances] = useState<TaskInstance[]>([]);
   const [error, setError] = useState<ApiError | null>(null);
@@ -209,7 +212,7 @@ export function TaskDetailPage(): JSX.Element {
 
       <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap', marginTop: 'var(--space-4)' }}>
         {canStart && (
-          <button type="button" disabled={submitting} onClick={() => void runAction(() => startInstance(instance.id))}>
+          <button type="button" disabled={submitting || locked} onClick={() => void runAction(() => startInstance(instance.id))}>
             Mark in progress
           </button>
         )}
@@ -217,28 +220,28 @@ export function TaskDetailPage(): JSX.Element {
           <button
             type="button"
             className="primary"
-            disabled={submitting}
+            disabled={submitting || locked}
             onClick={() => void runAction(() => completeInstance(instance.id))}
           >
             Mark complete
           </button>
         )}
         {canDismiss && (
-          <button type="button" disabled={submitting} onClick={() => void runAction(() => dismissInstance(instance.id))}>
+          <button type="button" disabled={submitting || locked} onClick={() => void runAction(() => dismissInstance(instance.id))}>
             Skip this occurrence
           </button>
         )}
         {canReschedule && !showRescheduleForm && (
-          <button type="button" disabled={submitting} onClick={() => setShowRescheduleForm(true)}>
+          <button type="button" disabled={submitting || locked} onClick={() => setShowRescheduleForm(true)}>
             Reschedule
           </button>
         )}
         {canExtendDeadline && !showExtendForm && (
-          <button type="button" disabled={submitting} onClick={() => setShowExtendForm(true)}>
+          <button type="button" disabled={submitting || locked} onClick={() => setShowExtendForm(true)}>
             Extend deadline
           </button>
         )}
-        <button type="button" onClick={() => navigate(`/tasks/${instance.id}/edit`)}>
+        <button type="button" disabled={locked} onClick={() => navigate(`/tasks/${instance.id}/edit`)}>
           Edit task
         </button>
       </div>

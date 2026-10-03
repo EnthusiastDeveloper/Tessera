@@ -3,6 +3,7 @@ import type { FormEvent } from 'react';
 import { DurationInput } from '../../components/DurationInput';
 import { ScopePrompt } from '../../components/ScopePrompt';
 import { ApiError, toApiError } from '../../api/client';
+import { LOCK_HINT, useOptimization } from '../../optimization/OptimizationContext';
 import { createTemplate, patchTemplateThisAndFuture } from '../../api/taskTemplates';
 import type { CreateTemplatePayload, PatchTemplatePayload } from '../../api/taskTemplates';
 import { listInstances, patchInstanceThisOccurrence } from '../../api/taskInstances';
@@ -165,6 +166,8 @@ export function TaskForm({
   const [scope, setScope] = useState<EditScope | null>(null);
   const [series, setSeries] = useState<TaskInstance[]>([]);
   const [includeDetached, setIncludeDetached] = useState(false);
+  // Read-only while "Optimize Schedule" runs (design doc §6.11); the server refuses the write regardless.
+  const { locked } = useOptimization();
   const [error, setError] = useState<ApiError | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -572,7 +575,12 @@ export function TaskForm({
       {!isEdit && <DependenciesPicker selected={dependencies} onChange={setDependencies} />}
 
       <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
-        <button type="submit" className="primary" disabled={submitting || scopeChoicePending}>
+        <button
+          type="submit"
+          className="primary"
+          disabled={submitting || scopeChoicePending || locked}
+          title={locked ? LOCK_HINT : undefined}
+        >
           {submitting ? 'Saving…' : 'Save'}
         </button>
         <button type="button" onClick={onCancel}>
