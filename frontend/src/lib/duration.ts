@@ -12,18 +12,33 @@ const UNIT_MINUTES: Record<DurationUnit, number> = {
   weeks: 10080,
 };
 
-const UNIT_WORDS: Record<DurationUnit, { singular: string; plural: string; abbreviation: string }> = {
-  minutes: { singular: 'minute', plural: 'minutes', abbreviation: 'm' },
-  hours: { singular: 'hour', plural: 'hours', abbreviation: 'h' },
-  days: { singular: 'day', plural: 'days', abbreviation: 'd' },
-  weeks: { singular: 'week', plural: 'weeks', abbreviation: 'w' },
-};
+const UNIT_WORDS: Record<DurationUnit, { singular: string; plural: string; abbreviation: string }> =
+  {
+    minutes: { singular: 'minute', plural: 'minutes', abbreviation: 'm' },
+    hours: { singular: 'hour', plural: 'hours', abbreviation: 'h' },
+    days: { singular: 'day', plural: 'days', abbreviation: 'd' },
+    weeks: { singular: 'week', plural: 'weeks', abbreviation: 'w' },
+  };
 
 // Per-field allowed unit sets (§8.1a), largest unit first.
 export const ESTIMATED_DURATION_UNITS: readonly DurationUnit[] = ['hours', 'minutes'];
 export const DEADLINE_OFFSET_UNITS: readonly DurationUnit[] = ['weeks', 'days', 'hours'];
 export const REMINDER_OFFSET_UNITS: readonly DurationUnit[] = ['days', 'hours', 'minutes'];
 export const DAILY_BUDGET_UNITS: readonly DurationUnit[] = ['hours', 'minutes'];
+
+/**
+ * The deadline offset, in minutes from the start of `startDate`, that makes a task due at
+ * the END of `dueDate` ("submit by April 15" means April 15 inclusive) - IRR-2 M3, so a
+ * one-time task's deadline is picked on a calendar instead of computed by hand. Both are
+ * local "YYYY-MM-DD" strings, differenced as plain calendar days (no timezone involved).
+ */
+export function offsetToEndOfDate(startDate: string, dueDate: string): number {
+  const toDay = (value: string): number => {
+    const [year, month, day] = value.split('-').map(Number);
+    return Date.UTC(year, month - 1, day) / 86_400_000;
+  };
+  return (toDay(dueDate) - toDay(startDate) + 1) * UNIT_MINUTES.days;
+}
 
 export interface DurationValue {
   value: number;

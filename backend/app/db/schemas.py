@@ -12,14 +12,17 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 TaskType = Literal["fixed", "flexible"]
+_CLOCK_TIME_PATTERN = r"^([01]\d|2[0-3]):[0-5]\d$"  # 24-hour "HH:MM" (§3.13)
+
 Priority = Literal["low", "medium", "high", "critical"]
-#: §3.2: priority is a label on the wire and on templates, an integer (1-4) on instances.
+#: §3.2: priority is a label on the wire (templates and instances alike, IRR-2 M15); the
+#: integer 1-4 is internal to instances, the engine and the database.
 PRIORITY_TO_INT: dict[Priority, int] = {"low": 1, "medium": 2, "high": 3, "critical": 4}
 INT_TO_PRIORITY: dict[int, Priority] = {value: key for key, value in PRIORITY_TO_INT.items()}
-RecurrencePattern = Literal["one_time", "daily", "weekly", "monthly", "custom"]
+RecurrencePattern = Literal["one_time", "daily", "weekly", "monthly"]
 RecurrenceAnchor = Literal["calendar", "completion"]
 TaskInstanceStatus = Literal["pending", "scheduled", "in_progress", "completed", "blocked", "missed", "dismissed"]
 NotificationType = Literal[
@@ -44,8 +47,8 @@ class _Frozen(BaseModel):
 class ActiveHoursWindow(_Frozen):
     """A wall-clock scheduling window on a single day of week. See §3.7."""
 
-    start: str  # "HH:MM"
-    end: str
+    start: str = Field(pattern=_CLOCK_TIME_PATTERN)  # "HH:MM"
+    end: str = Field(pattern=_CLOCK_TIME_PATTERN)
 
 
 class Recurrence(_Frozen):
@@ -119,6 +122,12 @@ class TaskInstance(_Frozen):
     updated_at: datetime
     version: int
 
+    @field_serializer("priority", when_used="json")
+    def _priority_label(self, value: int) -> Priority:
+        """IRR-2 M15: the integer is internal; on the wire an instance's priority is the same
+        label a template uses."""
+        return INT_TO_PRIORITY[value]
+
 
 class Notification(_Frozen):
     """See design doc §3.4, §5."""
@@ -158,8 +167,8 @@ class BlackoutDate(_Frozen):
     """A manual full-day exclusion range. See §3.7."""
 
     start: date
-    end: date
-    label: str | None = None
+    end: date  # inclusive: a range ending on a date blacks that date out too (§3.7)
+    label: str | None = Field(default=None, max_length=100)
 
 
 class UserSettings(_Frozen):

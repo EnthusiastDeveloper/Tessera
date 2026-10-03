@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+Design doc Revision 12 - the IRR-2 Medium findings.
+
+- The undefined `custom` recurrence pattern is gone; stored `custom` templates became `daily` (same behaviour).
+- Task instances use the priority labels (`low`/`medium`/`high`/`critical`) on the wire, like templates. **API change:** instance responses, `PATCH /task-instances`, its `expected` map and the `priority` list filter no longer use the integers 1-4.
+- Every request field is bounded (names, durations, intervals, reminders, clock times, budgets, blackout ranges); violations are `422 validation_error`. See design doc 3.13.
+- A one-time flexible task can take its deadline from a date picker.
+- Documented, with the gaps recorded as Backlog 12.25-12.27: the external-sync behaviour, SQLite pragmas, blackout-range inclusivity, monthly clamping, and that a generated occurrence starts with no dependencies.
+
 ## 0.2.0
 
 Design doc Revisions 10 and 11, plus the bug fixes and refactors that came out of using the POC.

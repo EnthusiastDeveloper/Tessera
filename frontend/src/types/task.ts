@@ -3,7 +3,7 @@
 
 export type TaskType = 'fixed' | 'flexible';
 export type Priority = 'low' | 'medium' | 'high' | 'critical';
-export type RecurrencePattern = 'one_time' | 'daily' | 'weekly' | 'monthly' | 'custom';
+export type RecurrencePattern = 'one_time' | 'daily' | 'weekly' | 'monthly';
 export type RecurrenceAnchor = 'calendar' | 'completion';
 export type TaskInstanceStatus = 'pending' | 'scheduled' | 'in_progress' | 'completed' | 'blocked' | 'missed' | 'dismissed';
 export type DayName = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
@@ -57,7 +57,7 @@ export interface TaskInstance {
   description?: string | null;
   location?: string | null;
   type: TaskType;
-  priority: number;
+  priority: Priority;
   estimated_duration_minutes: number;
   detached: boolean;
   scheduled_time?: string | null;

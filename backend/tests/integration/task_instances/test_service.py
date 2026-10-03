@@ -596,6 +596,32 @@ class TestDismiss:
         successor = next(i for i in instances if i.id != created.instance.id)
         assert successor.status in ("pending", "scheduled")
 
+    def test_a_generated_successor_has_no_dependencies(
+        self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
+    ) -> None:
+        """IRR-2 M5, §9.1: dependencies belong to one occurrence. A successor is generated
+        from the template, which carries none (template-level dependencies are Backlog
+        12.12), so it must not inherit its predecessor's."""
+        prep = create_template(db_session, jobs, _flexible_draft(name="Prepare"))
+        recurring = create_template(
+            db_session,
+            jobs,
+            _flexible_draft(
+                name="Inspection",
+                recurrence=Recurrence(pattern="daily", interval=1, anchor="completion"),
+                dependencies=(prep.instance.id,),
+            ),
+        )
+        db_session.commit()
+        assert recurring.instance.dependencies == (prep.instance.id,)
+
+        dismiss(db_session, jobs, recurring.instance.id)
+        db_session.commit()
+
+        instances = TaskInstanceRepository(db_session).list_by_template(recurring.template.id)
+        successor = next(i for i in instances if i.id != recurring.instance.id)
+        assert successor.dependencies == ()
+
     def test_calendar_anchored_template_does_not_directly_generate_a_successor(
         self, db_session: Session, settings: UserSettings, jobs: RecordingJobScheduler
     ) -> None:

@@ -11,8 +11,21 @@ from sqlalchemy.orm import Session
 
 from app.api.dependencies import DB_SESSION, get_request_job_scheduler
 from app.api.errors import AppError
+from app.api.v1.validation import (
+    ClockTime,
+    DayOfMonth,
+    DayOfWeek,
+    DeadlineOffsetMinutes,
+    Description,
+    DurationMinutes,
+    Location,
+    Name,
+    RecurrenceInterval,
+    ReminderOffsets,
+)
 from app.db.base import utcnow
 from app.db.schemas import (
+    INT_TO_PRIORITY,
     ActiveHoursWindow,
     DayName,
     Priority,
@@ -29,27 +42,27 @@ router = APIRouter(prefix="/api/v1/task-templates", tags=["task-templates"])
 
 
 class RecurrenceIn(BaseModel):
-    pattern: Literal["one_time", "daily", "weekly", "monthly", "custom"]
-    interval: int | None = None
-    day_of_week: int | None = None
-    day_of_month: int | None = None
+    pattern: Literal["one_time", "daily", "weekly", "monthly"]
+    interval: RecurrenceInterval | None = None
+    day_of_week: DayOfWeek | None = None
+    day_of_month: DayOfMonth | None = None
     anchor: Literal["calendar", "completion"]
 
 
 class CreateTemplateRequest(BaseModel):
-    name: str
+    name: Name
     type: TaskType
     recurrence: RecurrenceIn
     priority: Priority
-    estimated_duration_minutes: int
+    estimated_duration_minutes: DurationMinutes
     # Required (§3.2, Rev 10): a local "YYYY-MM-DD" in the user's timezone. Not accepted on
     # PATCH - the series' dates come from its occurrences once it exists.
     start_date: date
-    description: str | None = None
-    location: str | None = None
-    fixed_time_of_day: str | None = None
-    deadline_offset_minutes: int | None = None
-    reminder_offsets_minutes: tuple[int, ...] = ()
+    description: Description | None = None
+    location: Location | None = None
+    fixed_time_of_day: ClockTime | None = None
+    deadline_offset_minutes: DeadlineOffsetMinutes | None = None
+    reminder_offsets_minutes: ReminderOffsets = ()
     active_hours_override: dict[DayName, ActiveHoursWindow | None] | None = None
     dependencies: tuple[str, ...] = ()
 
@@ -64,14 +77,14 @@ class PatchTemplateRequest(BaseModel):
     (read via `model_fields_set`, see `patch_template_endpoint`).
     """
 
-    name: str | None = None
-    description: str | None = None
-    location: str | None = None
-    fixed_time_of_day: str | None = None
-    deadline_offset_minutes: int | None = None
+    name: Name | None = None
+    description: Description | None = None
+    location: Location | None = None
+    fixed_time_of_day: ClockTime | None = None
+    deadline_offset_minutes: DeadlineOffsetMinutes | None = None
     priority: Priority | None = None
-    estimated_duration_minutes: int | None = None
-    reminder_offsets_minutes: tuple[int, ...] | None = None
+    estimated_duration_minutes: DurationMinutes | None = None
+    reminder_offsets_minutes: ReminderOffsets | None = None
     active_hours_override: dict[DayName, ActiveHoursWindow | None] | None = None
     recurrence: RecurrenceIn | None = None
 
@@ -91,7 +104,7 @@ class VirtualOccurrenceResponse(BaseModel):
     template_id: str
     name: str
     type: TaskType
-    priority: int
+    priority: Priority
     estimated_duration_minutes: int
     occurs_at: datetime
     anchor: RecurrenceAnchor
@@ -110,7 +123,7 @@ def list_projections_endpoint(db: Session = DB_SESSION) -> list[VirtualOccurrenc
             template_id=occ.template_id,
             name=occ.name,
             type=occ.type,
-            priority=occ.priority,
+            priority=INT_TO_PRIORITY[occ.priority],
             estimated_duration_minutes=occ.estimated_duration_minutes,
             occurs_at=occ.occurs_at,
             anchor=occ.anchor,

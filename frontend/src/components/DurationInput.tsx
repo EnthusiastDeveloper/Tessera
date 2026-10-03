@@ -20,9 +20,11 @@ interface DurationInputProps {
   units: readonly DurationUnit[];
   onChange: (minutes: number) => void;
   min?: number;
+  /** Largest allowed total, in minutes (design doc §3.13); shown as the input's `max` in the chosen unit. */
+  maxMinutes?: number;
 }
 
-export function DurationInput({ id, label, initialMinutes, units, onChange, min = 0 }: DurationInputProps): JSX.Element {
+export function DurationInput({ id, label, initialMinutes, units, onChange, min = 0, maxMinutes }: DurationInputProps): JSX.Element {
   const initial = minutesToDuration(initialMinutes, units);
   const [rawValue, setRawValue] = useState(String(initial.value));
   const [unit, setUnit] = useState<DurationUnit>(initial.unit);
@@ -40,6 +42,7 @@ export function DurationInput({ id, label, initialMinutes, units, onChange, min 
           id={id}
           type="number"
           min={min}
+          max={maxMinutes === undefined ? undefined : maxMinutes / durationToMinutes(1, unit)}
           step="any"
           value={rawValue}
           onChange={(event) => {

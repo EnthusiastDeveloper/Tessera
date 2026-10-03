@@ -20,7 +20,7 @@ Most calendar tools only know "busy" or "free." Tessera additionally tracks a **
 
 ## Recurrence with a real semantics for "when's the next one"
 
-Recurring templates support `one_time`, `daily`, `weekly`, `monthly`, and `custom` patterns, plus - the part most calendar apps don't offer - a choice of **anchor**:
+Recurring templates support `one_time`, `daily`, `weekly`, and `monthly` patterns (with an interval, so "every 3 days" or "every 2 weeks" are covered), plus - the part most calendar apps don't offer - a choice of **anchor**:
 
 - **`calendar`** - the next occurrence lands where the rule says, on schedule, regardless of whether you ever did the previous one. Right for rigid commitments ("team sync every Monday").
 - **`completion`** - the next occurrence is generated relative to when you actually finished the last one. Right for upkeep work ("replace the filter a month after I actually replaced it last"), and only available on flexible templates, since it needs a deadline window to slide within.

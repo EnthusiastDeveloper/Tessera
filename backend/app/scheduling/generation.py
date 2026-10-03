@@ -203,12 +203,6 @@ def _advance(pattern: str, template: TaskTemplate, *, after: datetime, tz: ZoneI
         day_of_month = template.recurrence.day_of_month or after.day
         return _add_months(after, interval, day_of_month=day_of_month, tz=tz)
 
-    if pattern == "custom":
-        # Not elaborated anywhere in the source docs beyond the field existing - treated
-        # as "every `interval` days", the same simplification as `daily`, documented here
-        # rather than silently guessed at a second time somewhere else.
-        return after + timedelta(days=interval)
-
     raise ValueError(f"cannot advance a one_time template's recurrence (pattern={pattern!r})")
 
 

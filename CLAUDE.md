@@ -7,9 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Tessera** is a self-hosted task scheduling application that auto-places flexible tasks into your calendar while respecting fixed commitments, deadlines, and priorities. It's a Python FastAPI backend + React frontend, single-user, containerized.
 
 ### Key References
-- **Product specification:** `docs/design-doc.md` (Revision 11) - this is the authoritative source for what the system *does*
-- **Implementation plan:** `docs/architecture-plan.md` (Revision 5) - defines how it's structured and built
-- **Findings register / decision log:** `docs/implementation-readiness-review-2.md` (IRR-2) - why Revisions 9 and 3 say what they say (Revision 10's and 11's decisions are recorded in design-doc Section 11), plus the findings still open (H2 onward, gating Stage 5+)
+- **Product specification:** `docs/design-doc.md` (Revision 12) - this is the authoritative source for what the system *does*
+- **Implementation plan:** `docs/architecture-plan.md` (Revision 6) - defines how it's structured and built
+- **Findings register / decision log:** `docs/implementation-readiness-review-2.md` (IRR-2) - why Revisions 9 and 3 say what they say (Revision 10's, 11's and 12's decisions are recorded in design-doc Section 11); every High and Medium finding is now decided - only the editorial items remain, plus the overnight-active-hours question (Backlog 12.25)
 - **Architecture enforcement:** `backend/pyproject.toml` has an `import-linter` configuration that blocks layering violations at CI
 
 ### Common Commands
@@ -96,6 +96,7 @@ Background job wiring and reconciliation rules: see `backend/CLAUDE.md`.
 
 ### Error Envelope
 Consistent across all endpoints: HTTP status + machine-readable code + human message. Distinct error codes:
+- `validation_error` (`422`) - a field outside the bounds in design-doc 3.13 (implemented once in `backend/app/api/v1/validation.py`)
 - `cycle_detected` - dependency creates a cycle
 - `creation_conflict` - fixed task collides with existing event
 - `infeasible_duration` - flexible task can't fit any single day's active-hours window (design-doc 6.8)
@@ -112,10 +113,10 @@ Consistent across all endpoints: HTTP status + machine-readable code + human mes
 - `name`, `description`, `location` (informational)
 - `start_date`: local date, required at creation - the first occurrence is derived from it
 - `type`: "fixed" | "flexible"
-- `recurrence`: pattern + interval (one_time, daily, weekly, monthly, custom) + **`anchor`** (`calendar` | `completion`)
+- `recurrence`: pattern + interval (one_time, daily, weekly, monthly - `custom` was dropped in Rev 12; a monthly `day_of_month` clamps to a short month's last day) + **`anchor`** (`calendar` | `completion`)
 - `fixed_time_of_day`: wall-clock local time (e.g. "18:00"), **re-projected per timezone change** unless instance is `detached`
 - `deadline_offset_minutes`: integer minutes (e.g. 4320 = 3 days) for flexible tasks
-- `priority`: low | medium | high | critical (numeric internally: 1-4)
+- `priority`: low | medium | high | critical on the wire for templates **and** instances (Rev 12); numeric 1-4 is internal only
 - `estimated_duration_minutes`: integer minutes, validated at save against the **merged** active-hours window, measured from the first grid point (design-doc 6.8)
 - `reminder_offsets_minutes`: integer minutes before `scheduled_time` (e.g. [60, 15, 0])
 - `active_hours_override`: optional per-day-of-week window that **merges** over user settings per day; per-day `null` always means "day excluded" (never "unrestricted" - use an explicit `00:00`-`23:59` window for that)

@@ -132,3 +132,33 @@ def test_start_date_backfill_uses_the_earliest_occurrence_else_the_creation_day(
     with sqlite3.connect(db_path) as conn:
         start_dates = dict(conn.execute("SELECT id, start_date FROM task_templates").fetchall())
     assert start_dates == {"t-series": "2026-03-04", "t-empty": "2026-03-01"}
+
+
+def test_dropping_custom_recurrence_rewrites_existing_rows_to_daily(tmp_path: Path) -> None:
+    """f4a1c7d93b52 removes `custom` (IRR-2 M1). The generator treated it as "every
+    `interval` days", so existing rows become `daily` - same behaviour - and the CHECK
+    constraint no longer admits the value.
+    """
+    db_path = tmp_path / "custom.db"
+    _run_alembic("upgrade", "d91f3b6c2e84", database_path=db_path)
+
+    ts = "2026-03-01 12:00:00.000000"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "INSERT INTO task_templates (id, name, type, recurrence_pattern, recurrence_interval, "
+            "recurrence_anchor, priority, estimated_duration_minutes, reminder_offsets_minutes, "
+            "archived, created_at, updated_at, version) "
+            "VALUES ('t1', 'x', 'flexible', 'custom', 3, 'calendar', 2, 30, '[]', 0, ?, ?, 1)",
+            (ts, ts),
+        )
+
+    _run_alembic("upgrade", "head", database_path=db_path)
+
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT recurrence_pattern, recurrence_interval FROM task_templates").fetchall() == [("daily", 3)]
+        try:
+            conn.execute("UPDATE task_templates SET recurrence_pattern = 'custom'")
+        except sqlite3.IntegrityError:
+            pass
+        else:  # pragma: no cover - the assertion is the point
+            raise AssertionError("`custom` is still accepted by the recurrence_pattern CHECK constraint")

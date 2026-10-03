@@ -28,7 +28,7 @@ function occurrence(id: string, status: TaskInstance['status']): TaskInstance {
     template_id: 'template-1',
     name: 'Water the plants',
     type: 'flexible',
-    priority: 2,
+    priority: 'medium',
     estimated_duration_minutes: 30,
     detached: false,
     status,

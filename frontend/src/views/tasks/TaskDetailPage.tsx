@@ -9,11 +9,10 @@ import {
   rescheduleInstance,
   startInstance,
 } from '../../api/taskInstances';
-import type { Priority, TaskInstance, TaskInstanceStatus } from '../../types/task';
+import type { TaskInstance, TaskInstanceStatus } from '../../types/task';
 
 type LoadState = 'loading' | 'error' | 'ready';
 
-const NUMBER_TO_PRIORITY: Record<number, Priority> = { 1: 'low', 2: 'medium', 3: 'high', 4: 'critical' };
 
 const TERMINAL_STATUSES: TaskInstanceStatus[] = ['completed', 'dismissed'];
 
@@ -159,7 +158,7 @@ export function TaskDetailPage(): JSX.Element {
         <dt>Type</dt>
         <dd>{instance.type === 'fixed' ? 'Fixed' : 'Flexible'}</dd>
         <dt>Priority</dt>
-        <dd>{NUMBER_TO_PRIORITY[instance.priority] ?? instance.priority}</dd>
+        <dd>{instance.priority}</dd>
         <dt>Status</dt>
         <dd>
           <strong style={{ color: STATUS_COLOR[instance.status] }}>{formatStatus(instance.status)}</strong>

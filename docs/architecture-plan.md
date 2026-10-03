@@ -1,7 +1,7 @@
 # Tessera - Architecture & Implementation Plan
-### Revision 5 - companion to: Tessera - Design Document (POC), Revision 11
+### Revision 6 - companion to: Tessera - Design Document (POC), Revision 12
 
-> **Open review:** `docs/implementation-readiness-review-2.md` (IRR-2) is the findings register behind Revisions 9 and 3. Its findings gating Stages 1, 2 and 3 are now drafted into these documents. **Still undecided and open against this revision:** H9 (no job misfire policy), M11 (field validation rules), M12 (SQLite WAL and `busy_timeout`). H14 and M13 are resolved in Section 7. Resolve those before the stage that consumes them - IRR-2 Section 6 says which.
+> **Open review:** `docs/implementation-readiness-review-2.md` (IRR-2) is the findings register behind Revisions 9 and 3. Every High and Medium finding in it is now decided and drafted into these documents (M12 - the SQLite pragmas - in Section 5.3); the one open question, whether to support overnight active-hours windows, is tracked as design doc Backlog 12.25. Only the editorial items in IRR-2 Section 4 remain.
 
 ## 0. Purpose of this document
 
@@ -20,6 +20,7 @@ Whoever (human or LLM) implements against this repo should treat the design doc 
 | 3 | Sync with design doc Revision 9 - see below |
 | 4 | Sync with design doc Revision 10 (recurring-series rules). Section 3: templates take `start_date`; a "this and future" edit names the occurrence it starts from and whether to include individually edited ones; `GET /task-instances` filters by template. Section 4.1: the "this and future" path fans out to every open occurrence from the edited one onward. Section 4.1: fixed-task paths displace overlapping flexible work; blocked fixed instances hold their slot and keep their jobs. Section 8: coverage for both |
 | 5 | Sync with design doc Revision 11. Section 3: `DELETE ...?scope=this_and_future` deletes every open occurrence of the series; `GET /settings/schedule-repair` reports a running repair. Section 4: a one-off `schedule_repair` job and its reconciliation. Section 5: the `ScheduleRepair` row. Section 8: coverage |
+| 6 | Sync with design doc Revision 12 (IRR-2 Medium findings). Section 3: an instance's `priority` is the label on the wire (request, response, and the list filter), and request bodies are bounded (design doc 3.13). Section 5.3: the SQLite pragmas are a decision, not a risk to watch (M12). Design doc Section 9 now points here instead of restating the stack and job list (M14). |
 
 ### 0.2 Revision 3 changes - sync with Design Doc Revision 9
 
@@ -111,6 +112,7 @@ Low, because of the layering in Section 2. The service layer has no REST-specifi
 ### Resource shape
 Maps directly to Section 3 of the design doc:
 - `/task-templates`, `/task-instances`, `/notifications`, `/calendar-connections`, `/settings`
+- **(Added Rev 6, IRR-2 M15 and M11)** `priority` is `"low" | "medium" | "high" | "critical"` everywhere on the wire - template and instance bodies, the `PATCH /task-instances/{id}` body and its `expected` map, `GET /task-instances?priority=`, and the Timeline projection. The integer 1-4 is internal to the service layer, the engine and the database; a numeric value on the wire is a `422`. Request bodies are bounded by the table in design doc 3.13, implemented once in `app/api/v1/validation.py`; a violation is `422 validation_error` naming the field.
 - Non-CRUD actions become sub-resource actions: `POST /task-instances/{id}/complete`, `POST /task-instances/{id}/extend-deadline` (for clearing a `missed` status per design doc 6.7 - also a detaching "this occurrence" edit per 3.10)
 - **(Added Rev 2, design doc 3.10)** Edit scope is an explicit, required param, not inferred:
   - `PATCH /task-instances/{id}` - a **"this occurrence"** edit. Any of the override-capable fields (3.3/3.10). Sets `detached = true` server-side; the client never sends that flag directly.
@@ -258,6 +260,20 @@ Fields nobody is writing are preserved, so a concurrent job's `status` change su
 ### 5.2 `ScheduleRepair` (added Rev 5)
 
 Design doc 6.10's repair runs in the background, so its progress needs somewhere to live that the API can read and that survives a restart: one row per repair - `id`, `total`, `done`, `moved`, `unschedulable`, `requested_at`, `finished_at`. It is operational state, not a product entity, which is why it is specified here and not in design doc Section 3. Only the latest row matters; older ones are kept as a log and are never read by the UI.
+
+### 5.3 SQLite configuration (added Rev 6, IRR-2 M12)
+
+These pragmas are applied to **every** connection the application opens (`app/db/session.py`), and are a requirement, not an observation:
+
+| Pragma | Value | Why |
+|---|---|---|
+| `foreign_keys` | `ON` | SQLite ignores foreign keys per connection unless asked; without it every `ON DELETE CASCADE` (dependency join table, notifications) silently does nothing |
+| `journal_mode` | `WAL` | Readers (the Timeline, the poll's reads) no longer block on a writer, and a crash cannot leave a half-written rollback journal. WAL adds `-wal` and `-shm` side files, which is why backup copies the whole data directory as one unit (Section 7) |
+| `busy_timeout` | `5000` ms | A writer that meets another writer waits up to five seconds instead of failing instantly with `database is locked` |
+
+**The job store is a separate SQLite file** (`<name>.jobs.db`, beside the application database), not a second connection to the same one. Section 4.1 requires a mutation's database write and its job call to share one synchronous method, so a job-store write happens while the request's own transaction is still open; on one file that is a circular wait, which `busy_timeout` cannot fix (it only turns an instant failure into a five-second hang). Two files are two lock domains. WAL relaxes reader-versus-writer contention only, never writer-versus-writer - which is also why the application stays **a single process** (Section 7).
+
+`:memory:` databases (the test suite's) cannot use WAL and SQLite silently keeps the default journal; the pragma test therefore runs against a file.
 
 ## 6. Authentication & Secrets
 

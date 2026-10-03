@@ -1,5 +1,6 @@
 import type { DurationUnit } from '../../lib/duration';
 import { REMINDER_OFFSET_UNITS, durationToMinutes, minutesToDuration } from '../../lib/duration';
+import { MAX_REMINDER_OFFSETS, MAX_REMINDER_OFFSET_MINUTES } from '../../lib/limits';
 
 type ReminderUnit = DurationUnit | 'at_start';
 
@@ -49,6 +50,7 @@ export function DurationListInput({ label, values, onChange }: DurationListInput
               <input
                 type="number"
                 min={0}
+                max={MAX_REMINDER_OFFSET_MINUTES / durationToMinutes(1, unit as DurationUnit)}
                 step="any"
                 aria-label={`Reminder ${index + 1} value`}
                 value={amountOf(minutes)}
@@ -83,7 +85,11 @@ export function DurationListInput({ label, values, onChange }: DurationListInput
           </div>
         );
       })}
-      <button type="button" onClick={() => onChange([...values, DEFAULT_NEW_REMINDER_MINUTES])}>
+      <button
+        type="button"
+        disabled={values.length >= MAX_REMINDER_OFFSETS}
+        onClick={() => onChange([...values, DEFAULT_NEW_REMINDER_MINUTES])}
+      >
         Add reminder
       </button>
     </fieldset>

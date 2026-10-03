@@ -18,7 +18,13 @@ The template holds recurrence rules and defaults (name, priority, duration, dead
 
 ## Recurrence
 
-Templates support five patterns: `one_time`, `daily`, `weekly`, `monthly`, and `custom` (interval-based, e.g. every 2 weeks; weekly/monthly patterns also take a day-of-week or day-of-month).
+Templates support four patterns: `one_time`, `daily`, `weekly` and `monthly`. Every repeating pattern takes an interval ("every 3 days", "every 2 weeks"), and weekly/monthly also take a day of the week or month. A monthly task set to the 29th-31st lands on the last day of any shorter month, then returns to its day the month after.
+
+A one-time flexible task can be given its deadline by picking a due date ("Or pick a due date") instead of working out an offset; the task is then due by the end of that day.
+
+### Limits
+
+Names are 1-200 characters; descriptions up to 2000 and locations up to 200. A duration is between 1 minute and 24 hours, an interval 1-365, a task has at most 10 reminders, and a daily time budget is between 0 minutes and 24 hours. A blackout range includes both its first and last day. Anything outside these is refused with a message naming the field.
 
 ### Start date
 
