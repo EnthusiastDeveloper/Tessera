@@ -57,7 +57,7 @@ export interface TaskInstance {
   description?: string | null;
   location?: string | null;
   type: TaskType;
-  priority: number;
+  priority: Priority;
   estimated_duration_minutes: number;
   detached: boolean;
   scheduled_time?: string | null;

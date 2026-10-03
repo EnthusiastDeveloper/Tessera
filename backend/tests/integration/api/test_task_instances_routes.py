@@ -69,6 +69,19 @@ class TestListInstances:
         assert response.status_code == 200, response.text
         assert response.json() == []
 
+    def test_priority_is_a_label_on_the_wire_and_filters_by_label(self, app_client: TestClient) -> None:
+        """IRR-2 M15: an instance reports `"medium"`, not the internal integer 2, and the
+        `priority` filter takes the label too."""
+        _login(app_client)
+        instance = _create_fixed(app_client)
+        assert instance["priority"] == "medium"
+
+        hit = app_client.get("/api/v1/task-instances", params={"priority": "medium"})
+        miss = app_client.get("/api/v1/task-instances", params={"priority": "high"})
+        assert [i["id"] for i in hit.json()] == [instance["id"]]
+        assert miss.json() == []
+        assert app_client.get("/api/v1/task-instances", params={"priority": 2}).status_code == 422
+
     def test_backlog_view(self, app_client: TestClient) -> None:
         _login(app_client)
         response = app_client.get("/api/v1/task-instances", params={"view": "backlog"})
@@ -85,6 +98,17 @@ class TestPatchInstance:
         body = response.json()
         assert body["name"] == "Renamed occurrence"
         assert body["detached"] is True
+
+    def test_priority_edit_takes_and_returns_the_label(self, app_client: TestClient) -> None:
+        _login(app_client)
+        instance = _create_fixed(app_client)
+        response = app_client.patch(
+            f"/api/v1/task-instances/{instance['id']}",
+            json={"priority": "critical", "expected": {"priority": "medium"}},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["priority"] == "critical"
+        assert app_client.patch(f"/api/v1/task-instances/{instance['id']}", json={"priority": 4}).status_code == 422
 
     def test_deadline_edit_on_a_fixed_instance_is_rejected(self, app_client: TestClient) -> None:
         """`scheduled_time` isn't even a field on `PatchInstanceRequest` (retiming a fixed

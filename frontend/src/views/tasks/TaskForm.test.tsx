@@ -39,7 +39,7 @@ const BASE_INSTANCE: TaskInstance = {
   description: null,
   location: null,
   type: 'flexible',
-  priority: 2,
+  priority: 'medium',
   estimated_duration_minutes: 30,
   detached: false,
   scheduled_time: null,

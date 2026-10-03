@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.api.dependencies import DB_SESSION, get_request_job_scheduler
 from app.api.errors import AppError
-from app.db.schemas import TaskInstance, TaskInstanceStatus, TaskType
+from app.db.schemas import PRIORITY_TO_INT, Priority, TaskInstance, TaskInstanceStatus, TaskType
 from app.jobs.interface import JobScheduler
 from app.task_instances import service
 
@@ -28,7 +28,7 @@ class PatchInstanceExpected(BaseModel):
     name: str | None = None
     description: str | None = None
     location: str | None = None
-    priority: int | None = None
+    priority: Priority | None = None
     estimated_duration_minutes: int | None = None
     deadline: datetime | None = None
 
@@ -39,7 +39,7 @@ class PatchInstanceRequest(BaseModel):
     name: str | None = None
     description: str | None = None
     location: str | None = None
-    priority: int | None = None
+    priority: Priority | None = None
     estimated_duration_minutes: int | None = None
     deadline: datetime | None = None
     expected: PatchInstanceExpected | None = None
@@ -60,10 +60,19 @@ class DeleteResponse(BaseModel):
     deleted_instance_ids: tuple[str, ...]
 
 
+def _internal_values(model: BaseModel, *, exclude: frozenset[str] = frozenset()) -> dict[str, Any]:
+    """The fields actually present on the wire, with `priority` turned from its label into
+    the integer the service layer and database use (IRR-2 M15)."""
+    values = {field: getattr(model, field) for field in model.model_fields_set if field not in exclude}
+    if values.get("priority") is not None:
+        values["priority"] = PRIORITY_TO_INT[values["priority"]]
+    return values
+
+
 @router.get("")
 def list_instances_endpoint(
     status: TaskInstanceStatus | None = None,
-    priority: int | None = None,
+    priority: Priority | None = None,
     type: TaskType | None = None,
     view: Literal["backlog"] | None = None,
     template_id: str | None = None,
@@ -72,7 +81,10 @@ def list_instances_endpoint(
     """architecture-plan §3: `status`/`priority`/`type`/`template_id` filters, plus
     `?view=backlog` (design doc §8.1) - a filter on this same collection, not its own resource.
     """
-    return list(service.list_instances(db, status=status, priority=priority, type=type, view=view, template_id=template_id))
+    priority_filter = PRIORITY_TO_INT[priority] if priority is not None else None
+    return list(
+        service.list_instances(db, status=status, priority=priority_filter, type=type, view=view, template_id=template_id)
+    )
 
 
 @router.patch("/{instance_id}")
@@ -82,10 +94,8 @@ def patch_instance_endpoint(
     db: Session = DB_SESSION,
     jobs: JobScheduler = Depends(get_request_job_scheduler),
 ) -> TaskInstance:
-    patch: dict[str, Any] = {field: getattr(payload, field) for field in payload.model_fields_set if field != "expected"}
-    expected: dict[str, Any] | None = None
-    if payload.expected is not None:
-        expected = {field: getattr(payload.expected, field) for field in payload.expected.model_fields_set}
+    patch = _internal_values(payload, exclude=frozenset({"expected"}))
+    expected = _internal_values(payload.expected) if payload.expected is not None else None
     try:
         return service.edit_this_occurrence(db, jobs, instance_id, patch=patch, expected=expected)
     except service.InstanceValidationError as exc:

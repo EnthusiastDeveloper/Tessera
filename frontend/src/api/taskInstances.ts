@@ -1,9 +1,9 @@
 import { apiClient } from './client';
-import type { EditScope, TaskInstance, TaskInstanceStatus } from '../types/task';
+import type { EditScope, Priority, TaskInstance, TaskInstanceStatus } from '../types/task';
 
 export interface ListInstancesParams {
   status?: TaskInstanceStatus;
-  priority?: number;
+  priority?: Priority;
   type?: 'fixed' | 'flexible';
   view?: 'backlog';
   /** One series' occurrences (architecture-plan §3, Rev 4). */
@@ -26,7 +26,7 @@ export interface PatchInstancePayload {
   name?: string;
   description?: string;
   location?: string;
-  priority?: number;
+  priority?: Priority;
   estimated_duration_minutes?: number;
   deadline?: string;
 }

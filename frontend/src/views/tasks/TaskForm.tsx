@@ -22,7 +22,6 @@ import { ActiveHoursOverrideInput } from './ActiveHoursOverrideInput';
 import { DependenciesPicker } from './DependenciesPicker';
 import { DurationListInput } from './DurationListInput';
 
-const PRIORITY_TO_NUMBER: Record<Priority, number> = { low: 1, medium: 2, high: 3, critical: 4 };
 const PRIORITIES: Priority[] = ['low', 'medium', 'high', 'critical'];
 const PATTERNS: RecurrencePattern[] = ['one_time', 'daily', 'weekly', 'monthly'];
 const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -223,7 +222,7 @@ export function TaskForm({ mode, template, instance, onSaved, onCancel }: TaskFo
           name,
           description: description || undefined,
           location: location || undefined,
-          priority: PRIORITY_TO_NUMBER[priority],
+          priority,
           estimated_duration_minutes: estimatedDurationMinutes,
           ...(type === 'flexible' && deadlineAt ? { deadline: fromDatetimeLocal(deadlineAt) } : {}),
         };

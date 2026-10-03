@@ -13,6 +13,7 @@ from app.api.dependencies import DB_SESSION, get_request_job_scheduler
 from app.api.errors import AppError
 from app.db.base import utcnow
 from app.db.schemas import (
+    INT_TO_PRIORITY,
     ActiveHoursWindow,
     DayName,
     Priority,
@@ -91,7 +92,7 @@ class VirtualOccurrenceResponse(BaseModel):
     template_id: str
     name: str
     type: TaskType
-    priority: int
+    priority: Priority
     estimated_duration_minutes: int
     occurs_at: datetime
     anchor: RecurrenceAnchor
@@ -110,7 +111,7 @@ def list_projections_endpoint(db: Session = DB_SESSION) -> list[VirtualOccurrenc
             template_id=occ.template_id,
             name=occ.name,
             type=occ.type,
-            priority=occ.priority,
+            priority=INT_TO_PRIORITY[occ.priority],
             estimated_duration_minutes=occ.estimated_duration_minutes,
             occurs_at=occ.occurs_at,
             anchor=occ.anchor,

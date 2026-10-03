@@ -12,11 +12,12 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_serializer
 
 TaskType = Literal["fixed", "flexible"]
 Priority = Literal["low", "medium", "high", "critical"]
-#: §3.2: priority is a label on the wire and on templates, an integer (1-4) on instances.
+#: §3.2: priority is a label on the wire (templates and instances alike, IRR-2 M15); the
+#: integer 1-4 is internal to instances, the engine and the database.
 PRIORITY_TO_INT: dict[Priority, int] = {"low": 1, "medium": 2, "high": 3, "critical": 4}
 INT_TO_PRIORITY: dict[int, Priority] = {value: key for key, value in PRIORITY_TO_INT.items()}
 RecurrencePattern = Literal["one_time", "daily", "weekly", "monthly"]
@@ -118,6 +119,12 @@ class TaskInstance(_Frozen):
     created_at: datetime
     updated_at: datetime
     version: int
+
+    @field_serializer("priority", when_used="json")
+    def _priority_label(self, value: int) -> Priority:
+        """IRR-2 M15: the integer is internal; on the wire an instance's priority is the same
+        label a template uses."""
+        return INT_TO_PRIORITY[value]
 
 
 class Notification(_Frozen):
