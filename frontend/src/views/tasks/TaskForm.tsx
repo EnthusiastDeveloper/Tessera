@@ -8,6 +8,14 @@ import type { CreateTemplatePayload, PatchTemplatePayload } from '../../api/task
 import { listInstances, patchInstanceThisOccurrence } from '../../api/taskInstances';
 import type { PatchInstancePayload } from '../../api/taskInstances';
 import { DEADLINE_OFFSET_UNITS, ESTIMATED_DURATION_UNITS } from '../../lib/duration';
+import {
+  MAX_DEADLINE_OFFSET_MINUTES,
+  MAX_DESCRIPTION_LENGTH,
+  MAX_DURATION_MINUTES,
+  MAX_LOCATION_LENGTH,
+  MAX_NAME_LENGTH,
+  MAX_RECURRENCE_INTERVAL,
+} from '../../lib/limits';
 import type {
   ActiveHoursOverride,
   EditScope,
@@ -263,17 +271,36 @@ export function TaskForm({ mode, template, instance, onSaved, onCancel }: TaskFo
 
       <div className="field">
         <label htmlFor="task-name">Name</label>
-        <input id="task-name" type="text" value={name} onChange={(event) => setName(event.target.value)} required />
+        <input
+          id="task-name"
+          type="text"
+          value={name}
+          maxLength={MAX_NAME_LENGTH}
+          onChange={(event) => setName(event.target.value)}
+          required
+        />
       </div>
 
       <div className="field">
         <label htmlFor="task-description">Description</label>
-        <input id="task-description" type="text" value={description} onChange={(event) => setDescription(event.target.value)} />
+        <input
+          id="task-description"
+          type="text"
+          value={description}
+          maxLength={MAX_DESCRIPTION_LENGTH}
+          onChange={(event) => setDescription(event.target.value)}
+        />
       </div>
 
       <div className="field">
         <label htmlFor="task-location">Location</label>
-        <input id="task-location" type="text" value={location} onChange={(event) => setLocation(event.target.value)} />
+        <input
+          id="task-location"
+          type="text"
+          value={location}
+          maxLength={MAX_LOCATION_LENGTH}
+          onChange={(event) => setLocation(event.target.value)}
+        />
       </div>
 
       {!isEdit && (
@@ -323,6 +350,7 @@ export function TaskForm({ mode, template, instance, onSaved, onCancel }: TaskFo
                 id="task-interval"
                 type="number"
                 min={1}
+                max={MAX_RECURRENCE_INTERVAL}
                 value={interval}
                 onChange={(event) => setInterval_(Number(event.target.value) || 1)}
               />
@@ -397,6 +425,7 @@ export function TaskForm({ mode, template, instance, onSaved, onCancel }: TaskFo
         units={ESTIMATED_DURATION_UNITS}
         onChange={setEstimatedDurationMinutes}
         min={1}
+        maxMinutes={MAX_DURATION_MINUTES}
       />
       {error?.code === 'infeasible_duration' && <p className="field-error">{error.message}</p>}
 
@@ -408,6 +437,7 @@ export function TaskForm({ mode, template, instance, onSaved, onCancel }: TaskFo
           units={DEADLINE_OFFSET_UNITS}
           onChange={setDeadlineOffsetMinutes}
           min={1}
+          maxMinutes={MAX_DEADLINE_OFFSET_MINUTES}
         />
       )}
       {type === 'flexible' && showTemplateOnlyFields && (

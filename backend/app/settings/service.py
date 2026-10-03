@@ -103,6 +103,7 @@ def update_settings(db: Session, jobs: JobScheduler, *, patch: dict[str, Any]) -
         updates["daily_time_budget_minutes"] = patch["daily_time_budget_minutes"]
 
     if "blackout_dates" in patch:
+        _validate_blackout_dates(patch["blackout_dates"])
         updates["blackout_dates"] = patch["blackout_dates"]
 
     if "budget_enforcement" in patch:
@@ -115,6 +116,14 @@ def update_settings(db: Session, jobs: JobScheduler, *, patch: dict[str, Any]) -
     if _PLACEMENT_RULES & patch.keys():
         start_repair_if_needed(db, jobs, saved, now=utcnow())
     return saved
+
+
+def _validate_blackout_dates(blackouts: list[Any]) -> None:
+    for blackout in blackouts:
+        if blackout.end < blackout.start:
+            raise SettingsValidationError(
+                "invalid_field", f"A blackout range can't end ({blackout.end}) before it starts ({blackout.start})."
+            )
 
 
 def _validate_timezone(tz: str) -> None:

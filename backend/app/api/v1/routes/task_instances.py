@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.api.dependencies import DB_SESSION, get_request_job_scheduler
 from app.api.errors import AppError
+from app.api.v1.validation import Description, DurationMinutes, Location, Name
 from app.db.schemas import PRIORITY_TO_INT, Priority, TaskInstance, TaskInstanceStatus, TaskType
 from app.jobs.interface import JobScheduler
 from app.task_instances import service
@@ -36,11 +37,11 @@ class PatchInstanceExpected(BaseModel):
 class PatchInstanceRequest(BaseModel):
     """§3.10 "this occurrence" - genuinely partial, only fields present are applied."""
 
-    name: str | None = None
-    description: str | None = None
-    location: str | None = None
+    name: Name | None = None
+    description: Description | None = None
+    location: Location | None = None
     priority: Priority | None = None
-    estimated_duration_minutes: int | None = None
+    estimated_duration_minutes: DurationMinutes | None = None
     deadline: datetime | None = None
     expected: PatchInstanceExpected | None = None
 

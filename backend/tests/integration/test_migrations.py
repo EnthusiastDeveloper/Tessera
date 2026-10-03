@@ -155,9 +155,7 @@ def test_dropping_custom_recurrence_rewrites_existing_rows_to_daily(tmp_path: Pa
     _run_alembic("upgrade", "head", database_path=db_path)
 
     with sqlite3.connect(db_path) as conn:
-        assert conn.execute("SELECT recurrence_pattern, recurrence_interval FROM task_templates").fetchall() == [
-            ("daily", 3)
-        ]
+        assert conn.execute("SELECT recurrence_pattern, recurrence_interval FROM task_templates").fetchall() == [("daily", 3)]
         try:
             conn.execute("UPDATE task_templates SET recurrence_pattern = 'custom'")
         except sqlite3.IntegrityError:

@@ -5,6 +5,7 @@ import { updateSettings } from '../../api/settings';
 import { announcePossibleScheduleRepair } from '../../lib/scheduleRepairEvents';
 import { ApiError } from '../../api/client';
 import { DAILY_BUDGET_UNITS } from '../../lib/duration';
+import { MAX_BLACKOUT_LABEL_LENGTH, MAX_DAILY_BUDGET_MINUTES } from '../../lib/limits';
 import { DAY_LABELS } from '../../lib/days';
 import type { ActiveHoursWindow, DayName } from '../../types/task';
 import type { BlackoutDate, BudgetEnforcement, UserSettings } from '../../types/settings';
@@ -199,6 +200,7 @@ export function SchedulingWindowSection({ settings, onUpdated }: SchedulingWindo
               id="blackout-label"
               type="text"
               value={newBlackoutLabel}
+              maxLength={MAX_BLACKOUT_LABEL_LENGTH}
               onChange={(event) => setNewBlackoutLabel(event.target.value)}
             />
           </div>
@@ -233,6 +235,7 @@ export function SchedulingWindowSection({ settings, onUpdated }: SchedulingWindo
                   initialMinutes={minutes ?? DEFAULT_BUDGET_MINUTES}
                   units={DAILY_BUDGET_UNITS}
                   onChange={(value) => setDailyBudgetDay(day, value)}
+                  maxMinutes={MAX_DAILY_BUDGET_MINUTES}
                 />
               )}
             </>
