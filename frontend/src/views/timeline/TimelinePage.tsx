@@ -10,6 +10,8 @@ import { TimezoneNotice } from '../../components/TimezoneNotice';
 import { listExternalEvents } from '../../api/externalEvents';
 import { listInstances } from '../../api/taskInstances';
 import { listProjections } from '../../api/taskTemplates';
+import { OptimizeControls } from '../../optimization/OptimizeControls';
+import { useOptimization } from '../../optimization/OptimizationContext';
 import { buildCalendarEvents, type TimelineExtendedProps } from './buildEvents';
 import type { BlackoutDate } from '../../types/settings';
 import type { TaskInstance } from '../../types/task';
@@ -38,6 +40,8 @@ type LoadState = 'loading' | 'error' | 'ready';
  */
 export function TimelinePage(): JSX.Element {
   const navigate = useNavigate();
+  // Reload when an optimization applied or undone changed the schedule under the page.
+  const { scheduleRevision } = useOptimization();
   const [state, setState] = useState<LoadState>('loading');
   const [error, setError] = useState<ApiError | null>(null);
   const [instances, setInstances] = useState<TaskInstance[]>([]);
@@ -68,7 +72,7 @@ export function TimelinePage(): JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [scheduleRevision]);
 
   function handleEventClick(arg: EventClickArg): void {
     const props = arg.event.extendedProps as TimelineExtendedProps;
@@ -93,6 +97,7 @@ export function TimelinePage(): JSX.Element {
   return (
     <div>
       <h2>Timeline</h2>
+      <OptimizeControls />
       <TimezoneNotice settingsTimezone={settingsTimezone} />
       {state === 'loading' ? (
         <p style={{ color: 'var(--color-text-muted)' }}>Loading...</p>
