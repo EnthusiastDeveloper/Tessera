@@ -119,4 +119,25 @@ test.describe('settings screen against the real backend', () => {
     await page.getByRole('button', { name: 'Save scheduling window' }).click();
     await expect(page.getByText('Scheduling window saved.')).toBeVisible();
   });
+
+  test('a day can hold two windows, one of them overnight, and keeps them across a reload', async ({ page }) => {
+    // Design doc §3.7 (Rev 13). Saturday gets an evening window that runs past midnight on
+    // top of its default one; afterwards it is put back so later specs start from the default.
+    await page.getByRole('button', { name: 'Add Saturday window' }).click();
+    await page.getByLabel('Saturday window 2 start').fill('22:00');
+    await page.getByLabel('Saturday window 2 end').fill('02:00');
+    await expect(page.getByText('(ends next day)')).toBeVisible();
+    await page.getByRole('button', { name: 'Save scheduling window' }).click();
+    await expect(page.getByText('Scheduling window saved.')).toBeVisible();
+
+    await page.reload();
+    await expect(page.getByLabel('Saturday window 2 start')).toHaveValue('22:00');
+    await expect(page.getByLabel('Saturday window 2 end')).toHaveValue('02:00');
+
+    await page.getByRole('button', { name: 'Remove Saturday window 2' }).click();
+    await page.getByRole('button', { name: 'Save scheduling window' }).click();
+    await expect(page.getByText('Scheduling window saved.')).toBeVisible();
+    await page.reload();
+    await expect(page.getByLabel('Saturday window 2 start')).toHaveCount(0);
+  });
 });

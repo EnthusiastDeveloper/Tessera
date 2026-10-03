@@ -10,3 +10,4 @@ export const MAX_REMINDER_OFFSETS = 10;
 export const MAX_REMINDER_OFFSET_MINUTES = 30 * 24 * 60;
 export const MAX_DAILY_BUDGET_MINUTES = 24 * 60;
 export const MAX_BLACKOUT_LABEL_LENGTH = 100;
+export const MAX_WINDOWS_PER_DAY = 8;

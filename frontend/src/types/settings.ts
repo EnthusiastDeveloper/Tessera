@@ -3,7 +3,7 @@
 // `blackout_dates` need; the full Settings screen (Stage 9f, `src/views/settings/`)
 // reads and writes every other field here too.
 
-import type { ActiveHoursWindow, DayName } from './task';
+import type { DayName, DayWindows } from './task';
 
 export interface BlackoutDate {
   start: string; // "YYYY-MM-DD"
@@ -16,7 +16,7 @@ export type BudgetEnforcement = 'strict' | 'soft';
 export interface UserSettings {
   id: string;
   timezone: string;
-  active_hours: Partial<Record<DayName, ActiveHoursWindow | null>>;
+  active_hours: Partial<Record<DayName, DayWindows>>;
   blackout_dates: BlackoutDate[];
   daily_time_budget_minutes: Partial<Record<DayName, number | null>>;
   budget_enforcement: BudgetEnforcement;

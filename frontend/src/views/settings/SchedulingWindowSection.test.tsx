@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { SchedulingWindowSection } from './SchedulingWindowSection';
 import * as settingsApi from '../../api/settings';
@@ -14,11 +14,11 @@ const BASE_SETTINGS: UserSettings = {
   id: 'settings-1',
   timezone: 'UTC',
   active_hours: {
-    monday: { start: '09:00', end: '17:00' },
-    tuesday: { start: '09:00', end: '17:00' },
-    wednesday: { start: '09:00', end: '17:00' },
-    thursday: { start: '09:00', end: '17:00' },
-    friday: { start: '09:00', end: '17:00' },
+    monday: [{ start: '09:00', end: '17:00' }],
+    tuesday: [{ start: '09:00', end: '17:00' }],
+    wednesday: [{ start: '09:00', end: '17:00' }],
+    thursday: [{ start: '09:00', end: '17:00' }],
+    friday: [{ start: '09:00', end: '17:00' }],
     saturday: null,
     sunday: null,
   },
@@ -78,6 +78,45 @@ describe('SchedulingWindowSection', () => {
     expect(patch.active_hours?.monday).toBeNull();
   });
 
+  it('saves a day split into two windows and an overnight window (Rev 13)', async () => {
+    mockedSettingsApi.updateSettings.mockResolvedValue(BASE_SETTINGS);
+    render(<SchedulingWindowSection settings={BASE_SETTINGS} onUpdated={vi.fn()} />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Add Monday window' }));
+    fireEvent.change(screen.getByLabelText('Monday window 2 start'), {
+      target: { value: '20:00' },
+    });
+    fireEvent.change(screen.getByLabelText('Monday window 2 end'), { target: { value: '02:00' } });
+    expect(screen.getByText('(ends next day)')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /save scheduling window/i }));
+
+    await waitFor(() => expect(mockedSettingsApi.updateSettings).toHaveBeenCalled());
+    const patch = mockedSettingsApi.updateSettings.mock.calls[0][0];
+    expect(patch.active_hours?.monday).toEqual([
+      { start: '09:00', end: '17:00' },
+      { start: '20:00', end: '02:00' },
+    ]);
+    expect(patch.active_hours?.tuesday).toEqual([{ start: '09:00', end: '17:00' }]);
+  });
+
+  it("removes one of a day's windows but never the last", async () => {
+    render(<SchedulingWindowSection settings={BASE_SETTINGS} onUpdated={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: /remove monday window/i })).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Add Monday window' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Remove Monday window 2' }));
+
+    expect(screen.queryByLabelText('Monday window 2 start')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /remove monday window/i })).not.toBeInTheDocument();
+  });
+
+  it('stops offering another window at the per-day maximum', async () => {
+    render(<SchedulingWindowSection settings={BASE_SETTINGS} onUpdated={vi.fn()} />);
+    const add = screen.getByRole('button', { name: 'Add Monday window' });
+    for (let i = 0; i < 7; i += 1) await userEvent.click(add);
+    expect(add).toBeDisabled();
+  });
+
   it('adds a blackout date', async () => {
     render(<SchedulingWindowSection settings={BASE_SETTINGS} onUpdated={vi.fn()} />);
 
@@ -119,7 +158,9 @@ describe('SchedulingWindowSection', () => {
   });
 
   it('shows an error banner when the save fails', async () => {
-    mockedSettingsApi.updateSettings.mockRejectedValue(new ApiError(422, 'invalid_day_map', 'Bad day map.'));
+    mockedSettingsApi.updateSettings.mockRejectedValue(
+      new ApiError(422, 'invalid_day_map', 'Bad day map.')
+    );
     render(<SchedulingWindowSection settings={BASE_SETTINGS} onUpdated={vi.fn()} />);
 
     await userEvent.click(screen.getByRole('button', { name: /save scheduling window/i }));
