@@ -34,12 +34,16 @@ Changing it doesn't move anything already scheduled - only occurrences generated
 
 ### Active hours
 
-A per-day-of-week window (`start`/`end`) that bounds where **flexible** tasks may be auto-placed. This is the global default; individual task templates can layer an override on top (see below). It has no effect on fixed tasks - those sit at whatever time you set manually.
+Per day of the week, one or more windows (`start`/`end`) that bound where **flexible** tasks may be auto-placed. This is the global default; individual task templates can layer an override on top (see below). It has no effect on fixed tasks - those sit at whatever time you set manually.
 
 A day can be:
 
-- **A window**, e.g. `18:00`–`21:00`
-- **`null`**, meaning that day is fully excluded from flexible placement
+- **One window**, e.g. `18:00`–`21:00`
+- **Several windows**, e.g. `08:00`–`10:00` and `18:00`–`22:00` for a split day. Use **Add window** on the day. Windows on one day may not overlap.
+- **An overnight window**, where the end is earlier than the start: `22:00`–`02:00` runs from late evening into the next morning, and a task can sit across midnight inside it. The screen marks it "(ends next day)". If the next morning also has a window that starts where this one ends, the two join into one long stretch.
+- **`null`** (shown as *Excluded*), meaning that day is fully excluded from flexible placement
+
+Two things are decided by the calendar date a moment falls on, not by the window it came from: a **blackout date** removes everything on that date (so an overnight window from the evening before is cut at midnight), and the **daily time budget** counts a task's minutes on each date it touches.
 
 There is deliberately no "unrestricted" value. If you want a day fully open, set it explicitly to `00:00`–`23:59`.
 
@@ -53,7 +57,7 @@ It never moves a task that still fits, a task you've already started, or a fixed
 
 A task template can define its own `active_hours_override`, which **merges** over the global map rather than replacing it wholesale:
 
-- A day named in the override uses the override's value for that day.
+- A day named in the override uses the override's windows for that day - the whole list, replacing that day's global windows.
 - A day *not* named in the override inherits the global setting for that day.
 - A day explicitly set to `null` in the override is excluded, exactly like the global map's `null`.
 

@@ -1,7 +1,7 @@
 # Tessera - Architecture & Implementation Plan
-### Revision 6 - companion to: Tessera - Design Document (POC), Revision 12
+### Revision 7 - companion to: Tessera - Design Document (POC), Revision 13
 
-> **Open review:** `docs/implementation-readiness-review-2.md` (IRR-2) is the findings register behind Revisions 9 and 3. Every High and Medium finding in it is now decided and drafted into these documents (M12 - the SQLite pragmas - in Section 5.3); the one open question, whether to support overnight active-hours windows, is tracked as design doc Backlog 12.25. Only the editorial items in IRR-2 Section 4 remain.
+> **Open review:** `docs/implementation-readiness-review-2.md` (IRR-2) is the findings register behind Revisions 9 and 3. Every High and Medium finding in it is now decided and drafted into these documents (M12 - the SQLite pragmas - in Section 5.3); Only the editorial items in IRR-2 Section 4 remain. (The overnight-window question left open at Revision 6 is settled in design doc Revision 13.)
 
 ## 0. Purpose of this document
 
@@ -21,6 +21,7 @@ Whoever (human or LLM) implements against this repo should treat the design doc 
 | 4 | Sync with design doc Revision 10 (recurring-series rules). Section 3: templates take `start_date`; a "this and future" edit names the occurrence it starts from and whether to include individually edited ones; `GET /task-instances` filters by template. Section 4.1: the "this and future" path fans out to every open occurrence from the edited one onward. Section 4.1: fixed-task paths displace overlapping flexible work; blocked fixed instances hold their slot and keep their jobs. Section 8: coverage for both |
 | 5 | Sync with design doc Revision 11. Section 3: `DELETE ...?scope=this_and_future` deletes every open occurrence of the series; `GET /settings/schedule-repair` reports a running repair. Section 4: a one-off `schedule_repair` job and its reconciliation. Section 5: the `ScheduleRepair` row. Section 8: coverage |
 | 6 | Sync with design doc Revision 12 (IRR-2 Medium findings). Section 3: an instance's `priority` is the label on the wire (request, response, and the list filter), and request bodies are bounded (design doc 3.13). Section 5.3: the SQLite pragmas are a decision, not a risk to watch (M12). Design doc Section 9 now points here instead of restating the stack and job list (M14). |
+| 7 | Sync with design doc Revision 13. Section 3: `active_hours` and `active_hours_override` take `{day: [{start, end}, ...] | null}` - a list of windows per day, any of which may run overnight - replacing one window per day (**breaking** for API clients; migration `a2b7e5c19d36` wraps stored windows). Section 2: the engine builds eligible stretches of absolute time from the windows and places, validates feasibility and repairs against those. |
 
 ### 0.2 Revision 3 changes - sync with Design Doc Revision 9
 
@@ -112,6 +113,7 @@ Low, because of the layering in Section 2. The service layer has no REST-specifi
 ### Resource shape
 Maps directly to Section 3 of the design doc:
 - `/task-templates`, `/task-instances`, `/notifications`, `/calendar-connections`, `/settings`
+- **(Added Rev 7, design doc 3.7)** `active_hours` (`PATCH /settings`) and `active_hours_override` (task templates) map a day name to `null` (day excluded) or a **list of 1 to 8 windows** `{"start": "HH:MM", "end": "HH:MM"}`. `end` before `start` is an overnight window. An empty list, or the pre-Rev 13 single-object shape, is `422 validation_error`; a zero-length window or two overlapping windows on one day is `422 invalid_field`. Windows are stored sorted as given and returned as sent.
 - **(Added Rev 6, IRR-2 M15 and M11)** `priority` is `"low" | "medium" | "high" | "critical"` everywhere on the wire - template and instance bodies, the `PATCH /task-instances/{id}` body and its `expected` map, `GET /task-instances?priority=`, and the Timeline projection. The integer 1-4 is internal to the service layer, the engine and the database; a numeric value on the wire is a `422`. Request bodies are bounded by the table in design doc 3.13, implemented once in `app/api/v1/validation.py`; a violation is `422 validation_error` naming the field.
 - Non-CRUD actions become sub-resource actions: `POST /task-instances/{id}/complete`, `POST /task-instances/{id}/extend-deadline` (for clearing a `missed` status per design doc 6.7 - also a detaching "this occurrence" edit per 3.10)
 - **(Added Rev 2, design doc 3.10)** Edit scope is an explicit, required param, not inferred:

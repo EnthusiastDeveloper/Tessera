@@ -7,9 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Tessera** is a self-hosted task scheduling application that auto-places flexible tasks into your calendar while respecting fixed commitments, deadlines, and priorities. It's a Python FastAPI backend + React frontend, single-user, containerized.
 
 ### Key References
-- **Product specification:** `docs/design-doc.md` (Revision 12) - this is the authoritative source for what the system *does*
-- **Implementation plan:** `docs/architecture-plan.md` (Revision 6) - defines how it's structured and built
-- **Findings register / decision log:** `docs/implementation-readiness-review-2.md` (IRR-2) - why Revisions 9 and 3 say what they say (Revision 10's, 11's and 12's decisions are recorded in design-doc Section 11); every High and Medium finding is now decided - only the editorial items remain, plus the overnight-active-hours question (Backlog 12.25)
+- **Product specification:** `docs/design-doc.md` (Revision 13) - this is the authoritative source for what the system *does*
+- **Implementation plan:** `docs/architecture-plan.md` (Revision 7) - defines how it's structured and built
+- **Findings register / decision log:** `docs/implementation-readiness-review-2.md` (IRR-2) - why Revisions 9 and 3 say what they say (Revision 10's through 13's decisions are recorded in design-doc Section 11); every High and Medium finding is now decided - only the editorial items remain
 - **Architecture enforcement:** `backend/pyproject.toml` has an `import-linter` configuration that blocks layering violations at CI
 
 ### Common Commands
@@ -40,6 +40,7 @@ This is the high-risk piece. It's a greedy two-pass algorithm:
 - **Incremental fit, not a reflow:** existing placements are never moved by a later pass. Greedy corner-painting (`unschedulable` where a global rearrangement would have fitted) is accepted behaviour, not a bug
 - **Obstacles = every instance in `scheduled` or `in_progress`, both types**, plus intra-pass placements, plus filtered external events
 - **A scheduled flexible task gives way to a fixed one** (design-doc 6.5, Rev 10): it is not a creation conflict; the fixed task is saved and the flexible task is placed again or flagged `unschedulable`. There is no manual move for flexible tasks
+- **Active hours are a list of windows per day, and a window may run overnight** (design-doc 3.7, Rev 13): `{day: [{start, end}, ...] | null}`, `end` before `start` = ends next morning. The engine places against merged *eligible intervals* of absolute time; a blackout cuts at midnight and budgets count the calendar date. Never treat "the day's window" as a single `[start, end]` pair
 - **Start times land on a 15-minute grid** aligned to the hour in local wall-clock. **Durations are never quantised**
 - **Stricter rules repair, never block** (design-doc 6.10, Rev 11): narrowing active hours, adding blackout dates or tightening a strict budget re-places every scheduled flexible occurrence that no longer fits, in a background job with visible progress. Valid placements are still never moved
 - **No topological sort.** The `blocked` gate already guarantees every candidate's dependencies are `completed`. Do not build one
@@ -119,7 +120,7 @@ Consistent across all endpoints: HTTP status + machine-readable code + human mes
 - `priority`: low | medium | high | critical on the wire for templates **and** instances (Rev 12); numeric 1-4 is internal only
 - `estimated_duration_minutes`: integer minutes, validated at save against the **merged** active-hours window, measured from the first grid point (design-doc 6.8)
 - `reminder_offsets_minutes`: integer minutes before `scheduled_time` (e.g. [60, 15, 0])
-- `active_hours_override`: optional per-day-of-week window that **merges** over user settings per day; per-day `null` always means "day excluded" (never "unrestricted" - use an explicit `00:00`-`23:59` window for that)
+- `active_hours_override`: optional per-day-of-week **list of windows** that **merges** over user settings per day (a named day replaces that day's whole list); per-day `null` always means "day excluded" (never "unrestricted" - use an explicit `00:00`-`23:59` window for that)
 - `archived`: boolean (soft-delete; templates with history are archived, not hard-deleted)
 
 **TaskInstance** (design-doc 3.3):
@@ -139,7 +140,7 @@ Consistent across all endpoints: HTTP status + machine-readable code + human mes
 
 **UserSettings** (design-doc 3.7):
 - `timezone`: IANA name (e.g. "America/New_York")
-- `active_hours`: {day_name: {start, end} | null} - per-day-of-week global window
+- `active_hours`: {day_name: [{start, end}, ...] | null} - per-day-of-week global windows (a list, Rev 13)
 - `blackout_dates`: [{start, end, label?}] - full-day exclusions
 - `daily_time_budget_minutes`: {day_name: number | null} - max flexible work per day in minutes, soft cap by default
 - `budget_enforcement`: "soft" | "strict" - whether to allow budget override as last resort

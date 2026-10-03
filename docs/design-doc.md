@@ -1,6 +1,8 @@
 # Tessera - Design Document (POC)
-### Revision 12
+### Revision 13
 
+> **Revision 13 gives every day a list of active-hours windows, and lets a window run overnight** (Section 11 item 22, Backlog 12.25 built). A day can now be split - a morning and an evening window - and a window whose end is before its start ends the next morning. Placement works on the resulting stretches of absolute time (6.2), feasibility and schedule repair measure the same stretches (6.8, 6.10), a blackout date cuts at midnight, and the daily budget counts the calendar date the time falls on (3.7). The wire shape of `active_hours` and `active_hours_override` changes from one window per day to a list (architecture plan 3). A day's single window behaves exactly as before. Everything below about Revisions 9 to 12 still stands unless this revision says otherwise.
+>
 > **Revision 12 closes the Medium findings of IRR-2 (M1-M16).** Most were already decided or built and are now stated where the next reader will look; the rest are decided here (Section 11 items 18-22): the undefined `custom` recurrence pattern is dropped (3.2), field validation limits are tabulated (new 3.13), instances speak the same priority labels as templates (3.2, 3.3), and what external sync does today is written down (7). Nothing about scheduling behaviour changes. Everything below about Revisions 9, 10 and 11 still stands unless this revision says otherwise.
 >
 > **Revision 11 settles three open IRR-2 findings** - what deleting a series does to its open occurrences (H5), what a timezone change moves (H12), and what happens to scheduled work when the user's scheduling rules get stricter (H13) (Section 11 items 15-17). Everything below about Revisions 9 and 10 still stands unless this revision says otherwise.
@@ -36,6 +38,7 @@ Full diffs are in git; IRR-2 (`docs/implementation-readiness-review-2.md`) holds
 | 10 | Recurring-series rules: every occurrence has its own date, a template takes an explicit start date, flexible occurrences are never placed before their date, and "this and future" reaches every open occurrence from the edited one onward. A scheduled flexible task gives way to a fixed one instead of blocking it; a waiting fixed task holds its slot and goes overdue normally - see below |
 | 11 | Deleting a series deletes every open occurrence; a timezone change moves nothing; stricter scheduling rules repair the schedule in the background (6.10) |
 | 12 | IRR-2 Medium findings closed: `custom` recurrence dropped, field validation table (3.13), priority labels on the wire for instances, current external-sync behaviour documented (7), calendar selection and failed-sync visibility recorded as Backlog |
+| 13 | Active hours are a **list of windows per day**, and a window may run **overnight**; a blackout cuts at midnight and budgets count the calendar date (3.7, 6.2, 6.8, 6.10); Worked Examples Q and R |
 
 **Revision 9 changelog.** Eighteen IRR-2 findings, following stakeholder decisions taken 2026-08-05 to 2026-08-07. Revision 8's "locked" status meant "no unilateral edits"; it did not mean "verified correct". IRR-2 records what each finding was and why it mattered; this lists only what the specification now says.
 
@@ -197,8 +200,9 @@ interface TaskTemplate {
 
   // --- Scheduling-window override (optional) ---
   active_hours_override?: {         // (Rev 9) MERGES over the user's global active-hours map,
-    [day: string]: { start: string; end: string } | null;  // per day. Days named here use these
-  } | null;                         // values; days NOT named inherit the global map (3.7).
+    [day: string]: { start: string; end: string }[] | null;  // per day. Days named here use
+  } | null;                         // THIS LIST of windows (Rev 13); days NOT named inherit the
+                                     // global map (3.7).
                                      // Per-day null == "that day is excluded", identically to
                                      // 3.7. There is no "no restriction" value: to allow a task
                                      // at any hour, give that day an explicit 00:00-23:59 window.
@@ -220,6 +224,7 @@ Notes:
 - **(Added Revision 7, amended Revision 10)** A "this and future" edit reaches every open instance from the edited one onward, except those that are `detached` - unless the user opts in to overriding them (3.10). The template's new values apply to every instance generated afterwards (9.1) regardless.
 - **(Added Revision 10) `start_date` is what the user means by "starts on".** It is asked for in the creation form alongside every other parameter, never defaulted silently. For a `flexible` template it is the first occurrence's date, so the first instance is not placed before it (9.1); together with `deadline_offset_minutes` it fixes the first occurrence's window. For a `fixed` template it is the date from which the rule produces the first occurrence. A `start_date` earlier than today in the user's timezone is rejected with `invalid_start_date`. **(Clarified post-Revision 10)** So is a flexible template whose first occurrence's window has already ended - a short `deadline_offset_minutes` on a `start_date` of today, since the window counts from the start of the date - which would otherwise be created already `missed`. It is a creation-time input: once the series exists, its dates come from its occurrences (`nominal_date`, 3.3), so later edits to `start_date` are not offered.
 - **`recurrence.anchor` is a type constraint, not a preference.** `anchor: "completion"` requires `type: "flexible"`, and a save that violates this is **rejected** with an `invalid_recurrence_anchor` validation error. The reason is structural rather than stylistic: completion-anchoring only means anything if the resulting occurrence can be *pushed* within a window, and that window is `deadline_offset_minutes` - a field flexible instances have and fixed instances do not (3.3 sets `deadline` for flexible tasks only; a fixed instance carries `scheduled_time` and has nothing to slide against). A fixed task must happen at its defined date and time, so there is nothing for a completion date to re-anchor. A recurring commitment that genuinely should shift with completion - "service the car six months after the last service" - is modelled as a flexible template whose `deadline_offset_minutes` expresses how far it may slip.
+- **(Added Revision 13) A day's override replaces that day's whole list.** Naming Monday with `[{08:00, 12:00}]` leaves Monday with that one window, not the global Monday windows plus it. A window may run overnight and a day may hold several (3.7).
 - **(Added Revision 12, IRR-2 M1) There is no `custom` recurrence pattern.** It sat in the enum with no configuring fields and no definition; `interval` already expresses "every N days, weeks or months". It is removed from the model, the API and the UI, and any stored `custom` template became `daily` (the generator already treated it as "every `interval` days").
 - **(Added Revision 12, IRR-2 M2) A monthly `day_of_month` that a month lacks clamps to that month's last day.** A template on the 31st lands on 28/29 February, 30 April and so on; the following month returns to the 31st. The rule applies to the first occurrence and every later one.
 - **(Added Revision 12, IRR-2 M3) A one-time flexible task takes its deadline as an offset, entered on a calendar.** The deadline stays `start_date + deadline_offset_minutes` (9.1) - no new field. The creation form offers "Or pick a due date", which sets the offset to the end of the chosen day, counted in calendar days from `start_date`, and shows what it resolved to in the usual number-and-unit control (8.1a). The user never computes "April 15" by hand, and an absolute deadline never has to be set by editing the occurrence afterwards (which would detach it, 3.10).
@@ -389,9 +394,9 @@ interface UserSettings {
   id: string;
   timezone: string;                 // IANA name, e.g. "America/New_York" - see 14.1
                                      // default sourced from the container's TZ env var
-  active_hours: {                   // global default scheduling window, per day of week
-    [day: string]: { start: string; end: string } | null;  // null = day fully excluded
-  };
+  active_hours: {                   // global default scheduling windows, per day of week
+    [day: string]: { start: string; end: string }[] | null;  // null = day fully excluded;
+  };                                // otherwise a LIST of windows (Rev 13), never empty
   blackout_dates: { start: Date; end: Date; label?: string }[]; // manual full-day exclusions;
                                      // `end` is INCLUSIVE (Rev 12) and may not precede `start`
                                      // (POC stand-in for holiday calendars, see Backlog 12.15)
@@ -413,11 +418,25 @@ interface UserSettings {
 }
 ```
 
-**(Added Revision 12, IRR-2 M4)** A blackout range is **inclusive at both ends**: `start: 2026-03-10, end: 2026-03-12` excludes the 10th, 11th and 12th, and a one-day blackout has `start == end`. A window's `start` and `end` are 24-hour `HH:MM` times on the same day. Overnight windows (`22:00`-`02:00`) and split windows (morning plus evening) are **not** part of the POC's window shape; whether to support them is open (Backlog 12.25), and nothing in the engine is specified for a window whose `end` is not after its `start`.
+**(Added Revision 12, IRR-2 M4) A blackout range is inclusive at both ends**: `start: 2026-03-10, end: 2026-03-12` excludes the 10th, 11th and 12th, and a one-day blackout has `start == end`.
 
-`first_day_of_week` affects **display only** - it controls the Timeline view's calendar layout (8.1) and the row order of the day-of-week settings below (`active_hours`, `daily_time_budget_minutes`, `blackout_dates`). It has no effect on scheduling algorithm behavior: those fields are already keyed by day name rather than position-in-week, so the algorithm doesn't have a concept of "week" to reorder in the first place.
+**(Rewritten Revision 13) Windows.** A day of the week holds a **list** of windows - `[{08:00, 12:00}, {18:00, 22:00}]` is a day split in two - and a window is a pair of 24-hour `HH:MM` times:
 
-A per-day `null` in `active_hours` means **that day is fully excluded**, and the same rule applies to `TaskTemplate.active_hours_override` (3.2) - one shape, one meaning. A template override **merges** over this map per day: days the override names use the override's value, days it does not name inherit the value here. To allow a task at any hour on a given day, give that day an explicit `00:00`–`23:59` window; there is no `null` that means "unrestricted".
+- **`end` after `start`:** the window ends the same day.
+- **`end` before `start`:** an **overnight window** - `22:00`-`02:00` starts on the day that declares it and ends the next morning.
+- **`end` equal to `start`:** not a window (it has no length) and is rejected. "Any hour of the day" stays an explicit `00:00`-`23:59` window.
+- **Windows within one day may not overlap**, measured from that day's midnight - so `22:00`-`02:00` and `01:00`-`03:00` on the same day do not overlap, because the first ends on the next date. Windows that meet end to start are fine. At most 8 per day (3.13).
+- **Windows of different days may overlap, and are merged.** Monday's `22:00`-`02:00` and Tuesday's `02:00`-`08:00` are one stretch from Monday 22:00 to Tuesday 08:00, and a task may sit across midnight inside it (6.2).
+- A day with **no** windows is `null`, never `[]` (one shape, one meaning, below).
+
+Everything day-keyed is read by the **calendar date the time falls on**, not by the window it came from:
+
+- **Blackout dates cut at midnight.** Whatever part of any window falls on a blacked-out date is unavailable. Monday's `22:00`-`02:00` with Tuesday blacked out leaves Monday `22:00`-`24:00`; with Monday blacked out it leaves Tuesday `00:00`-`02:00`.
+- **The daily budget counts the calendar date.** A task that runs `23:30`-`00:30` spends 30 minutes of the first date's budget and 30 of the next. Obstacles are counted the same way (6.2).
+
+`first_day_of_week` affects **display only**`first_day_of_week` affects **display only** - it controls the Timeline view's calendar layout (8.1) and the row order of the day-of-week settings below (`active_hours`, `daily_time_budget_minutes`, `blackout_dates`). It has no effect on scheduling algorithm behavior: those fields are already keyed by day name rather than position-in-week, so the algorithm doesn't have a concept of "week" to reorder in the first place.
+
+A per-day `null` in `active_hours` (not an empty list) means **that day is fully excluded**, and the same rule applies to `TaskTemplate.active_hours_override` (3.2) - one shape, one meaning. A template override **merges** over this map per day: days the override names use the override's value, days it does not name inherit the value here. To allow a task at any hour on a given day, give that day an explicit `00:00`–`23:59` window; there is no `null` that means "unrestricted". A template override replaces a named day's **whole list** (3.2).
 
 `active_hours` (and any `TaskTemplate.active_hours_override`), `blackout_dates`, and `daily_time_budget_minutes` constrain **flexible-task auto-placement only** (6.2). Fixed tasks are user-chosen times and are never constrained by this window - the window governs what the algorithm may choose, not what the user is allowed to set manually. Note the distinction between "constrains" and "counts toward capacity" for `daily_time_budget_minutes` specifically: fixed tasks and external calendar events are never *blocked* by the budget, but their duration *does* count against a day's budget when the algorithm decides whether there's still room for more flexible tasks that day (see 6.2) - otherwise a day already packed with fixed commitments would still get flexible chores piled on top of it, which defeats the purpose of the setting. Unlike the effective active-hours window and `blackout_dates`, which are hard constraints the algorithm never crosses, `daily_time_budget_minutes` is a constraint whose strictness is itself configurable via `budget_enforcement` - see 6.2 for exactly when and how it's allowed to yield.
 
@@ -542,6 +561,7 @@ Every request body is bounded. A violation is a `422` with code `validation_erro
 | `deadline_offset_minutes` | integer, 1 to 525600 (365 days) |
 | `reminder_offsets_minutes` | at most 10 entries, each 0 to 43200 (30 days); 0 means at the time itself |
 | `fixed_time_of_day`, active-hours `start` / `end` | 24-hour `HH:MM`, `00:00` to `23:59` |
+| `active_hours[day]`, `active_hours_override[day]` | `null` (day excluded) or a list of 1 to 8 windows; an empty list is rejected (`validation_error`). Within a day a window must have a length (`end != start`) and windows may not overlap (`invalid_field`); an `end` before `start` is an overnight window (3.7) |
 | `daily_time_budget_minutes[day]` | integer 0 to 1440, or `null` for unlimited |
 | `blackout_dates[].label` | at most 100 characters |
 | `blackout_dates[]` | `end` on or after `start` (`invalid_field`) |
@@ -667,11 +687,12 @@ function schedule_pending_flexible_tasks():
         # (Rev 9) Active hours resolve PER DAY, merging the template's override over
         # the global map (3.2/3.7). NOT a whole-object selection: a template overriding
         # one evening must keep its active hours on every other day.
+        # (Rev 13) What a day yields is a LIST of windows, possibly overnight.
         function effective_hours(day):
             if task.template.active_hours_override is not None
                and day in task.template.active_hours_override:
-                return task.template.active_hours_override[day]   # may be null -> day excluded
-            return user_settings.active_hours[day]                # may be null -> day excluded
+                return task.template.active_hours_override[day]   # list; null -> day excluded
+            return user_settings.active_hours[day]                # list; null -> day excluded
 
         # Pass 1: respect the daily time budget (preferred outcome)
         slot = find_first_free_slot(
@@ -729,7 +750,17 @@ function schedule_pending_flexible_tasks():
             # task stays "pending"
 ```
 
-`find_first_free_slot` treats the daily time budget (when passed) as an additional day-level exclusion, alongside `allowed_hours` and `excluded_dates`: for each candidate day D it is considering, it sums the duration of every obstacle already occupying D (all `scheduled`/`in_progress` instances of either type on D + external busy-blocks on D + flexible instances already placed on D in this pass) and skips D entirely for this task if `committed_duration(D) + task.estimated_duration_minutes` would exceed `daily_time_budget_minutes[day_of_week(D)]`. The day isn't invalid in general - just full for the purposes of adding more flexible work - so the search simply continues to the next eligible day.
+**(Rewritten Revision 13) What `find_first_free_slot` searches.** It does not look at "the day's window"; it looks at **eligible stretches of absolute time**:
+
+1. Every date contributes the windows `effective_hours` lists for its day of the week; an overnight window ends on the next date, so the day *before* the search range is read too.
+2. Overlapping or touching windows merge into one stretch (Monday's overnight window and Tuesday's morning one).
+3. A blackout date then cuts at midnight (3.7): the part of any stretch on a blacked-out date is removed, wherever it came from.
+
+For each stretch, and for each calendar date it covers, the candidate is the first grid slot that **starts** on that date and fits (below) - it may run past midnight inside the stretch. Dates are tried in order and the first acceptable candidate wins.
+
+The daily time budget (when passed) is an additional exclusion on a candidate: it sums the duration of every obstacle already occupying each date the candidate touches (all `scheduled`/`in_progress` instances of either type + external busy-blocks + flexible instances already placed in this pass), adds the task's own minutes **on that date**, and rejects the candidate if any touched date would exceed `daily_time_budget_minutes[day_of_week(date)]`. A task wholly inside one date is the familiar case: `committed_duration(D) + task.estimated_duration_minutes` against D's cap. Where a stretch runs past midnight a later start on the same date may split its minutes more kindly across the two budgets than an earlier one, so the search carries on grid point by grid point; where nothing can cross midnight every start on a date fares alike and the first decides. The date isn't invalid in general - just full for the purposes of adding more flexible work - so the search simply continues.
+
+Pass 2's candidates are the same ones, one per date: its overage is summed over the dates the slot touches, its slack is the free capacity left in that date's part of the stretch, and the earliest date still breaks ties.
 
 #### Placement grid (added Revision 9)
 
@@ -739,7 +770,7 @@ function schedule_pending_flexible_tasks():
 - **The grid is aligned in the user's local wall-clock time, not UTC.** Aligning in UTC would produce `:15`-offset slots for anyone in a half-hour or quarter-hour offset zone (`Asia/Kolkata` at +05:30, `Asia/Kathmandu` at +05:45). This is a concrete instance of 14.1's binding rule.
 - **The grid constrains computed starts only.** Fixed instances sit at their `fixed_time_of_day`, whatever the user chose, and external events keep their real times - so gaps still have arbitrary boundaries. Only the chosen start must land on a grid point.
 - **Durations are not quantised.** A 20-minute task placed at 18:00 occupies 18:00–18:20 as an obstacle; the next flexible placement starts at 18:30. Budget arithmetic stays exact and `estimated_duration_minutes` stays an honest estimate rather than something the user has to round to fit.
-- **The rule:** the chosen start is the earliest grid point `t` with `t >= gap_start` such that `t + duration <= gap_end`, `t + duration <= deadline`, and `t + duration <=` the end of that day's effective active-hours window.
+- **The rule:** the chosen start is the earliest grid point `t` with `t >= gap_start` such that `t + duration <= gap_end`, `t + duration <= deadline`, and `t + duration <=` the end of the stretch of eligible time it starts in (3.7: the window, or the merged windows, less any blackout date) - and it must **start** on the date being considered, though it may end after midnight.
 
 Notes:
 - Single fixed greedy algorithm for POC (Backlog 12.9 covers alternatives). The minimum-overage comparison in Pass 2 is a bounded, deterministic tie-break rule, not a pluggable/alternate algorithm - it stays within that scope.
@@ -749,7 +780,7 @@ Notes:
 - Budget accounting includes fixed tasks and external events, not just flexible ones (3.7) - a day already full of meetings shouldn't also absorb a stack of chores just because no *flexible* task has been placed there yet.
 - **The daily budget's strictness is configurable via `budget_enforcement`** (3.7). In `"strict"` mode, Pass 2 never runs - a Pass-1 failure becomes `unschedulable` directly, even if a physically free slot exists elsewhere in the window. In `"soft"` mode (default), Pass 2 runs and picks the least-damaging day as described above.
 - `unschedulable` is reserved for the case where no slot exists **even after ignoring the budget** (in `"soft"` mode), or where Pass 1 simply fails (in `"strict"` mode) - i.e. there's genuinely no acceptable time before the deadline under the configured policy.
-- Day boundaries for budget accounting are computed in the user's configured IANA timezone, consistent with the binding rule in 14.1.
+- Day boundaries for budget accounting are computed in the user's configured IANA timezone, consistent with the binding rule in 14.1. **(Rev 13)** Budgets and blackouts are keyed by calendar date; a window never carries its own day's budget or blackout into the next morning (3.7).
 - **(Added Revision 6)** The Pass 2 tie-break now has three ordered keys: smallest overage, then most remaining slack, then earliest date. **[CONFIRMED - Revision 8, Section 11 item 2.]**
 - **(Added Revision 6)** A flexible task's `deadline` having already elapsed by the time it enters this function is handled *before* it ever gets here - see new 6.7. This function should never actually receive a task with `deadline <= earliest_start`; if it does, that's a bug in the 6.7 gate, not a case this function needs to handle defensively.
 - **(Added Revision 6)** Feasibility (can this duration ever fit, on any day, under any circumstance) is checked once at task creation, not per scheduling pass - see new 6.8.
@@ -813,7 +844,7 @@ Without this gate, a flexible task overdue past its own deadline would hand `fin
 
 ### 6.8 Creation-time feasibility validation for flexible tasks - added Revision 6
 
-Before a flexible `TaskTemplate` (and its initial instance) is saved, validate that `estimated_duration_minutes` fits within **at least one** day's **effective** active-hours window - i.e.:
+Before a flexible `TaskTemplate` (and its initial instance) is saved, validate that `estimated_duration_minutes` fits within **at least one stretch** of the **effective** active hours - a single window, or windows that run into each other (Revision 13: an overnight window and the next morning's window are one stretch) - i.e.:
 
 ```
 # (Rev 9) Evaluated against the MERGED map (3.2), not the override alone - a partial
@@ -824,9 +855,12 @@ effective = { day: effective_hours(day) for every day-of-week }   # see 6.2
 # (Rev 9) Measured from the first GRID point at or after the window start, not from the
 # window start itself - otherwise a task can pass validation here and then never be
 # placeable, because 6.2 can only ever start it on a grid point.
-usable(day) = window.end - first_grid_point_at_or_after(window.start)
+# (Rev 13) Over STRETCHES, not days: windows of every day are laid out over a
+# reference fortnight (so Sunday's overnight window joins Monday's) and merged as in
+# 6.2; a day's several windows count separately unless they meet end to start.
+usable(stretch) = stretch.end - first_grid_point_at_or_after(stretch.start)
 
-max_window = max( usable(day) for every day-of-week entry that is non-null in `effective` )
+max_window = max( usable(stretch) for every stretch of `effective` )
 
 if estimated_duration_minutes > max_window
    (or no day-of-week has a non-null window at all):
@@ -864,7 +898,7 @@ Placement is an incremental fit (6.2): a valid placement is never moved. But a p
 - a `blackout_dates` range added or widened;
 - a `daily_time_budget_minutes` value lowered, or `budget_enforcement` switched to `"strict"` - **only while enforcement is `"strict"`**, since a soft budget is not a rule a placement can break (6.2 Pass 2 may exceed it).
 
-**What is checked.** Every `scheduled` flexible occurrence - for a template's own override change, every such occurrence the "this and future" edit reaches (3.10), since earlier and individually-edited ones are never changed by it. It no longer fits if its slot is not entirely inside its day's effective active-hours window, or its day is blacked out, or - strict budget only - its day's committed minutes (counted exactly as 6.2 counts them, fixed tasks and external events included) exceed the day's budget. On an over-budget day, occurrences are taken off in the reverse of 6.2's placement order - latest deadline first, then lowest priority - until the day is within budget.
+**What is checked.** Every `scheduled` flexible occurrence - for a template's own override change, every such occurrence the "this and future" edit reaches (3.10), since earlier and individually-edited ones are never changed by it. It no longer fits if its slot is not entirely inside **one stretch** of eligible time (3.7, 6.2 - the effective windows, merged, less any blacked-out date), or - strict budget only - the committed minutes of any calendar date it touches (counted exactly as 6.2 counts them, fixed tasks and external events included) exceed the day's budget. On an over-budget day, occurrences are taken off in the reverse of 6.2's placement order - latest deadline first, then lowest priority - until the day is within budget.
 
 **What is not touched.** `in_progress` occurrences (the user has started them), fixed occurrences (never constrained by these rules, 3.7), and every placement that still fits - this is a repair, not a reflow.
 
@@ -914,7 +948,7 @@ WebUI only (Backlog 12.2 for IM bot).
 6. **Settings** -
    - Account: change password.
    - External calendars: connect/disconnect, refresh interval, last-sync timestamp.
-   - Scheduling window: global active-hours per day of week, blackout dates list, daily time-budget cap per day of week, and a budget-enforcement toggle ("respect the budget" / "meet the deadline") controlling whether the last-resort override in 6.2 is allowed at all.
+   - Scheduling window: global active-hours per day of week (**Rev 13: one or more windows per day, any of which may run overnight, with an "ends next day" note**), blackout dates list, daily time-budget cap per day of week, and a budget-enforcement toggle ("respect the budget" / "meet the deadline") controlling whether the last-resort override in 6.2 is allowed at all.
    - Timezone: select IANA timezone, defaulted from container `TZ`.
    - Display: first day of the week (for Timeline layout and Settings ordering).
    - **(Rev 11)** Saving a stricter scheduling window (active hours, blackout dates, a strict budget) may start a schedule repair (6.10); while it runs, a full-screen overlay reads "Fixing the calendar (*n*/*total*)…" and closes with a summary.
@@ -1220,11 +1254,37 @@ The user clears the stale one with **"skip this occurrence"**: the 2026-03-02 in
 
 This is the case that makes 9.1's occurrence-boundary rule necessary: gating generation on a `completed` transition that never comes would silently end the series.
 
+**Example Q - A day split into two windows (3.7, 6.2 - added Rev 13).**
+
+| Given | |
+|---|---|
+| Timezone | America/New_York |
+| Active hours | Monday: `[{08:00, 10:00}, {18:00, 20:00}]`; every other day `null` |
+| Obstacle | Mon 2026-03-02 08:00-10:00 external event (fills the morning window) |
+| Task | flexible, 60 min, `deadline` Mon 2026-03-02 21:00; `now` = Mon 2026-03-02 07:00 |
+
+**Expected:** `scheduled_time` = **Mon 2026-03-02 18:00**. The morning window is full, so the evening one is the next eligible stretch - not "no room on Monday". A 130-minute task would be rejected at creation by 6.8 (the longest stretch is 120 minutes), because two windows are measured separately.
+
+**Example R - An overnight window, straddling midnight (3.7, 6.2 - added Rev 13).**
+
+| Given | |
+|---|---|
+| Timezone | America/New_York |
+| Active hours | Monday: `[{22:00, 02:00}]`; every other day `null` |
+| Obstacle | Mon 2026-03-02 22:00-23:30 external event |
+| Task | flexible, 90 min, `deadline` Tue 2026-03-03 12:00; `now` = Mon 2026-03-02 12:00 |
+
+**Expected:** `scheduled_time` = **Mon 2026-03-02 23:30**, ending Tue 01:00 - inside the stretch Monday 22:00 to Tuesday 02:00. Three variations pin down the rules:
+
+- **Tuesday blacked out:** the stretch is cut at midnight (3.7), leaving 22:00-24:00 on Monday, of which the event takes 22:00-23:30. 90 minutes no longer fit and the task is `unschedulable`.
+- **Daily budgets Monday 30 min and Tuesday 30 min, no obstacle, a 60-minute task:** 22:00 would put 60 minutes on Monday, so Pass 1 settles on **23:30**, which spends 30 on each date. Had Tuesday's budget been 20, no split fits; in `soft` mode Pass 2 then places at 22:00 (30 over on Monday beats 40 over on Tuesday).
+- **Feasibility (6.8):** a 240-minute task is accepted against this window alone and a 241-minute one is rejected, since the overnight window is one four-hour stretch.
+
 ---
 
 ## 11. Open Questions Requiring Stakeholder Sign-off
 
-**Status as of Revision 11: no open items.** See the closing note below for why that is not the same as "the document is fully verified".
+**Status as of Revision 13: no open items.** See the closing note below for why that is not the same as "the document is fully verified".
 
 Items 1–7 were raised by the first readiness review and resolved in Revisions 7 and 8; their outcomes are stated in the body of this document rather than restated here, and the full text is in git history. One is worth naming, because it was a **reversal** and a future reader is otherwise liable to reinstate the original position:
 
@@ -1260,9 +1320,9 @@ Revision 9 resolved eighteen findings from a second review (IRR-2). Two of them 
 
 21. ~~**Should external sync let the user choose which calendars of an account to read?**~~ **RESOLVED - Revision 12 (IRR-2 M6): not for the POC.** The poll reads one calendar per connection and a failed poll is visible only as a stale "last synced" time; both are written down (7) and the improvements are Backlog 12.26 and 12.27.
 
-22. ~~**Do overnight active-hours windows (`22:00`-`02:00`) belong in the POC?**~~ **DEFERRED - Revision 12 (IRR-2 M4).** Not decided here: the question touches the placement algorithm and is to be discussed on its own (Backlog 12.25). What *is* settled: blackout ranges are inclusive at both ends (3.7).
+22. ~~**Do overnight active-hours windows (`22:00`-`02:00`) belong in the POC, and what about split days?**~~ **RESOLVED - Revision 13 (IRR-2 M4, Backlog 12.25 built).** Yes, both. A day holds a list of windows and a window may end the next morning; placement works on stretches of absolute time, a blackout cuts at midnight, and budgets count the calendar date (3.7, 6.2). A list rather than a single overnight-capable window, because the user's days are split and fluid and a list expresses that directly. The wire shape of `active_hours` / `active_hours_override` becomes `{day: [window, ...] | null}`.
 
-**Section 11 has no open items at Revision 12** apart from item 22, which is deliberately deferred. Note this is narrower than Revision 8's claim that the document was "fully locked": IRR-2's editorial findings (Section 4 of that register) and the one deferred Medium question above remain open and are tracked there, not here. Section 11 tracks decisions awaiting confirmation; IRR-2 tracks findings awaiting a decision.
+**Section 11 has no open items at Revision 13.** Note this is narrower than Revision 8's claim that the document was "fully locked": IRR-2's editorial findings (Section 4 of that register) and the one deferred Medium question above remain open and are tracked there, not here. Section 11 tracks decisions awaiting confirmation; IRR-2 tracks findings awaiting a decision.
 
 Two related items were resolved **without** flagging, since they don't change load-bearing behavior and follow directly from rules already on the books:
 - Instances may be marked `completed` directly without first being `scheduled` (3.3/4) - this is a natural reading of "the user did the task," not a new mechanism.
@@ -1298,7 +1358,7 @@ Two related items were resolved **without** flagging, since they don't change lo
 | 12.22 *(added Rev 9)* | Placing dependents against a prerequisite's *scheduled* time rather than its completion, so whole chains appear on the Timeline in advance | Genuinely better for previewing a plan, but it requires a dependency-invalidation cascade: placements are immovable (6.2), so moving a prerequisite would strand every dependent placed after it, needing re-placement, new job re-wiring, and a bounded exception to the immovability rule. That is a feature with its own design, not a side effect of deleting dead code. POC makes the work visible via the Backlog view (8.1) instead |
 | 12.23 *(added Rev 9)* | User-triggered "re-optimise my schedule" reflow - clear and re-place all `pending`/`scheduled` flexible instances in one global pass | The natural escape hatch for 6.2's accepted greedy corner-painting. Deferred because it must be explicit and user-initiated: an automatic reflow would silently move work the user has already planned around, which 6.2 rules out deliberately |
 | 12.24 *(added and withdrawn in Rev 9)* | ~~Non-destructive `dismiss` for a stale recurring occurrence~~ | **Withdrawn - built into the POC**, not deferred. Section 11 item 8 resolved in favour of a `dismissed` terminal status (3.8, Section 4). Number retained rather than reused, so existing citations do not silently repoint |
-| 12.25 *(added Rev 12)* | Overnight (`22:00`-`02:00`) and split (morning plus evening) active-hours windows | The window shape is a single same-day `{start, end}` (3.7). Supporting either changes placement in 6.2 and the merge in 3.2, so it is discussed separately rather than slipped in under validation work (IRR-2 M4). Until decided, a window whose `end` is not after its `start` is unspecified |
+| 12.25 *(added Rev 12, built Rev 13)* | ~~Overnight and split active-hours windows~~ | **Built - Revision 13** (3.7, 6.2). Section 11 item 22 |
 | 12.26 *(added Rev 12)* | Choose which calendars of a connected account are synced (a `calendar_ids` selection on `ExternalCalendarConnection`) | The POC reads one calendar per connection - Google `primary`, Outlook's default (7). A selection needs a provider call to list calendars, a column and a settings control (IRR-2 M6) |
 | 12.27 *(added Rev 12)* | A failed-sync status or notification, and rate-limit/backoff handling for the poll | A failed poll is logged and shows as a stale "last synced" time; the next interval retries (7). Surfacing it properly wants a new notification type or a status field on the connection (IRR-2 M6) |
 
