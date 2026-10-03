@@ -7,7 +7,7 @@ and budgets stay exact, unquantised minutes (§6.2).
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from app.scheduling_engine.types import ActiveHoursWindow
 
@@ -17,6 +17,20 @@ DEFAULT_GRID_MINUTES = 15
 # objects so `ceil_to_grid` (which operates on `datetime`) can be reused for
 # time-of-day-only math. The date itself is arbitrary and never observed by callers.
 _REFERENCE_DAY = date(2000, 1, 1)
+
+
+def add_elapsed(moment: datetime, delta: timedelta) -> datetime:
+    """`moment` plus `delta` of real elapsed time, shown on the same wall clock (§14.1).
+
+    `moment + delta` on an aware datetime is wall-clock arithmetic whenever it keeps its
+    tzinfo - 22:00 plus 7 hours is 05:00 even on the night 02:00 is skipped, when 7 real
+    hours end at 06:00. Every duration the engine lays down goes through here so a slot's
+    end is a real instant, and a task is neither squeezed out of a fall-back night nor
+    let overrun a spring-forward one.
+    """
+    if moment.tzinfo is None:  # the reference-day arithmetic of 6.8, which has no zone
+        return moment + delta
+    return (moment.astimezone(UTC) + delta).astimezone(moment.tzinfo)
 
 
 def ceil_to_grid(moment: datetime, grid_minutes: int = DEFAULT_GRID_MINUTES) -> datetime:
@@ -30,7 +44,7 @@ def ceil_to_grid(moment: datetime, grid_minutes: int = DEFAULT_GRID_MINUTES) -> 
     # own minute/second/microsecond - so this is an equality check, not a range.
     if floor_point == moment:
         return floor_point
-    return floor_point + timedelta(minutes=grid_minutes)
+    return add_elapsed(floor_point, timedelta(minutes=grid_minutes))
 
 
 def usable_minutes(window: ActiveHoursWindow, grid_minutes: int = DEFAULT_GRID_MINUTES) -> int:
@@ -40,8 +54,17 @@ def usable_minutes(window: ActiveHoursWindow, grid_minutes: int = DEFAULT_GRID_M
     starting on a grid point, so a window whose start isn't grid-aligned (e.g.
     18:07) is effectively shorter than its raw span for feasibility purposes.
     Built on `ceil_to_grid` rather than re-deriving the rounding rule, so the two
-    can't drift apart as that rule evolves.
+    can't drift apart as that rule evolves. An overnight window (`end` before `start`)
+    runs to the next morning.
     """
-    grid_start = ceil_to_grid(datetime.combine(_REFERENCE_DAY, window.start), grid_minutes)
-    window_end = datetime.combine(_REFERENCE_DAY, window.end)
-    return max(0, int((window_end - grid_start).total_seconds() // 60))
+    if window.end == window.start:
+        return 0
+    end_day = _REFERENCE_DAY if window.end > window.start else _REFERENCE_DAY + timedelta(days=1)
+    return usable_minutes_between(
+        datetime.combine(_REFERENCE_DAY, window.start), datetime.combine(end_day, window.end), grid_minutes
+    )
+
+
+def usable_minutes_between(start: datetime, end: datetime, grid_minutes: int = DEFAULT_GRID_MINUTES) -> int:
+    """Minutes of the stretch [start, end) a task could occupy, from the first grid point at/after `start`."""
+    return max(0, int((end - ceil_to_grid(start, grid_minutes)).total_seconds() // 60))

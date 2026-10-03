@@ -30,7 +30,7 @@ from app.jobs.interface import (
     JobScheduler,
     occurrence_boundary_job_key,
 )
-from app.scheduling.adapter import build_active_hours_map, has_fixed_conflict
+from app.scheduling.adapter import build_active_hours_map, has_fixed_conflict, invalid_windows_message
 from app.scheduling.generation import (
     GeneratedInstanceFields,
     VirtualOccurrence,
@@ -81,7 +81,7 @@ class TaskTemplateDraft:
     fixed_time_of_day: str | None = None
     deadline_offset_minutes: int | None = None
     reminder_offsets_minutes: tuple[int, ...] = ()
-    active_hours_override: dict[DayName, ActiveHoursWindow | None] | None = None
+    active_hours_override: dict[DayName, list[ActiveHoursWindow] | None] | None = None
     dependencies: tuple[str, ...] = ()
 
 
@@ -125,6 +125,13 @@ def list_virtual_occurrences(db: Session, *, now: datetime) -> list[VirtualOccur
     )
 
 
+def _validate_window_override(override: dict[DayName, list[ActiveHoursWindow] | None] | None) -> None:
+    """§3.7: a day's windows need a length and mustn't overlap one another."""
+    problem = invalid_windows_message(override) if override else None
+    if problem:
+        raise TemplateValidationError("invalid_field", f"active_hours_override - {problem}")
+
+
 def create_template(db: Session, jobs: JobScheduler, draft: TaskTemplateDraft) -> CreatedTemplate:
     """§3.1/§9.1: creating a template always spawns its initial instance in the same
     transaction. Every check below can reject the whole save (§6.1, §6.5, §6.8) and none
@@ -134,6 +141,8 @@ def create_template(db: Session, jobs: JobScheduler, draft: TaskTemplateDraft) -
 
     if draft.recurrence.anchor == "completion" and draft.type != "flexible":
         raise TemplateValidationError("invalid_recurrence_anchor", 'anchor: "completion" is only valid on flexible templates.')
+
+    _validate_window_override(draft.active_hours_override)
 
     settings = require_settings(db)
 
@@ -376,6 +385,9 @@ def edit_template_this_and_future(
     prospective = current.model_copy(update=patch)
     if prospective.recurrence.anchor == "completion" and prospective.type != "flexible":
         raise TemplateValidationError("invalid_recurrence_anchor", 'anchor: "completion" is only valid on flexible templates.')
+
+    if "active_hours_override" in patch:
+        _validate_window_override(prospective.active_hours_override)
 
     settings = require_settings(db)
     duration_or_hours_changed = "estimated_duration_minutes" in patch or "active_hours_override" in patch

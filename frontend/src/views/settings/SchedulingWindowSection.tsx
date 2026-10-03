@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { DayOfWeekRows } from '../../components/DayOfWeekRows';
+import { WindowListInput } from '../../components/WindowListInput';
 import { DurationInput } from '../../components/DurationInput';
 import { updateSettings } from '../../api/settings';
 import { announcePossibleScheduleRepair } from '../../lib/scheduleRepairEvents';
@@ -7,7 +8,7 @@ import { ApiError } from '../../api/client';
 import { DAILY_BUDGET_UNITS } from '../../lib/duration';
 import { MAX_BLACKOUT_LABEL_LENGTH, MAX_DAILY_BUDGET_MINUTES } from '../../lib/limits';
 import { DAY_LABELS } from '../../lib/days';
-import type { ActiveHoursWindow, DayName } from '../../types/task';
+import type { ActiveHoursWindow, DayName, DayWindows } from '../../types/task';
 import type { BlackoutDate, BudgetEnforcement, UserSettings } from '../../types/settings';
 
 const DEFAULT_WINDOW: ActiveHoursWindow = { start: '09:00', end: '17:00' };
@@ -15,8 +16,8 @@ const DEFAULT_BUDGET_MINUTES = 120;
 
 type ActiveHoursMode = 'excluded' | 'custom';
 
-function activeHoursMode(window: ActiveHoursWindow | null | undefined): ActiveHoursMode {
-  return window ? 'custom' : 'excluded';
+function activeHoursMode(windows: DayWindows | undefined): ActiveHoursMode {
+  return windows ? 'custom' : 'excluded';
 }
 
 interface SchedulingWindowSectionProps {
@@ -32,14 +33,19 @@ interface SchedulingWindowSectionProps {
  * excluded, §3.7's own "null always means day excluded" rule), so this control offers
  * only those two modes.
  */
-export function SchedulingWindowSection({ settings, onUpdated }: SchedulingWindowSectionProps): JSX.Element {
-  const [activeHours, setActiveHours] = useState<Record<DayName, ActiveHoursWindow | null>>(
-    settings.active_hours as Record<DayName, ActiveHoursWindow | null>
+export function SchedulingWindowSection({
+  settings,
+  onUpdated,
+}: SchedulingWindowSectionProps): JSX.Element {
+  const [activeHours, setActiveHours] = useState<Record<DayName, DayWindows>>(
+    settings.active_hours as Record<DayName, DayWindows>
   );
   const [dailyBudget, setDailyBudget] = useState<Record<DayName, number | null>>(
     settings.daily_time_budget_minutes as Record<DayName, number | null>
   );
-  const [budgetEnforcement, setBudgetEnforcement] = useState<BudgetEnforcement>(settings.budget_enforcement);
+  const [budgetEnforcement, setBudgetEnforcement] = useState<BudgetEnforcement>(
+    settings.budget_enforcement
+  );
   const [blackoutDates, setBlackoutDates] = useState<BlackoutDate[]>(settings.blackout_dates);
   const [newBlackoutStart, setNewBlackoutStart] = useState('');
   const [newBlackoutEnd, setNewBlackoutEnd] = useState('');
@@ -50,8 +56,8 @@ export function SchedulingWindowSection({ settings, onUpdated }: SchedulingWindo
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const setActiveHoursDay = (day: DayName, mode: ActiveHoursMode, window?: ActiveHoursWindow): void => {
-    setActiveHours((prev) => ({ ...prev, [day]: mode === 'excluded' ? null : (window ?? prev[day] ?? DEFAULT_WINDOW) }));
+  const setActiveHoursDay = (day: DayName, windows: DayWindows): void => {
+    setActiveHours((prev) => ({ ...prev, [day]: windows }));
   };
 
   const setDailyBudgetDay = (day: DayName, minutes: number | null): void => {
@@ -123,40 +129,31 @@ export function SchedulingWindowSection({ settings, onUpdated }: SchedulingWindo
 
       <DayOfWeekRows
         legend="Active hours"
-        hint="A day with no active hours is fully excluded from scheduling."
+        hint="A day can have several windows (morning and evening, say), and a window that ends before it starts runs overnight. A day with no active hours is fully excluded from scheduling."
         renderControl={(day) => {
-          const window = activeHours[day];
-          const mode = activeHoursMode(window);
+          const windows = activeHours[day];
+          const mode = activeHoursMode(windows);
           return (
             <>
               <select
                 aria-label={`${DAY_LABELS[day]} active hours`}
                 value={mode}
-                onChange={(event) => setActiveHoursDay(day, event.target.value as ActiveHoursMode)}
+                onChange={(event) =>
+                  setActiveHoursDay(
+                    day,
+                    event.target.value === 'excluded' ? null : (windows ?? [DEFAULT_WINDOW])
+                  )
+                }
               >
                 <option value="excluded">Excluded</option>
                 <option value="custom">Custom</option>
               </select>
-              {mode === 'custom' && (
-                <>
-                  <input
-                    type="time"
-                    aria-label={`${DAY_LABELS[day]} start`}
-                    value={window?.start ?? DEFAULT_WINDOW.start}
-                    onChange={(event) =>
-                      setActiveHoursDay(day, 'custom', { start: event.target.value, end: window?.end ?? DEFAULT_WINDOW.end })
-                    }
-                  />
-                  <span>to</span>
-                  <input
-                    type="time"
-                    aria-label={`${DAY_LABELS[day]} end`}
-                    value={window?.end ?? DEFAULT_WINDOW.end}
-                    onChange={(event) =>
-                      setActiveHoursDay(day, 'custom', { start: window?.start ?? DEFAULT_WINDOW.start, end: event.target.value })
-                    }
-                  />
-                </>
+              {windows && (
+                <WindowListInput
+                  dayLabel={DAY_LABELS[day]}
+                  windows={windows}
+                  onChange={(next) => setActiveHoursDay(day, next)}
+                />
               )}
             </>
           );
@@ -165,22 +162,40 @@ export function SchedulingWindowSection({ settings, onUpdated }: SchedulingWindo
 
       <fieldset className="field">
         <legend>Blackout dates</legend>
-        {blackoutDates.length === 0 && <p style={{ color: 'var(--color-text-muted)' }}>No blackout dates.</p>}
+        {blackoutDates.length === 0 && (
+          <p style={{ color: 'var(--color-text-muted)' }}>No blackout dates.</p>
+        )}
         {blackoutDates.map((blackout, index) => (
           <div
             key={`${blackout.start}-${blackout.end}-${index}`}
-            style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--space-2)',
+              marginBottom: 'var(--space-2)',
+            }}
           >
             <span>
               {blackout.start} – {blackout.end}
               {blackout.label ? ` (${blackout.label})` : ''}
             </span>
-            <button type="button" onClick={() => removeBlackoutDate(index)} aria-label={`Remove blackout date ${index + 1}`}>
+            <button
+              type="button"
+              onClick={() => removeBlackoutDate(index)}
+              aria-label={`Remove blackout date ${index + 1}`}
+            >
               Remove
             </button>
           </div>
         ))}
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'flex-end',
+            gap: 'var(--space-2)',
+            flexWrap: 'wrap',
+          }}
+        >
           <div>
             <label htmlFor="blackout-start">Start</label>
             <input
@@ -192,7 +207,12 @@ export function SchedulingWindowSection({ settings, onUpdated }: SchedulingWindo
           </div>
           <div>
             <label htmlFor="blackout-end">End</label>
-            <input id="blackout-end" type="date" value={newBlackoutEnd} onChange={(event) => setNewBlackoutEnd(event.target.value)} />
+            <input
+              id="blackout-end"
+              type="date"
+              value={newBlackoutEnd}
+              onChange={(event) => setNewBlackoutEnd(event.target.value)}
+            />
           </div>
           <div>
             <label htmlFor="blackout-label">Label (optional)</label>
@@ -219,12 +239,21 @@ export function SchedulingWindowSection({ settings, onUpdated }: SchedulingWindo
           const unlimited = minutes === null;
           return (
             <>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)', marginBottom: 0 }}>
+              <label
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 'var(--space-1)',
+                  marginBottom: 0,
+                }}
+              >
                 <input
                   type="checkbox"
                   aria-label={`${DAY_LABELS[day]} unlimited budget`}
                   checked={unlimited}
-                  onChange={(event) => setDailyBudgetDay(day, event.target.checked ? null : DEFAULT_BUDGET_MINUTES)}
+                  onChange={(event) =>
+                    setDailyBudgetDay(day, event.target.checked ? null : DEFAULT_BUDGET_MINUTES)
+                  }
                 />
                 Unlimited
               </label>
@@ -250,8 +279,12 @@ export function SchedulingWindowSection({ settings, onUpdated }: SchedulingWindo
           value={budgetEnforcement}
           onChange={(event) => setBudgetEnforcement(event.target.value as BudgetEnforcement)}
         >
-          <option value="soft">Meet the deadline (soft budget - may exceed as a last resort)</option>
-          <option value="strict">Respect the budget (strict cap - becomes unschedulable instead)</option>
+          <option value="soft">
+            Meet the deadline (soft budget - may exceed as a last resort)
+          </option>
+          <option value="strict">
+            Respect the budget (strict cap - becomes unschedulable instead)
+          </option>
         </select>
       </div>
 

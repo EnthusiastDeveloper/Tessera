@@ -16,15 +16,15 @@ touches no clock, and creates no notifications; the service layer maps
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone, tzinfo
 
-from app.scheduling_engine.calendar_rules import day_name, day_range, is_blacked_out, merge_active_hours
+from app.scheduling_engine.calendar_rules import Interval, day_name, day_range, eligible_intervals, merge_active_hours
 from app.scheduling_engine.fixed_conflicts import intervals_overlap
-from app.scheduling_engine.grid import DEFAULT_GRID_MINUTES, ceil_to_grid
+from app.scheduling_engine.grid import DEFAULT_GRID_MINUTES, add_elapsed, ceil_to_grid
 from app.scheduling_engine.types import (
     ActiveHoursMap,
-    ActiveHoursWindow,
     BlackoutDate,
     BudgetEnforcement,
     FlexibleTaskCandidate,
@@ -47,10 +47,12 @@ def find_first_free_slot(
 ) -> datetime | None:
     """Pass 1 (§6.2): first grid-aligned start fitting `duration_minutes` in [not_before, not_after].
 
-    Scans days in order. A day is skipped entirely (not partially considered) if
-    it's blacked out, has no active-hours window, or - when
-    `daily_time_budget_minutes` is provided - already-committed obstacle time on
-    that day plus this task's duration would exceed that day's cap.
+    Scans the eligible stretches of time in order, one candidate per calendar date a
+    stretch covers (the first slot that *starts* on that date; it may run past midnight
+    inside an overnight stretch). A date contributes nothing if it is blacked out or has
+    no window - when `daily_time_budget_minutes` is provided, a slot is also passed over if
+    the obstacle time already committed on any date it touches, plus the task's minutes on
+    that date, would exceed that date's cap.
 
     `daily_time_budget_minutes=None` disables the budget check entirely for every
     day (used internally by Pass 2's physical-feasibility probe); a per-day value
@@ -62,27 +64,22 @@ def find_first_free_slot(
     """
     duration = timedelta(minutes=duration_minutes)
     sorted_obstacles = sorted(obstacles, key=lambda obstacle: obstacle.start)
-    for day in day_range(not_before.date(), not_after.date()):
-        window = eligible_window_for_day(day, allowed_hours, excluded_dates)
-        if window is None:
-            continue
-        if daily_time_budget_minutes is not None:
-            budget = daily_time_budget_minutes.get(day_name(day))
-            if budget is not None:
-                committed = committed_minutes_for_day(day, sorted_obstacles, not_before.tzinfo)
-                if committed + duration_minutes > budget:
-                    continue
-        slot = _first_slot_in_window(
-            day=day,
-            window=window,
-            duration=duration,
-            not_before=not_before,
-            not_after=not_after,
-            obstacles=sorted_obstacles,
-            grid_minutes=grid_minutes,
-        )
-        if slot is not None:
-            return slot
+    within_budget = (
+        None
+        if daily_time_budget_minutes is None
+        else lambda slot: not _budget_overage(slot, duration, daily_time_budget_minutes, sorted_obstacles)
+    )
+    for candidate in _candidates(
+        duration=duration,
+        not_before=not_before,
+        not_after=not_after,
+        allowed_hours=allowed_hours,
+        excluded_dates=excluded_dates,
+        obstacles=sorted_obstacles,
+        grid_minutes=grid_minutes,
+        accept=within_budget,
+    ):
+        return candidate.slot
     return None
 
 
@@ -139,7 +136,9 @@ def schedule_pending_flexible_tasks(
 
         if slot is not None:
             placements.append(Placement(task_id=task.id, scheduled_start=slot, budget_overridden=budget_overridden))
-            working_obstacles.append(Obstacle(start=slot, end=slot + timedelta(minutes=task.estimated_duration_minutes)))
+            working_obstacles.append(
+                Obstacle(start=slot, end=add_elapsed(slot, timedelta(minutes=task.estimated_duration_minutes)))
+            )
         else:
             unschedulable.append(task.id)
 
@@ -161,98 +160,154 @@ def _pass_two(
     Only reached from `schedule_pending_flexible_tasks` when Pass 1 fails and
     `budget_enforcement == "soft"`. Considers every day in [earliest_start,
     deadline] with a *physically* free slot (budget aside) and picks the one
-    minimizing, in order: (1) overage against that day's budget, (2) negated
-    remaining free capacity in the window after this task would land (i.e.
-    maximize slack), (3) earliest date.
+    minimizing, in order: (1) overage against the budgets of the dates the slot touches,
+    (2) negated remaining free capacity in that date's part of the stretch after this
+    task would land (i.e. maximize slack), (3) earliest date.
     """
     duration = timedelta(minutes=task.estimated_duration_minutes)
-    tz = earliest_start.tzinfo
     sorted_obstacles = sorted(obstacles, key=lambda obstacle: obstacle.start)
 
     best_slot: datetime | None = None
     best_key: tuple[float, float, date] | None = None
 
-    for day in day_range(earliest_start.date(), task.deadline.date()):
-        window = eligible_window_for_day(day, effective_hours, blackout_dates)
-        if window is None:
-            continue
-        slot = _first_slot_in_window(
-            day=day,
-            window=window,
-            duration=duration,
-            not_before=earliest_start,
-            not_after=task.deadline,
-            obstacles=sorted_obstacles,
-            grid_minutes=grid_minutes,
-        )
-        if slot is None:
-            continue
-
-        cap = daily_time_budget_minutes.get(day_name(day))
-        committed = committed_minutes_for_day(day, sorted_obstacles, tz)
-        overage = max(0.0, committed + task.estimated_duration_minutes - cap) if cap is not None else 0.0
-        remaining_after = _free_capacity_in_window(day, window, sorted_obstacles, tz) - task.estimated_duration_minutes
-        key = (overage, float(-remaining_after), day)
+    for candidate in _candidates(
+        duration=duration,
+        not_before=earliest_start,
+        not_after=task.deadline,
+        allowed_hours=effective_hours,
+        excluded_dates=blackout_dates,
+        obstacles=sorted_obstacles,
+        grid_minutes=grid_minutes,
+    ):
+        overage = _budget_overage(candidate.slot, duration, daily_time_budget_minutes, sorted_obstacles)
+        remaining_after = _free_capacity(candidate.segment, sorted_obstacles) - task.estimated_duration_minutes
+        key = (float(overage), float(-remaining_after), candidate.day)
 
         if best_key is None or key < best_key:
             best_key = key
-            best_slot = slot
+            best_slot = candidate.slot
 
     return best_slot, best_slot is not None
 
 
-def eligible_window_for_day(
-    day: date, allowed_hours: ActiveHoursMap, excluded_dates: Sequence[BlackoutDate]
-) -> ActiveHoursWindow | None:
-    """The day's active-hours window, or None if the day is ineligible - blacked out or excluded (§6.2).
+@dataclass(frozen=True)
+class _Candidate:
+    """The first slot that starts on `day` inside one eligible stretch.
 
-    Shared by `find_first_free_slot` and `_pass_two` so the two passes can't
-    silently diverge on which days are even in play.
+    `segment` is the stretch clipped to `day` - the day's part of the window(s) the slot
+    sits in, which Pass 2 measures slack against.
     """
-    if is_blacked_out(day, excluded_dates):
-        return None
-    return allowed_hours.get(day_name(day))
+
+    day: date
+    slot: datetime
+    segment: Interval
 
 
-def _first_slot_in_window(
+def _candidates(
     *,
-    day: date,
-    window: ActiveHoursWindow,
     duration: timedelta,
     not_before: datetime,
     not_after: datetime,
+    allowed_hours: ActiveHoursMap,
+    excluded_dates: Sequence[BlackoutDate],
+    obstacles: Sequence[Obstacle],
+    grid_minutes: int,
+    accept: Callable[[datetime], bool] | None = None,
+) -> Iterator[_Candidate]:
+    """Per calendar date, in order, the first obstacle-clear grid slot inside the eligible time (§6.2).
+
+    Shared by Pass 1 and Pass 2 so the two can't silently diverge on which dates and
+    stretches are in play. `obstacles` must already be sorted by `start`.
+
+    With `accept` (Pass 1's budget test), a date yields its first slot that `accept` allows.
+    Where nothing can run past midnight a date's slots all fare alike, so the first one
+    decides; where it can, a later slot may spend fewer minutes on the next date's budget
+    than an earlier one, so the search carries on grid point by grid point.
+    """
+    tz = not_before.tzinfo
+    intervals = eligible_intervals(not_before.date(), not_after.date(), allowed_hours, excluded_dates, tz)
+    for interval_start, interval_end in intervals:
+        limit = min(interval_end, not_after)
+        first = max(interval_start, not_before)
+        if first >= limit:
+            continue
+        for day in day_range(first.date(), limit.date()):
+            day_start = datetime.combine(day, time.min, tzinfo=tz)
+            next_day_start = datetime.combine(day + timedelta(days=1), time.min, tzinfo=tz)
+            search_from = max(first, day_start)
+            while True:
+                slot = _first_slot(
+                    search_from=search_from,
+                    start_before=next_day_start,
+                    stretch_end=interval_end,
+                    limit=limit,
+                    duration=duration,
+                    obstacles=obstacles,
+                    grid_minutes=grid_minutes,
+                )
+                if slot is None:
+                    break
+                if accept is None or accept(slot):
+                    yield _Candidate(
+                        day=day,
+                        slot=slot,
+                        segment=(max(interval_start, day_start), min(interval_end, next_day_start)),
+                    )
+                    break
+                if limit <= next_day_start:
+                    break
+                search_from = add_elapsed(slot, timedelta(minutes=grid_minutes))
+
+
+def _first_slot(
+    *,
+    search_from: datetime,
+    start_before: datetime,
+    stretch_end: datetime,
+    limit: datetime,
+    duration: timedelta,
     obstacles: Sequence[Obstacle],
     grid_minutes: int,
 ) -> datetime | None:
-    """The earliest grid-aligned start on `day` that fits `duration` clear of obstacles.
+    """The earliest grid-aligned start in [search_from, start_before) that fits `duration` clear of obstacles.
 
-    The chosen start `t` satisfies `t >= gap_start`, `t + duration <= gap_end`,
-    `t + duration <= not_after` (the deadline), and `t + duration <=` the window's
-    end - exactly §6.2's placement-grid rule.
-
-    `obstacles` must already be sorted by `start` - both callers sort once per
-    invocation rather than once per day, so this only ever filters.
+    The chosen start `t` satisfies `t >= gap_start`, `t + duration <= gap_end` and
+    `t + duration <= limit` (real elapsed time, `add_elapsed`) (the stretch's end or the deadline, whichever is first) -
+    exactly §6.2's placement-grid rule. `obstacles` must already be sorted by `start`.
     """
-    tz = not_before.tzinfo
-    window_start = datetime.combine(day, window.start, tzinfo=tz)
-    window_end = datetime.combine(day, window.end, tzinfo=tz)
-    search_from = max(window_start, not_before)
-    limit = min(window_end, not_after)
-
     cursor = ceil_to_grid(search_from, grid_minutes)
-    if cursor + duration > limit:
+    if cursor >= start_before or add_elapsed(cursor, duration) > limit:
         return None
 
-    relevant = [obstacle for obstacle in obstacles if intervals_overlap(search_from, window_end, obstacle.start, obstacle.end)]
+    relevant = [obstacle for obstacle in obstacles if intervals_overlap(search_from, stretch_end, obstacle.start, obstacle.end)]
     for obstacle in relevant:
-        if cursor + duration <= obstacle.start:
-            return cursor
+        if add_elapsed(cursor, duration) <= obstacle.start:
+            break
         if obstacle.end > cursor:
             cursor = ceil_to_grid(obstacle.end, grid_minutes)
-        if cursor + duration > limit:
+        if cursor >= start_before or add_elapsed(cursor, duration) > limit:
             return None
 
-    return cursor if cursor + duration <= limit else None
+    return cursor if cursor < start_before and add_elapsed(cursor, duration) <= limit else None
+
+
+def _budget_overage(slot: datetime, duration: timedelta, budget: Mapping[str, int | None], obstacles: Sequence[Obstacle]) -> int:
+    """Minutes by which placing `duration` at `slot` would exceed the budget of the dates it touches (§6.2).
+
+    Obstacles are counted by calendar date, so a task that runs past midnight is counted
+    on each date for the minutes it spends there. A date with no cap contributes nothing.
+    """
+    tz = slot.tzinfo
+    end = add_elapsed(slot, duration)
+    overage = 0
+    for day in day_range(slot.date(), end.date()):
+        day_start = datetime.combine(day, time.min, tzinfo=tz)
+        next_day_start = day_start + timedelta(days=1)
+        minutes_here = _elapsed_minutes(max(slot, day_start), min(end, next_day_start))
+        cap = budget.get(day_name(day))
+        if minutes_here > 0 and cap is not None:
+            overage += max(0, committed_minutes_for_day(day, obstacles, tz) + minutes_here - cap)
+    return overage
 
 
 def committed_minutes_for_day(day: date, obstacles: Sequence[Obstacle], tz: tzinfo | None) -> int:
@@ -266,12 +321,10 @@ def committed_minutes_for_day(day: date, obstacles: Sequence[Obstacle], tz: tzin
     return _summed_minutes(_clip_obstacles(obstacles, day_start, day_end))
 
 
-def _free_capacity_in_window(day: date, window: ActiveHoursWindow, obstacles: Sequence[Obstacle], tz: tzinfo | None) -> int:
-    """Free minutes remaining inside `day`'s active-hours window, obstacles merged (§6.2 Pass 2 slack key)."""
-    window_start = datetime.combine(day, window.start, tzinfo=tz)
-    window_end = datetime.combine(day, window.end, tzinfo=tz)
-    window_minutes = _elapsed_minutes(window_start, window_end)
-    return max(0, window_minutes - _summed_minutes(_clip_obstacles(obstacles, window_start, window_end)))
+def _free_capacity(segment: Interval, obstacles: Sequence[Obstacle]) -> int:
+    """Free minutes left in `segment` once obstacles are merged out (§6.2 Pass 2 slack key)."""
+    start, end = segment
+    return max(0, _elapsed_minutes(start, end) - _summed_minutes(_clip_obstacles(obstacles, start, end)))
 
 
 def _clip_obstacles(obstacles: Sequence[Obstacle], bound_start: datetime, bound_end: datetime) -> list[tuple[datetime, datetime]]:

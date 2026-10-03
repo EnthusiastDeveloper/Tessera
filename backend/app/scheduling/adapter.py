@@ -30,7 +30,7 @@ from app.db.repositories import ExternalCalendarConnectionRepository, ExternalEv
 from app.db.schemas import ActiveHoursWindow as DomainActiveHoursWindow
 from app.db.schemas import DayName, TaskInstance, TaskTemplate, UserSettings
 from app.db.session import acquire_write_lock
-from app.scheduling_engine.calendar_rules import merge_active_hours
+from app.scheduling_engine.calendar_rules import merge_active_hours, validate_day_windows
 from app.scheduling_engine.fixed_conflicts import check_fixed_conflict as engine_check_fixed_conflict
 from app.scheduling_engine.placement import schedule_pending_flexible_tasks
 from app.scheduling_engine.types import ActiveHoursMap, FlexibleTaskCandidate, Obstacle, SchedulingResult
@@ -59,19 +59,32 @@ def _parse_hhmm(value: str) -> time:
 
 
 def to_engine_active_hours(
-    mapping: dict[DayName, DomainActiveHoursWindow | None] | None,
+    mapping: dict[DayName, list[DomainActiveHoursWindow] | None] | None,
 ) -> ActiveHoursMap | None:
     """ "HH:MM"-string windows (design doc §3.2/§3.7's wire shape) -> the engine's `time`-based type."""
     if mapping is None:
         return None
-    return {
-        day: (EngineActiveHoursWindow(start=_parse_hhmm(w.start), end=_parse_hhmm(w.end)) if w else None)
-        for day, w in mapping.items()
-    }
+    return {day: _engine_windows(windows) for day, windows in mapping.items()}
+
+
+def _engine_windows(windows: list[DomainActiveHoursWindow] | None) -> tuple[EngineActiveHoursWindow, ...] | None:
+    if windows is None:
+        return None
+    return tuple(EngineActiveHoursWindow(start=_parse_hhmm(w.start), end=_parse_hhmm(w.end)) for w in windows)
+
+
+def invalid_windows_message(mapping: dict[DayName, list[DomainActiveHoursWindow] | None]) -> str | None:
+    """Why some day's windows can't stand (zero length, or overlapping within the day, §3.7), or None."""
+    for day, windows in mapping.items():
+        engine_windows = _engine_windows(windows)
+        problem = validate_day_windows(engine_windows) if engine_windows else None
+        if problem:
+            return f"{day.capitalize()}: {problem}"
+    return None
 
 
 def build_active_hours_map(
-    settings: UserSettings, override: dict[DayName, DomainActiveHoursWindow | None] | None
+    settings: UserSettings, override: dict[DayName, list[DomainActiveHoursWindow] | None] | None
 ) -> ActiveHoursMap:
     """The effective per-day window: `override` merged over the global settings map (§3.2, §6.2)."""
     global_map = to_engine_active_hours(settings.active_hours)

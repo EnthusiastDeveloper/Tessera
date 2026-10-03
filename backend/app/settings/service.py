@@ -15,6 +15,7 @@ from app.db.base import generate_id, utcnow
 from app.db.repositories import UserSettingsRepository
 from app.db.schemas import ActiveHoursWindow, DayName, UserSettings
 from app.jobs.interface import JobScheduler
+from app.scheduling.adapter import invalid_windows_message
 from app.scheduling.repair import start_repair_if_needed
 
 DAY_NAMES: tuple[DayName, ...] = (
@@ -33,8 +34,8 @@ DAY_NAMES: tuple[DayName, ...] = (
 # 09:00-17:00, so scheduling works out of the box rather than silently placing nothing
 # until the user visits Settings (a per-day `null` means *excluded*, not unrestricted -
 # see §3.2/§3.7 - so "every day null" would be the opposite of a usable default).
-DEFAULT_ACTIVE_HOURS: dict[DayName, ActiveHoursWindow | None] = {
-    day: ActiveHoursWindow(start="09:00", end="17:00") for day in DAY_NAMES
+DEFAULT_ACTIVE_HOURS: dict[DayName, list[ActiveHoursWindow] | None] = {
+    day: [ActiveHoursWindow(start="09:00", end="17:00")] for day in DAY_NAMES
 }
 DEFAULT_DAILY_TIME_BUDGET: dict[DayName, int | None] = dict.fromkeys(DAY_NAMES, None)
 
@@ -96,6 +97,8 @@ def update_settings(db: Session, jobs: JobScheduler, *, patch: dict[str, Any]) -
 
     if "active_hours" in patch:
         _validate_full_week(patch["active_hours"], "active_hours")
+        if problem := invalid_windows_message(patch["active_hours"]):
+            raise SettingsValidationError("invalid_field", f"active_hours - {problem}")
         updates["active_hours"] = patch["active_hours"]
 
     if "daily_time_budget_minutes" in patch:

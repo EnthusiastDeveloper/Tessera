@@ -12,7 +12,7 @@ from tests.fixtures.db_entities import make_task_template
 def test_create_and_get_round_trip(db_session: Session) -> None:
     repo = TaskTemplateRepository(db_session)
     template = make_task_template(
-        active_hours_override={"monday": None, "saturday": ActiveHoursWindow(start="09:00", end="21:00")}
+        active_hours_override={"monday": None, "saturday": [ActiveHoursWindow(start="09:00", end="21:00")]}
     )
     created = repo.create(template)
     db_session.commit()

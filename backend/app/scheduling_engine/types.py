@@ -30,18 +30,23 @@ DAY_NAMES: tuple[str, ...] = (
 
 @dataclass(frozen=True)
 class ActiveHoursWindow:
-    """A wall-clock scheduling window on a single day of week. See design doc §3.7."""
+    """A wall-clock scheduling window that starts on a day of the week. See design doc §3.7.
+
+    `end` later than `start` ends the same day; `end` earlier than `start` is an overnight
+    window that ends the next morning (`22:00`-`02:00`). `end == start` is not a window.
+    """
 
     start: time
     end: time
 
 
-# Per-day-of-week active-hours map. A day name absent from the mapping is not the
-# same as a day name present with value None: absent means "not overridden, inherit
-# the global map" (only meaningful for override maps - see merge_active_hours in
-# calendar_rules.py); present-with-None always means "this day is fully excluded"
-# (design doc §3.2/§3.7 - one shape, one meaning, no exceptions).
-type ActiveHoursMap = Mapping[str, ActiveHoursWindow | None]
+# Per-day-of-week active-hours map: each day holds a LIST of windows (design doc §3.7,
+# Rev 13). A day name absent from the mapping is not the same as a day name present with
+# value None: absent means "not overridden, inherit the global map" (only meaningful for
+# override maps - see merge_active_hours in calendar_rules.py); present-with-None always
+# means "this day is fully excluded" (design doc §3.2/§3.7 - one shape, one meaning, no
+# exceptions). A present list is never empty.
+type ActiveHoursMap = Mapping[str, Sequence[ActiveHoursWindow] | None]
 
 
 @dataclass(frozen=True)

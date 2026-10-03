@@ -85,7 +85,7 @@ def _seed_settings() -> UserSettings:
             UserSettings(
                 id=generate_id(),
                 timezone="UTC",
-                active_hours=dict.fromkeys(DAY_NAMES, ActiveHoursWindow(start="00:00", end="23:59")),
+                active_hours=dict.fromkeys(DAY_NAMES, [ActiveHoursWindow(start="00:00", end="23:59")]),
                 blackout_dates=(),
                 daily_time_budget_minutes=dict.fromkeys(DAY_NAMES, None),
                 budget_enforcement="soft",

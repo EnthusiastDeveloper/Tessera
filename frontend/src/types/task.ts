@@ -10,7 +10,7 @@ export type DayName = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday'
 
 export interface ActiveHoursWindow {
   start: string; // "HH:MM"
-  end: string;
+  end: string; // earlier than `start` = an overnight window, ending the next morning
 }
 
 export interface Recurrence {
@@ -21,7 +21,10 @@ export interface Recurrence {
   anchor: RecurrenceAnchor;
 }
 
-export type ActiveHoursOverride = Partial<Record<DayName, ActiveHoursWindow | null>>;
+/** A day's windows (design doc §3.7, Rev 13): a non-empty list, or `null` for an excluded day. */
+export type DayWindows = ActiveHoursWindow[] | null;
+
+export type ActiveHoursOverride = Partial<Record<DayName, DayWindows>>;
 
 export interface TaskTemplate {
   id: string;

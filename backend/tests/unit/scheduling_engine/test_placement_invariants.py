@@ -56,8 +56,9 @@ def test_placements_respect_obstacles_active_hours_and_blackout_dates() -> None:
 
         assert not is_blacked_out(start.date(), blackout_dates), f"{placement.task_id} placed on a blackout day"
 
-        window = active_hours[day_name(start.date())]
-        assert window is not None, f"{placement.task_id} placed on an excluded day"
+        windows = active_hours[day_name(start.date())]
+        assert windows is not None, f"{placement.task_id} placed on an excluded day"
+        (window,) = windows
         assert start.time() >= window.start, f"{placement.task_id} starts before the active-hours window"
         assert end.time() <= window.end, f"{placement.task_id} ends after the active-hours window"
 

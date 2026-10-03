@@ -35,8 +35,8 @@ def window(start: str, end: str) -> ActiveHoursWindow:
 
 
 def every_day(start: str, end: str) -> ActiveHoursMap:
-    """An active-hours map with the identical window on all seven days (e.g. Examples B, E, I)."""
-    return dict.fromkeys(DAY_NAMES, window(start, end))
+    """An active-hours map with the identical single window on all seven days (e.g. Examples B, E, I)."""
+    return dict.fromkeys(DAY_NAMES, [window(start, end)])
 
 
 def no_budget() -> dict[str, int | None]:

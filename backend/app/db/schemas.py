@@ -45,7 +45,10 @@ class _Frozen(BaseModel):
 
 
 class ActiveHoursWindow(_Frozen):
-    """A wall-clock scheduling window on a single day of week. See §3.7."""
+    """A wall-clock scheduling window that starts on a day of the week. See §3.7.
+
+    `end` after `start` ends the same day; `end` before `start` runs overnight, to the next
+    morning. A day holds a list of these (Rev 13)."""
 
     start: str = Field(pattern=_CLOCK_TIME_PATTERN)  # "HH:MM"
     end: str = Field(pattern=_CLOCK_TIME_PATTERN)
@@ -80,7 +83,7 @@ class TaskTemplate(_Frozen):
     reminder_offsets_minutes: tuple[int, ...] = ()
     # A day named here uses that value (window, or null == excluded); a day not named
     # inherits UserSettings.active_hours (§3.2, §6.2). `None` means no override at all.
-    active_hours_override: dict[DayName, ActiveHoursWindow | None] | None = None
+    active_hours_override: dict[DayName, list[ActiveHoursWindow] | None] | None = None
     archived: bool = False
     created_at: datetime
     updated_at: datetime
@@ -176,7 +179,7 @@ class UserSettings(_Frozen):
 
     id: str
     timezone: str
-    active_hours: dict[DayName, ActiveHoursWindow | None]
+    active_hours: dict[DayName, list[ActiveHoursWindow] | None]
     blackout_dates: tuple[BlackoutDate, ...] = ()
     daily_time_budget_minutes: dict[DayName, int | None]
     budget_enforcement: BudgetEnforcement = "soft"

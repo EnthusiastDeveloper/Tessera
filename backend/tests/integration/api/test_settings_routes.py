@@ -38,7 +38,7 @@ class TestGetSettings:
         assert body["budget_enforcement"] == "soft"
         assert body["first_day_of_week"] == "monday"
         assert body["blackout_dates"] == []
-        assert body["active_hours"]["monday"] == {"start": "09:00", "end": "17:00"}
+        assert body["active_hours"]["monday"] == [{"start": "09:00", "end": "17:00"}]
         assert body["daily_time_budget_minutes"]["monday"] is None
 
 
@@ -70,7 +70,7 @@ class TestPatchSettings:
 
     def test_active_hours_missing_a_day_is_rejected(self, app_client: TestClient) -> None:
         _login(app_client)
-        incomplete = {"monday": {"start": "09:00", "end": "17:00"}}  # only 1 of 7 days
+        incomplete = {"monday": [{"start": "09:00", "end": "17:00"}]}  # only 1 of 7 days
         response = app_client.patch("/api/v1/settings", json={"active_hours": incomplete})
         assert response.status_code == 422
         assert response.json()["code"] == "invalid_day_map"
@@ -83,7 +83,7 @@ class TestPatchSettings:
         response = app_client.patch("/api/v1/settings", json={"active_hours": hours})
         assert response.status_code == 200, response.text
         assert response.json()["active_hours"]["sunday"] is None
-        assert response.json()["active_hours"]["monday"] == {"start": "09:00", "end": "17:00"}
+        assert response.json()["active_hours"]["monday"] == [{"start": "09:00", "end": "17:00"}]
 
     def test_patch_persists_across_requests(self, app_client: TestClient) -> None:
         _login(app_client)
@@ -126,7 +126,7 @@ class TestScheduleRepair:
         ).json()
         assert created["instance"]["scheduled_time"].startswith(f"{tomorrow.isoformat()}T09:00")
 
-        narrowed = {day: {"start": "10:00", "end": "17:00"} for day in DAY_NAMES}
+        narrowed = {day: [{"start": "10:00", "end": "17:00"}] for day in DAY_NAMES}
         assert app_client.patch("/api/v1/settings", json={"active_hours": narrowed}).status_code == 200
 
         deadline = time.monotonic() + 10

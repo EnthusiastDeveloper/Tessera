@@ -47,8 +47,8 @@ def _flexible(db: Session, jobs: RecordingJobScheduler, name: str, **overrides: 
     return created.instance
 
 
-def _every_day(start: str, end: str) -> dict[DayName, ActiveHoursWindow | None]:
-    return {day: ActiveHoursWindow(start=start, end=end) for day in DAY_NAMES}
+def _every_day(start: str, end: str) -> dict[DayName, list[ActiveHoursWindow] | None]:
+    return {day: [ActiveHoursWindow(start=start, end=end)] for day in DAY_NAMES}
 
 
 def _get(db: Session, instance_id: str) -> TaskInstance:
@@ -212,7 +212,7 @@ class TestATasksOwnOverride:
             db_session,
             jobs,
             occurrence.template_id,
-            patch={"active_hours_override": {"monday": ActiveHoursWindow(start="14:00", end="17:00")}},
+            patch={"active_hours_override": {"monday": [ActiveHoursWindow(start="14:00", end="17:00")]}},
             from_instance_id=occurrence.id,
         )
         db_session.commit()
@@ -228,7 +228,7 @@ class TestATasksOwnOverride:
             db_session,
             jobs,
             occurrence.template_id,
-            patch={"active_hours_override": {"monday": ActiveHoursWindow(start="08:00", end="12:00")}},
+            patch={"active_hours_override": {"monday": [ActiveHoursWindow(start="08:00", end="12:00")]}},
             from_instance_id=occurrence.id,
         )
         db_session.commit()

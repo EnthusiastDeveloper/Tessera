@@ -2,13 +2,22 @@
 
 ## Unreleased
 
+Active hours take a **list of windows per day**, and a window may run **overnight** (design doc Revision 13).
+
+- A day can be split (`08:00`-`10:00` and `18:00`-`22:00`) and a window whose end is before its start ends the next morning (`22:00`-`02:00`). Tasks may straddle midnight inside one. A blackout date cuts at midnight and the daily budget counts the calendar date.
+- **API change:** `active_hours` (`PATCH /settings`) and a template's `active_hours_override` are `{day: [{start, end}, ...] | null}` instead of `{day: {start, end} | null}`. An empty list or the old single-object shape is `422 validation_error`; a zero-length or overlapping window is `422 invalid_field`. A migration wraps stored windows in lists; a window that never had any length becomes an excluded day, which behaves as it did.
+- The Settings scheduling window and a task's override both edit a list of windows per day.
+- Fix: placement now measures a task's length in real elapsed time. Around a daylight-saving change the old wall-clock arithmetic mis-sized a window by an hour (a task could overrun the short spring-forward night, or be refused on the long fall-back one); it mattered little for daytime windows and a lot for overnight ones.
+
+### Earlier in this release train
+
 Design doc Revision 12 - the IRR-2 Medium findings.
 
 - The undefined `custom` recurrence pattern is gone; stored `custom` templates became `daily` (same behaviour).
 - Task instances use the priority labels (`low`/`medium`/`high`/`critical`) on the wire, like templates. **API change:** instance responses, `PATCH /task-instances`, its `expected` map and the `priority` list filter no longer use the integers 1-4.
 - Every request field is bounded (names, durations, intervals, reminders, clock times, budgets, blackout ranges); violations are `422 validation_error`. See design doc 3.13.
 - A one-time flexible task can take its deadline from a date picker.
-- Documented, with the gaps recorded as Backlog 12.25-12.27: the external-sync behaviour, SQLite pragmas, blackout-range inclusivity, monthly clamping, and that a generated occurrence starts with no dependencies.
+- Documented, with the gaps recorded as Backlog 12.26-12.27 (12.25, overnight windows, is built above): the external-sync behaviour, SQLite pragmas, blackout-range inclusivity, monthly clamping, and that a generated occurrence starts with no dependencies.
 
 ## 0.2.0
 

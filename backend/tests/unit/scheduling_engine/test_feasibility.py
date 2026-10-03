@@ -46,8 +46,8 @@ def test_empty_map_is_infeasible() -> None:
 
 def test_picks_the_largest_usable_window_across_days() -> None:
     effective = {
-        "monday": window("18:00", "19:00"),  # 60 usable minutes
-        "saturday": window("09:00", "21:00"),  # 720 usable minutes
+        "monday": [window("18:00", "19:00")],  # 60 usable minutes
+        "saturday": [window("09:00", "21:00")],  # 720 usable minutes
     }
     assert validate_feasible_duration(600, effective) is True
     assert validate_feasible_duration(721, effective) is False
