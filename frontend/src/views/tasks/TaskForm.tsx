@@ -7,7 +7,11 @@ import { createTemplate, patchTemplateThisAndFuture } from '../../api/taskTempla
 import type { CreateTemplatePayload, PatchTemplatePayload } from '../../api/taskTemplates';
 import { listInstances, patchInstanceThisOccurrence } from '../../api/taskInstances';
 import type { PatchInstancePayload } from '../../api/taskInstances';
-import { DEADLINE_OFFSET_UNITS, ESTIMATED_DURATION_UNITS } from '../../lib/duration';
+import {
+  DEADLINE_OFFSET_UNITS,
+  ESTIMATED_DURATION_UNITS,
+  offsetToEndOfDate,
+} from '../../lib/duration';
 import {
   MAX_DEADLINE_OFFSET_MINUTES,
   MAX_DESCRIPTION_LENGTH,
@@ -59,14 +63,15 @@ function skippedOccurrences(series: TaskInstance[], edited: TaskInstance): TaskI
         !TERMINAL_STATUSES.has(occurrence.status) &&
         (occurrence.nominal_date ?? occurrence.generated_at) > editedDate
     )
-    .sort((a, b) => ((a.nominal_date ?? a.generated_at) < (b.nominal_date ?? b.generated_at) ? -1 : 1));
+    .sort((a, b) =>
+      (a.nominal_date ?? a.generated_at) < (b.nominal_date ?? b.generated_at) ? -1 : 1
+    );
 }
 
 function occurrenceLabel(occurrence: TaskInstance): string {
-  return new Date(occurrence.scheduled_time ?? occurrence.nominal_date ?? occurrence.generated_at).toLocaleDateString(
-    undefined,
-    { weekday: 'short', day: 'numeric', month: 'short' }
-  );
+  return new Date(
+    occurrence.scheduled_time ?? occurrence.nominal_date ?? occurrence.generated_at
+  ).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
 /** Drops null/undefined/'' so "unset" compares equal however each side spells it. */
@@ -86,11 +91,16 @@ function normalized(value: unknown): unknown {
 /** Only the fields that differ from the template - PATCH must be genuinely partial
  * (architecture-plan §5.1), and a field the user didn't touch must not be pushed onto
  * occurrences that kept their own value (design doc §3.10). */
-function changedFields(payload: PatchTemplatePayload, template: TaskTemplate): PatchTemplatePayload {
+function changedFields(
+  payload: PatchTemplatePayload,
+  template: TaskTemplate
+): PatchTemplatePayload {
   const current = template as unknown as Record<string, unknown>;
   return Object.fromEntries(
     Object.entries(payload).filter(
-      ([key, value]) => value !== undefined && JSON.stringify(normalized(value)) !== JSON.stringify(normalized(current[key]))
+      ([key, value]) =>
+        value !== undefined &&
+        JSON.stringify(normalized(value)) !== JSON.stringify(normalized(current[key]))
     )
   ) as PatchTemplatePayload;
 }
@@ -112,7 +122,13 @@ interface TaskFormProps {
   onCancel: () => void;
 }
 
-export function TaskForm({ mode, template, instance, onSaved, onCancel }: TaskFormProps): JSX.Element {
+export function TaskForm({
+  mode,
+  template,
+  instance,
+  onSaved,
+  onCancel,
+}: TaskFormProps): JSX.Element {
   const isEdit = mode === 'edit';
   const isRecurring = isEdit ? template!.recurrence.pattern !== 'one_time' : false;
 
@@ -120,7 +136,9 @@ export function TaskForm({ mode, template, instance, onSaved, onCancel }: TaskFo
   const [description, setDescription] = useState(template?.description ?? '');
   const [location, setLocation] = useState(template?.location ?? '');
   const [type, setType] = useState<TaskType>(template?.type ?? 'flexible');
-  const [pattern, setPattern] = useState<RecurrencePattern>(template?.recurrence.pattern ?? 'one_time');
+  const [pattern, setPattern] = useState<RecurrencePattern>(
+    template?.recurrence.pattern ?? 'one_time'
+  );
   const [interval, setInterval_] = useState(template?.recurrence.interval ?? 1);
   const [dayOfWeek, setDayOfWeek] = useState(template?.recurrence.day_of_week ?? 0);
   const [dayOfMonth, setDayOfMonth] = useState(template?.recurrence.day_of_month ?? 1);
@@ -128,10 +146,21 @@ export function TaskForm({ mode, template, instance, onSaved, onCancel }: TaskFo
   const [startDate, setStartDate] = useState(todayLocalDate);
   const [fixedTimeOfDay, setFixedTimeOfDay] = useState(template?.fixed_time_of_day ?? '09:00');
   const [priority, setPriority] = useState<Priority>(template?.priority ?? 'medium');
-  const [estimatedDurationMinutes, setEstimatedDurationMinutes] = useState(template?.estimated_duration_minutes ?? 30);
-  const [deadlineOffsetMinutes, setDeadlineOffsetMinutes] = useState(template?.deadline_offset_minutes ?? 1440);
+  const [estimatedDurationMinutes, setEstimatedDurationMinutes] = useState(
+    template?.estimated_duration_minutes ?? 30
+  );
+  const [deadlineOffsetMinutes, setDeadlineOffsetMinutes] = useState(
+    template?.deadline_offset_minutes ?? 1440
+  );
+  // A one-time task may be given its deadline as a calendar date (IRR-2 M3). The date only
+  // *sets* `deadlineOffsetMinutes`; the duration control stays the single source of truth,
+  // and is remounted (`durationKey`) to show what the date resolved to.
+  const [dueDate, setDueDate] = useState('');
+  const [durationKey, setDurationKey] = useState(0);
   const [deadlineAt, setDeadlineAt] = useState(toDatetimeLocal(instance?.deadline));
-  const [reminderOffsetsMinutes, setReminderOffsetsMinutes] = useState<number[]>(template?.reminder_offsets_minutes ?? []);
+  const [reminderOffsetsMinutes, setReminderOffsetsMinutes] = useState<number[]>(
+    template?.reminder_offsets_minutes ?? []
+  );
   const [activeHoursOverride, setActiveHoursOverride] = useState<ActiveHoursOverride | null>(
     template?.active_hours_override ?? null
   );
@@ -145,12 +174,32 @@ export function TaskForm({ mode, template, instance, onSaved, onCancel }: TaskFo
 
   // A one-time template has no "future occurrences" to distinguish (design doc §3.10) -
   // it always edits the template directly, with no prompt, exactly like create.
-  const effectiveScope: EditScope | null = !isEdit ? null : !isRecurring ? 'this_and_future' : scope;
+  const effectiveScope: EditScope | null = !isEdit
+    ? null
+    : !isRecurring
+      ? 'this_and_future'
+      : scope;
   const scopeChoicePending = isEdit && isRecurring && scope === null;
   // Template-only fields (recurrence, fixed_time_of_day, reminders, active-hours
   // override) never apply to a single occurrence (design doc §3.10's field table) - the
   // form hides them entirely rather than showing something that would silently no-op.
   const showTemplateOnlyFields = effectiveScope !== 'this_occurrence';
+  const offersDueDate = !isEdit && pattern === 'one_time';
+  const applyDueDate = (start: string, due: string): void => {
+    setDueDate(due);
+    setDeadlineOffsetMinutes(offsetToEndOfDate(start, due));
+    setDurationKey((key) => key + 1);
+  };
+  const pickDueDate = (value: string): void => {
+    if (value) applyDueDate(startDate, value);
+    else setDueDate('');
+  };
+  // The picked due date is a calendar date, so moving the start date re-derives the offset
+  // (and a start date past the due date drags the due date along with it).
+  const changeStartDate = (value: string): void => {
+    setStartDate(value);
+    if (dueDate && value) applyDueDate(value, dueDate < value ? value : dueDate);
+  };
 
   useEffect(() => {
     if (!isEdit || !isRecurring) return;
@@ -218,12 +267,16 @@ export function TaskForm({ mode, template, instance, onSaved, onCancel }: TaskFo
             ...(pattern === 'monthly' ? { day_of_month: dayOfMonth } : {}),
           },
         };
-        const updated = await patchTemplateThisAndFuture(template!.id, changedFields(payload, template!), {
-          // A one-time task has only its one occurrence; naming it would refuse an edit
-          // once that occurrence is finished, when the template alone is still editable.
-          fromInstanceId: isRecurring ? instance?.id : undefined,
-          includeDetached: skipped.length > 0 && includeDetached,
-        });
+        const updated = await patchTemplateThisAndFuture(
+          template!.id,
+          changedFields(payload, template!),
+          {
+            // A one-time task has only its one occurrence; naming it would refuse an edit
+            // once that occurrence is finished, when the template alone is still editable.
+            fromInstanceId: isRecurring ? instance?.id : undefined,
+            includeDetached: skipped.length > 0 && includeDetached,
+          }
+        );
         onSaved({ template: updated });
       } else {
         const payload: PatchInstancePayload = {
@@ -263,7 +316,11 @@ export function TaskForm({ mode, template, instance, onSaved, onCancel }: TaskFo
             {skipped.map(occurrenceLabel).join(', ')}
           </p>
           <label>
-            <input type="checkbox" checked={includeDetached} onChange={(event) => setIncludeDetached(event.target.checked)} />{' '}
+            <input
+              type="checkbox"
+              checked={includeDetached}
+              onChange={(event) => setIncludeDetached(event.target.checked)}
+            />{' '}
             Apply to all upcoming occurrences, including these
           </label>
         </div>
@@ -307,10 +364,22 @@ export function TaskForm({ mode, template, instance, onSaved, onCancel }: TaskFo
         <fieldset className="field">
           <legend>Type</legend>
           <label style={{ marginRight: 'var(--space-4)' }}>
-            <input type="radio" name="task-type" checked={type === 'flexible'} onChange={() => setType('flexible')} /> Flexible
+            <input
+              type="radio"
+              name="task-type"
+              checked={type === 'flexible'}
+              onChange={() => setType('flexible')}
+            />{' '}
+            Flexible
           </label>
           <label>
-            <input type="radio" name="task-type" checked={type === 'fixed'} onChange={() => setType('fixed')} /> Fixed
+            <input
+              type="radio"
+              name="task-type"
+              checked={type === 'fixed'}
+              onChange={() => setType('fixed')}
+            />{' '}
+            Fixed
           </label>
         </fieldset>
       )}
@@ -323,7 +392,7 @@ export function TaskForm({ mode, template, instance, onSaved, onCancel }: TaskFo
             type="date"
             value={startDate}
             min={todayLocalDate()}
-            onChange={(event) => setStartDate(event.target.value)}
+            onChange={(event) => changeStartDate(event.target.value)}
             required
           />
           {error?.code === 'invalid_start_date' && <p className="field-error">{error.message}</p>}
@@ -335,7 +404,11 @@ export function TaskForm({ mode, template, instance, onSaved, onCancel }: TaskFo
           <legend>Recurrence</legend>
           <div className="field">
             <label htmlFor="task-pattern">Repeats</label>
-            <select id="task-pattern" value={pattern} onChange={(event) => setPattern(event.target.value as RecurrencePattern)}>
+            <select
+              id="task-pattern"
+              value={pattern}
+              onChange={(event) => setPattern(event.target.value as RecurrencePattern)}
+            >
               {PATTERNS.map((p) => (
                 <option key={p} value={p}>
                   {p === 'one_time' ? 'Does not repeat' : p.charAt(0).toUpperCase() + p.slice(1)}
@@ -359,7 +432,11 @@ export function TaskForm({ mode, template, instance, onSaved, onCancel }: TaskFo
           {pattern === 'weekly' && (
             <div className="field">
               <label htmlFor="task-day-of-week">On</label>
-              <select id="task-day-of-week" value={dayOfWeek} onChange={(event) => setDayOfWeek(Number(event.target.value))}>
+              <select
+                id="task-day-of-week"
+                value={dayOfWeek}
+                onChange={(event) => setDayOfWeek(Number(event.target.value))}
+              >
                 {WEEKDAYS.map((day, index) => (
                   <option key={day} value={index}>
                     {day}
@@ -384,11 +461,17 @@ export function TaskForm({ mode, template, instance, onSaved, onCancel }: TaskFo
           {pattern !== 'one_time' && type === 'flexible' && (
             <div className="field">
               <label htmlFor="task-anchor">Next occurrence is based on</label>
-              <select id="task-anchor" value={anchor} onChange={(event) => setAnchor(event.target.value as RecurrenceAnchor)}>
+              <select
+                id="task-anchor"
+                value={anchor}
+                onChange={(event) => setAnchor(event.target.value as RecurrenceAnchor)}
+              >
                 <option value="calendar">The calendar (rigid schedule)</option>
                 <option value="completion">When you complete it (upkeep work)</option>
               </select>
-              {error?.code === 'invalid_recurrence_anchor' && <p className="field-error">{error.message}</p>}
+              {error?.code === 'invalid_recurrence_anchor' && (
+                <p className="field-error">{error.message}</p>
+              )}
             </div>
           )}
         </fieldset>
@@ -409,7 +492,11 @@ export function TaskForm({ mode, template, instance, onSaved, onCancel }: TaskFo
 
       <div className="field">
         <label htmlFor="task-priority">Priority</label>
-        <select id="task-priority" value={priority} onChange={(event) => setPriority(event.target.value as Priority)}>
+        <select
+          id="task-priority"
+          value={priority}
+          onChange={(event) => setPriority(event.target.value as Priority)}
+        >
           {PRIORITIES.map((p) => (
             <option key={p} value={p}>
               {p.charAt(0).toUpperCase() + p.slice(1)}
@@ -431,14 +518,30 @@ export function TaskForm({ mode, template, instance, onSaved, onCancel }: TaskFo
 
       {type === 'flexible' && showTemplateOnlyFields && (
         <DurationInput
+          key={durationKey}
           id="task-deadline-offset"
           label="Deadline"
           initialMinutes={deadlineOffsetMinutes}
           units={DEADLINE_OFFSET_UNITS}
-          onChange={setDeadlineOffsetMinutes}
+          onChange={(minutes) => {
+            setDeadlineOffsetMinutes(minutes);
+            setDueDate('');
+          }}
           min={1}
           maxMinutes={MAX_DEADLINE_OFFSET_MINUTES}
         />
+      )}
+      {type === 'flexible' && offersDueDate && (
+        <div className="field">
+          <label htmlFor="task-due-date">Or pick a due date</label>
+          <input
+            id="task-due-date"
+            type="date"
+            min={startDate}
+            value={dueDate}
+            onChange={(event) => pickDueDate(event.target.value)}
+          />
+        </div>
       )}
       {type === 'flexible' && showTemplateOnlyFields && (
         <p style={{ color: 'var(--color-text-muted)', fontSize: 'var(--font-size-sm)' }}>
@@ -459,10 +562,16 @@ export function TaskForm({ mode, template, instance, onSaved, onCancel }: TaskFo
       )}
 
       {showTemplateOnlyFields && (
-        <DurationListInput label="Reminders" values={reminderOffsetsMinutes} onChange={setReminderOffsetsMinutes} />
+        <DurationListInput
+          label="Reminders"
+          values={reminderOffsetsMinutes}
+          onChange={setReminderOffsetsMinutes}
+        />
       )}
 
-      {showTemplateOnlyFields && <ActiveHoursOverrideInput value={activeHoursOverride} onChange={setActiveHoursOverride} />}
+      {showTemplateOnlyFields && (
+        <ActiveHoursOverrideInput value={activeHoursOverride} onChange={setActiveHoursOverride} />
+      )}
 
       {!isEdit && <DependenciesPicker selected={dependencies} onChange={setDependencies} />}
 

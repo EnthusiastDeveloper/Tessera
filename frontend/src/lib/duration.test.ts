@@ -6,6 +6,7 @@ import {
   durationToMinutes,
   formatDurationCompact,
   minutesToDuration,
+  offsetToEndOfDate,
 } from './duration';
 
 describe('minutesToDuration / durationToMinutes round-trip', () => {
@@ -20,15 +21,21 @@ describe('minutesToDuration / durationToMinutes round-trip', () => {
     }
   );
 
-  it.each([0, 60, 1440, 4320, 10080, 20160, 25])('%i minutes round-trips through deadline-offset units', (minutes) => {
-    const { value, unit } = minutesToDuration(minutes, DEADLINE_OFFSET_UNITS);
-    expect(durationToMinutes(value, unit)).toBe(minutes);
-  });
+  it.each([0, 60, 1440, 4320, 10080, 20160, 25])(
+    '%i minutes round-trips through deadline-offset units',
+    (minutes) => {
+      const { value, unit } = minutesToDuration(minutes, DEADLINE_OFFSET_UNITS);
+      expect(durationToMinutes(value, unit)).toBe(minutes);
+    }
+  );
 
-  it.each([0, 15, 60, 1440, 4321])('%i minutes round-trips through reminder-offset units', (minutes) => {
-    const { value, unit } = minutesToDuration(minutes, REMINDER_OFFSET_UNITS);
-    expect(durationToMinutes(value, unit)).toBe(minutes);
-  });
+  it.each([0, 15, 60, 1440, 4321])(
+    '%i minutes round-trips through reminder-offset units',
+    (minutes) => {
+      const { value, unit } = minutesToDuration(minutes, REMINDER_OFFSET_UNITS);
+      expect(durationToMinutes(value, unit)).toBe(minutes);
+    }
+  );
 
   it('prefers the largest unit that divides evenly', () => {
     expect(minutesToDuration(180, ESTIMATED_DURATION_UNITS)).toEqual({ value: 3, unit: 'hours' });
@@ -61,5 +68,20 @@ describe('formatDurationCompact', () => {
 
   it('renders zero explicitly', () => {
     expect(formatDurationCompact(0)).toBe('0 minutes');
+  });
+});
+
+describe('offsetToEndOfDate (IRR-2 M3)', () => {
+  it('is one day for a task due on its own start date', () => {
+    expect(offsetToEndOfDate('2026-04-01', '2026-04-01')).toBe(1440);
+  });
+
+  it('counts the due day itself, so "by April 15" from April 1 is 15 days', () => {
+    expect(offsetToEndOfDate('2026-04-01', '2026-04-15')).toBe(15 * 1440);
+  });
+
+  it('counts calendar days across month and year ends and leap days', () => {
+    expect(offsetToEndOfDate('2027-12-30', '2028-01-02')).toBe(4 * 1440);
+    expect(offsetToEndOfDate('2028-02-28', '2028-03-01')).toBe(3 * 1440);
   });
 });
