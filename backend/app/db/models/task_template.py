@@ -36,7 +36,7 @@ class TaskTemplateORM(Base):
 
     # --- Recurrence ---
     recurrence_pattern: Mapped[str] = mapped_column(
-        Enum("one_time", "daily", "weekly", "monthly", "custom", name="recurrence_pattern", create_constraint=True),
+        Enum("one_time", "daily", "weekly", "monthly", name="recurrence_pattern", create_constraint=True),
         nullable=False,
     )
     recurrence_interval: Mapped[int | None] = mapped_column(Integer, nullable=True)

@@ -29,7 +29,7 @@ router = APIRouter(prefix="/api/v1/task-templates", tags=["task-templates"])
 
 
 class RecurrenceIn(BaseModel):
-    pattern: Literal["one_time", "daily", "weekly", "monthly", "custom"]
+    pattern: Literal["one_time", "daily", "weekly", "monthly"]
     interval: int | None = None
     day_of_week: int | None = None
     day_of_month: int | None = None

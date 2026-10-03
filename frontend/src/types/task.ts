@@ -3,7 +3,7 @@
 
 export type TaskType = 'fixed' | 'flexible';
 export type Priority = 'low' | 'medium' | 'high' | 'critical';
-export type RecurrencePattern = 'one_time' | 'daily' | 'weekly' | 'monthly' | 'custom';
+export type RecurrencePattern = 'one_time' | 'daily' | 'weekly' | 'monthly';
 export type RecurrenceAnchor = 'calendar' | 'completion';
 export type TaskInstanceStatus = 'pending' | 'scheduled' | 'in_progress' | 'completed' | 'blocked' | 'missed' | 'dismissed';
 export type DayName = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
