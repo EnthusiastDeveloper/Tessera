@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.api.dependencies import DB_SESSION, get_request_job_scheduler
+from app.api.dependencies import DB_SESSION, SCHEDULE_UNLOCKED, get_request_job_scheduler
 from app.api.errors import AppError
 from app.api.v1.validation import DailyBudgetMinutes, DayWindows
 from app.db.repositories import ScheduleRepairRepository
@@ -16,7 +16,7 @@ from app.db.schemas import BlackoutDate, DayName, UserSettings
 from app.jobs.interface import JobScheduler
 from app.settings import service
 
-router = APIRouter(prefix="/api/v1/settings", tags=["settings"])
+router = APIRouter(prefix="/api/v1/settings", tags=["settings"], dependencies=[SCHEDULE_UNLOCKED])
 
 
 class SettingsPatchRequest(BaseModel):

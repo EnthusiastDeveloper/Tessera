@@ -7,8 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Tessera** is a self-hosted task scheduling application that auto-places flexible tasks into your calendar while respecting fixed commitments, deadlines, and priorities. It's a Python FastAPI backend + React frontend, single-user, containerized.
 
 ### Key References
-- **Product specification:** `docs/design-doc.md` (Revision 13) - this is the authoritative source for what the system *does*
-- **Implementation plan:** `docs/architecture-plan.md` (Revision 7) - defines how it's structured and built
+- **Product specification:** `docs/design-doc.md` (Revision 14) - this is the authoritative source for what the system *does*
+- **Implementation plan:** `docs/architecture-plan.md` (Revision 9) - defines how it's structured and built
 - **Findings register / decision log:** `docs/implementation-readiness-review-2.md` (IRR-2) - why Revisions 9 and 3 say what they say (Revision 10's through 13's decisions are recorded in design-doc Section 11); every finding in it - High, Medium and editorial - is now resolved
 - **Architecture enforcement:** `backend/pyproject.toml` has an `import-linter` configuration that blocks layering violations at CI
 
@@ -40,6 +40,7 @@ This is the high-risk piece. It's a greedy two-pass algorithm:
 - **Incremental fit, not a reflow:** existing placements are never moved by a later pass. Greedy corner-painting (`unschedulable` where a global rearrangement would have fitted) is accepted behaviour, not a bug
 - **Obstacles = every instance in `scheduled` or `in_progress`, both types**, plus intra-pass placements, plus filtered external events
 - **A scheduled flexible task gives way to a fixed one** (design-doc 6.5, Rev 10): it is not a creation conflict; the fixed task is saved and the flexible task is placed again or flagged `unschedulable`. There is no manual move for flexible tasks
+- **"Optimize Schedule" is explicit, user-triggered, and runs in the background** (design-doc 6.11, Rev 14): it re-runs 6.2's placement over every `scheduled`/`pending` flexible task. While it runs the schedule is read-only - the UI disables edits **and the server refuses schedule-changing writes** (`SCHEDULE_UNLOCKED`, `409 optimization_in_progress`); a plan waiting for approval locks nothing. It applies at once only if no scheduled task would lose its place or go newly over budget, otherwise the whole plan is held for one collective approval (recomputed on approval); it always shows a summary; Undo (10 minutes, latest run only) is offered only while safe and simply disappears otherwise. Never run it automatically, and never offer a plan that places fewer tasks than today. The button is always visible but says whether it is worth pressing (`GET /schedule-optimizations/opportunity`, read-only, no write lock): a gain hint and rainbow border when more tasks could be scheduled, grayed out when not - moves and swaps are not value. Applying and undoing go through the shared placement-change helpers (`place_instance_at`, `return_to_pending`) so jobs and notifications follow
 - **Active hours are a list of windows per day, and a window may run overnight** (design-doc 3.7, Rev 13): `{day: [{start, end}, ...] | null}`, `end` before `start` = ends next morning. The engine places against merged *eligible intervals* of absolute time; a blackout cuts at midnight and budgets count the calendar date. Never treat "the day's window" as a single `[start, end]` pair
 - **Start times land on a 15-minute grid** aligned to the hour in local wall-clock. **Durations are never quantised**
 - **Stricter rules repair, never block** (design-doc 6.10, Rev 11): narrowing active hours, adding blackout dates or tightening a strict budget re-places every scheduled flexible occurrence that no longer fits, in a background job with visible progress. Valid placements are still never moved
@@ -202,6 +203,7 @@ Consistent across all endpoints: HTTP status + machine-readable code + human mes
 - `TZ` - default timezone, overridable in Settings (optional, sensible default)
 - `RESET_ADMIN_PASSWORD` - one-time password recovery (optional, requires container restart)
 - `SESSION_COOKIE_SECURE` - `auto` (default) | `true` | `false`; `auto` derives the cookie's `Secure` flag from `APP_BASE_URL`. Never hardcode it to `true` - it silently breaks login on plain-HTTP LAN, which is a supported deployment
+- `OPTIMIZATION_SLOW_AFTER_SECONDS` (default `10`) / `OPTIMIZATION_TIMEOUT_SECONDS` (default `30`) - when "Optimize Schedule" says it is taking longer than expected, and when it is declared failed (nothing applied, editing unlocked); the timeout must exceed the notice
 - Calendar provider credentials if using sync (`GOOGLE_CLIENT_ID`, etc.)
 
 **Data persistence:** SQLite file must live on a mounted Docker volume, never in the container's writable layer. Otherwise all tasks, history, and credentials evaporate on container recreate.

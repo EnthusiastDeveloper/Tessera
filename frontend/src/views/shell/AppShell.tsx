@@ -2,6 +2,9 @@ import { useEffect } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthContext';
 import { ScheduleRepairOverlay } from '../../components/ScheduleRepairOverlay';
+import { OptimizationDialogs } from '../../optimization/OptimizationDialogs';
+import { OptimizationProvider, useOptimization } from '../../optimization/OptimizationContext';
+import { OptimizingBanner } from '../../optimization/OptimizingBanner';
 import type { CalendarProvider } from '../../types/calendarConnection';
 
 const NAV_ITEMS = [
@@ -12,7 +15,16 @@ const NAV_ITEMS = [
 ];
 
 export function AppShell(): JSX.Element {
+  return (
+    <OptimizationProvider>
+      <Shell />
+    </OptimizationProvider>
+  );
+}
+
+function Shell(): JSX.Element {
   const { user, logout } = useAuth();
+  const { locked, showLockHint } = useOptimization();
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -43,11 +55,21 @@ export function AppShell(): JSX.Element {
           ))}
         </nav>
         <div>
-          <Link to="/tasks/new" style={{ marginRight: 'var(--space-4)' }}>
-            <button type="button" className="primary">
-              New task
-            </button>
-          </Link>
+          {/* Read-only while an optimization runs (design doc §6.11): not a link then, and a click
+              says why instead of doing nothing. */}
+          <span style={{ marginRight: 'var(--space-4)' }}>
+            {locked ? (
+              <button type="button" className="primary" aria-disabled="true" onClick={showLockHint}>
+                New task
+              </button>
+            ) : (
+              <Link to="/tasks/new">
+                <button type="button" className="primary">
+                  New task
+                </button>
+              </Link>
+            )}
+          </span>
           <span style={{ marginRight: 'var(--space-4)', color: 'var(--color-text-muted)' }}>
             {user?.username}
           </span>
@@ -57,9 +79,11 @@ export function AppShell(): JSX.Element {
         </div>
       </header>
       <main className="app-shell__content">
+        <OptimizingBanner />
         <Outlet />
       </main>
       <ScheduleRepairOverlay />
+      <OptimizationDialogs />
     </div>
   );
 }

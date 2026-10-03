@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.api.dependencies import DB_SESSION, get_request_job_scheduler
+from app.api.dependencies import DB_SESSION, SCHEDULE_UNLOCKED, get_request_job_scheduler
 from app.api.errors import AppError
 from app.api.v1.validation import (
     ClockTime,
@@ -38,7 +38,7 @@ from app.db.schemas import (
 from app.jobs.interface import JobScheduler
 from app.task_templates import service
 
-router = APIRouter(prefix="/api/v1/task-templates", tags=["task-templates"])
+router = APIRouter(prefix="/api/v1/task-templates", tags=["task-templates"], dependencies=[SCHEDULE_UNLOCKED])
 
 
 class RecurrenceIn(BaseModel):

@@ -65,6 +65,36 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_table(
+        "schedule_optimizations",
+        sa.Column("id", sa.String(), nullable=False),
+        sa.Column(
+            "status",
+            sa.Enum(
+                "running",
+                "awaiting_approval",
+                "applied",
+                "nothing_to_do",
+                "declined",
+                "undone",
+                "expired",
+                "failed",
+                name="schedule_optimization_status",
+                create_constraint=True,
+            ),
+            nullable=False,
+        ),
+        sa.Column("requested_at", UTCDateTime(), nullable=False),
+        sa.Column("finished_at", UTCDateTime(), nullable=True),
+        sa.Column("approved", sa.Boolean(), nullable=False),
+        sa.Column("plan_changed", sa.Boolean(), nullable=False),
+        sa.Column("valid_until", UTCDateTime(), nullable=True),
+        sa.Column("undo_until", UTCDateTime(), nullable=True),
+        sa.Column("reason", sa.String(), nullable=True),
+        sa.Column("plan", sa.JSON(), nullable=True),
+        sa.Column("applied_versions", sa.JSON(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
         "schedule_repairs",
         sa.Column("id", sa.String(), nullable=False),
         sa.Column("total", sa.Integer(), nullable=False),
@@ -266,6 +296,7 @@ def downgrade() -> None:
         batch_op.drop_index(batch_op.f("ix_schedule_repairs_requested_at"))
 
     op.drop_table("schedule_repairs")
+    op.drop_table("schedule_optimizations")
     op.drop_table("oauth_tokens")
     op.drop_table("external_calendar_connections")
     op.drop_table("admin_password_reset_marker")
