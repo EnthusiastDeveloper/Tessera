@@ -285,16 +285,54 @@ input[type='password'] {
 
 
 /* "Optimize Schedule" when pressing it would get more tasks scheduled (design doc §6.11, §8.1):
-   a rainbow that travels round the button's border, the one deliberately attention-seeking element
-   in the app. Reduced-motion users get the same border, still. */
+   a 3px rainbow border that travels round the button, with a soft glow of the same colors outside
+   it - the one deliberately attention-seeking element in the app. One animation, on the wrapper,
+   drives both (the angle is inherited), so they never drift apart. The glow is the wrapper's
+   ::before, behind the button, so the button's own fill keeps the inside clean. Reduced-motion
+   users get the same border and glow, still. */
 @property --optimize-angle {
   syntax: '<angle>';
   initial-value: 0deg;
-  inherits: false;
+  inherits: true;
 }
 
+.optimize-wrap {
+  position: relative;
+  display: inline-block;
+  isolation: isolate;
+}
+
+.optimize-wrap--attention {
+  animation: optimize-spin 3s linear infinite;
+}
+
+.optimize-wrap--attention::before {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: var(--radius);
+  background: conic-gradient(
+    from var(--optimize-angle),
+    #ff4d4d,
+    #ffb84d,
+    #ffe14d,
+    #4dff88,
+    #4dc3ff,
+    #8a4dff,
+    #ff4dd2,
+    #ff4d4d
+  );
+  filter: blur(8px);
+  opacity: 0.55;
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* The border is thicker than a normal button's, so the padding gives the difference back and the
+   button keeps its size in every state - nothing jumps when it starts or stops inviting. */
 button.optimize-button--attention {
-  border: 2px solid transparent;
+  border: 3px solid transparent;
+  padding: calc(var(--space-2) - 2px) calc(var(--space-4) - 2px);
   background:
     linear-gradient(var(--color-surface), var(--color-surface)) padding-box,
     conic-gradient(
@@ -309,7 +347,6 @@ button.optimize-button--attention {
         #ff4d4d
       )
       border-box;
-  animation: optimize-spin 3s linear infinite;
 }
 
 @keyframes optimize-spin {
@@ -319,7 +356,7 @@ button.optimize-button--attention {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  button.optimize-button--attention {
+  .optimize-wrap--attention {
     animation: none;
   }
 }

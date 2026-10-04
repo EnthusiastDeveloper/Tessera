@@ -136,9 +136,9 @@ describe('Optimize Schedule', () => {
     renderUI();
 
     expect(await screen.findByText('3 more tasks could be scheduled')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Optimize Schedule' })).toHaveClass(
-      'optimize-button--attention'
-    );
+    const button = screen.getByRole('button', { name: 'Optimize Schedule' });
+    expect(button).toHaveClass('optimize-button--attention'); // the rainbow border ...
+    expect(button.parentElement).toHaveClass('optimize-wrap--attention'); // ... and its outward glow
     await userEvent.click(await screen.findByRole('button', { name: 'Optimize Schedule' }));
     expect(await screen.findByText(/Optimizing your schedule/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Optimize Schedule' })).toBeDisabled();

@@ -98,6 +98,7 @@ test.describe('Optimize Schedule against the real backend (design doc §6.11)', 
     await expect(page.getByText(/\d+ more tasks? could be scheduled/)).toBeVisible();
     await expect(optimizeButton).toBeEnabled();
     await expect(optimizeButton).toHaveClass(/optimize-button--attention/);
+    const inviting = await optimizeButton.boundingBox(); // its size while inviting ...
     await optimizeButton.click();
 
     const dialog = page.getByRole('dialog', { name: 'Schedule optimized' });
@@ -114,6 +115,7 @@ test.describe('Optimize Schedule against the real backend (design doc §6.11)', 
     await expect(page.getByRole('link', { name: 'New task' })).toBeVisible();
     await expect(page.getByText('Nothing to improve right now')).toBeVisible();
     await expect(optimizeButton).toBeDisabled();
+    expect(await optimizeButton.boundingBox()).toEqual(inviting); // ... is the same grayed out: nothing jumps
 
     // Undo puts everything back, and the opportunity comes back with it.
     await dialog.getByRole('button', { name: 'Undo' }).click();

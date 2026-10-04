@@ -66,7 +66,10 @@ export function OptimizeControls(): JSX.Element {
         marginBottom: 'var(--space-3)',
       }}
     >
-      <span title={nothingToGain ? NOTHING_TO_IMPROVE : undefined}>
+      <span
+        className={worthwhile ? 'optimize-wrap optimize-wrap--attention' : 'optimize-wrap'}
+        title={nothingToGain ? NOTHING_TO_IMPROVE : undefined}
+      >
         <button
           type="button"
           className={worthwhile ? 'optimize-button optimize-button--attention' : 'optimize-button'}
