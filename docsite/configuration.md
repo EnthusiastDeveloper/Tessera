@@ -11,7 +11,7 @@ Set these in `.env` before bringing the container up (see `.env.example` in the 
 | `SECRET_KEY` | **Yes** | - | Session signing and Fernet encryption of stored OAuth tokens. Generate with `openssl rand -hex 32`; keep it stable, rotating it invalidates every session. |
 | `DATABASE_PATH` | No | `./data/tessera.db` | SQLite file location. Point this at a mounted volume - it must survive container recreates. |
 | `APP_BASE_URL` | Only if using calendar sync | - | Base URL used to construct OAuth redirect URIs (e.g. `https://tessera.example.com`). |
-| `TZ` | No | (system default) | Default IANA timezone (e.g. `America/New_York`), used to seed the timezone in Settings on first run. Overridable per-user in Settings afterward. |
+| `TZ` | No | (system default) | Default IANA timezone (e.g. `America/New_York`), used to seed the timezone in Settings. Re-read on every start until you finish the setup wizard, so correcting it and restarting before setup works; after that, change it in Settings. |
 | `RESET_ADMIN_PASSWORD` | No | (empty) | One-time password recovery - see [Getting Started](installation.md#password-recovery). Not a standing login mechanism. |
 | `SESSION_COOKIE_SECURE` | No | `auto` | `auto` derives the cookie's `Secure` flag from `APP_BASE_URL`'s scheme. **Never hardcode `true`** - it silently breaks login on a plain-HTTP LAN deployment, which is a supported setup. |
 | `ENABLE_API_DOCS` | No | `false` | Whether the interactive `/api/v1/docs`, `/api/v1/redoc` and `/api/v1/openapi.json` routes exist at all. Leave off in production - even though they're already auth-guarded, this is defense-in-depth against exposing the full API surface. Turn on locally if you want to browse the OpenAPI schema. |

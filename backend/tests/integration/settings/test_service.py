@@ -30,6 +30,19 @@ class TestGetOrCreateDefault:
         second = service.get_or_create_default(db_session, default_timezone="Europe/London")
         assert second == first  # the second call's default_timezone must NOT overwrite it
 
+    def test_before_setup_reseeds_the_timezone_from_tz(self, db_session: Session) -> None:
+        # First start with TZ unset seeds UTC; the operator then sets TZ and restarts
+        # before running the setup wizard - the new TZ must win.
+        service.get_or_create_default(db_session, default_timezone="UTC", before_setup=True)
+        reseeded = service.get_or_create_default(db_session, default_timezone="Asia/Jerusalem", before_setup=True)
+        assert reseeded.timezone == "Asia/Jerusalem"
+        assert service.get_or_create_default(db_session, default_timezone="UTC") == reseeded
+
+    def test_before_setup_touches_nothing_but_the_timezone(self, db_session: Session) -> None:
+        first = service.get_or_create_default(db_session, default_timezone="UTC", before_setup=True)
+        reseeded = service.get_or_create_default(db_session, default_timezone="Europe/London", before_setup=True)
+        assert reseeded == first.model_copy(update={"timezone": "Europe/London"})
+
 
 class TestUpdateSettings:
     def test_partial_update_touches_only_the_given_field(self, db_session: Session) -> None:

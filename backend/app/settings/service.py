@@ -48,11 +48,20 @@ class SettingsValidationError(Exception):
         self.code = code
 
 
-def get_or_create_default(db: Session, *, default_timezone: str) -> UserSettings:
-    """The single `UserSettings` row, creating it with defaults on first run if absent."""
+def get_or_create_default(db: Session, *, default_timezone: str, before_setup: bool = False) -> UserSettings:
+    """The single `UserSettings` row, creating it with defaults on first run if absent.
+
+    `before_setup` (no account exists yet): an existing row's timezone is re-seeded from
+    `default_timezone`. Startup creates the row before the setup wizard runs, so a first
+    start with `TZ` unset or wrong would otherwise pin that value forever, even after the
+    operator fixes `TZ` and restarts. Before setup nobody can have chosen a timezone in
+    Settings, so `TZ` still owns it (design doc 14.1).
+    """
     repo = UserSettingsRepository(db)
     existing = repo.get()
     if existing is not None:
+        if before_setup and existing.timezone != default_timezone:
+            return repo.update(existing.model_copy(update={"timezone": default_timezone}))
         return existing
     return repo.create(
         UserSettings(
