@@ -24,7 +24,9 @@ run:
 		echo "No .env found - copying .env.example (edit it with your own SECRET_KEY before real use)."; \
 		cp .env.example .env; \
 	fi
-	$(COMPOSE) up -d --build
+	@# BUILDAH_FORMAT=docker: podman builds OCI images by default, and the OCI format
+	@# drops the Dockerfile's HEALTHCHECK (with a warning). Docker ignores the variable.
+	BUILDAH_FORMAT=docker $(COMPOSE) up -d --build
 	@echo "Waiting for Tessera to become healthy at http://localhost:$(PORT) ..."
 	@for i in $$(seq 1 60); do \
 		if curl -sf http://localhost:$(PORT)/health >/dev/null 2>&1; then \
@@ -34,7 +36,9 @@ run:
 		fi; \
 		sleep 1; \
 	done; \
-	echo "Timed out waiting for the health check - inspect with: $(COMPOSE) logs"; \
+	echo "Timed out waiting for the health check. Last log lines:"; \
+	$(COMPOSE) logs --tail 30 tessera 2>&1 | tail -30; \
+	echo "Full logs: $(COMPOSE) logs tessera"; \
 	exit 1
 
 backend-check: backend-lint backend-typecheck backend-imports backend-test

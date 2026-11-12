@@ -1,17 +1,33 @@
 # Multi-stage build for Tessera
 
 # Stage 1: Backend dependencies
-FROM python:3.12-slim as backend-builder
+FROM python:3.12-slim AS backend-builder
+
+# The builder runs as root in a throwaway stage, so pip's "running as root" advice
+# does not apply here.
+ENV PIP_ROOT_USER_ACTION=ignore
 
 WORKDIR /build
 
-COPY backend/pyproject.toml backend/requirements.txt* ./
+COPY backend/pyproject.toml ./
 
+# Install only the runtime dependencies listed in pyproject.toml, not the project
+# itself. The runtime stage runs `python -m app.main` from /app with the source copied
+# in, so an install of the tessera package would be dead weight - and an editable one
+# (`pip install -e .`) leaves a .pth pointing at /build, which the runtime image does
+# not have. Copying only pyproject.toml keeps this layer cached across code changes.
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -e .
+    python -c "import tomllib; print('\n'.join(tomllib.load(open('pyproject.toml', 'rb'))['project']['dependencies']))" > requirements.txt && \
+    pip install --no-cache-dir -r requirements.txt
 
 # Stage 2: Frontend build
-FROM node:20-alpine as frontend-builder
+# Node 24 is the current LTS (Node 20 reached end-of-life in April 2026); keep this in
+# step with node-version in .github/workflows/ci.yml.
+FROM node:24-alpine AS frontend-builder
+
+# npm comes with the base image, so its "new major version available" notice is noise.
+ENV NPM_CONFIG_UPDATE_NOTIFIER=false \
+    NPM_CONFIG_FUND=false
 
 WORKDIR /build
 

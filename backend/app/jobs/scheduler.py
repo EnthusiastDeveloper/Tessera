@@ -19,7 +19,7 @@ against state that can have moved on since they were scheduled, never a snapshot
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 
 from apscheduler.jobstores.base import JobLookupError
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
@@ -48,7 +48,12 @@ class APSchedulerJobScheduler(JobScheduler):
         an isolated one.
         """
         jobstore = SQLAlchemyJobStore(engine=engine)
-        self._scheduler = BackgroundScheduler(jobstores={"default": jobstore})
+        # An explicit UTC zone, never the host's: left unset, APScheduler asks tzlocal,
+        # which re-reads the TZ env var and raises on an invalid value - crashing startup
+        # where app.main promises a fallback to UTC. Every job here is an absolute UTC
+        # instant or an interval, so this zone never decides when anything fires (design
+        # doc 14.1: persisted timestamps are UTC; the user's zone lives in their settings).
+        self._scheduler = BackgroundScheduler(jobstores={"default": jobstore}, timezone=UTC)
 
     def start(self) -> None:
         self._scheduler.start()
@@ -78,7 +83,9 @@ class APSchedulerJobScheduler(JobScheduler):
     def schedule_interval(self, *, job_key: str, minutes: int) -> None:
         self._scheduler.add_job(
             _dispatch,
-            IntervalTrigger(minutes=minutes),
+            # A trigger built here doesn't inherit the scheduler's zone - unset, it asks
+            # tzlocal too (see __init__). "date" jobs above get the scheduler's UTC.
+            IntervalTrigger(minutes=minutes, timezone=UTC),
             args=[job_key],
             id=job_key,
             replace_existing=True,

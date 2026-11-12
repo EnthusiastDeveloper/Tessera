@@ -1,0 +1,42 @@
+# Keep the build context to what docker/Dockerfile actually COPYs. Without this file
+# every build ships the host's venv, node_modules, database and .env to the builder,
+# and `COPY frontend/ ./` lays the host's node_modules (glibc native binaries) over the
+# musl ones `npm ci` just installed in the Alpine stage.
+
+# VCS, editor and agent state
+.git/
+.github/
+.claude/
+.idea/
+.vscode/
+
+# Secrets and runtime data - never part of an image
+.env
+.env.*
+!.env.example
+data/
+*.db
+*.scheduler.lock
+
+# Python
+venv/
+.venv/
+**/__pycache__/
+**/*.pyc
+**/*.egg-info/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.coverage
+**/htmlcov/
+
+# Node - the image installs its own from package-lock.json and builds its own dist
+**/node_modules/
+frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
+
+# Docs site (built separately by .github/workflows/docs.yml)
+docsite/
+site/

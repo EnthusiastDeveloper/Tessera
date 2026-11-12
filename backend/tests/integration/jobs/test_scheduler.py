@@ -310,3 +310,35 @@ class TestScheduleInterval:
         jobs_with_that_key = [j for j in wired_scheduler._scheduler.get_jobs() if j.id == "sweep:deadline_elapsed"]
         assert len(jobs_with_that_key) == 1
         assert jobs_with_that_key[0].trigger.interval == timedelta(minutes=30)
+
+
+def test_an_invalid_tz_env_var_does_not_stop_the_scheduler_from_starting(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A mistyped TZ (here with a stray trailing dot) is meant to fall back to UTC with a
+    warning (app.main's lifespan), not to crash startup. APScheduler, left without an
+    explicit timezone, asks tzlocal, which re-reads TZ and raises - so the scheduler pins
+    UTC instead. Every job it runs is an absolute UTC instant or an interval, so the
+    scheduler's own zone never decides when anything fires (design doc 14.1).
+
+    Walks what app.main's lifespan does - construct, start, add a one-off and an interval
+    job - because each step can reach tzlocal on its own (a directly built trigger does
+    not inherit the scheduler's zone).
+    """
+    monkeypatch.setenv("TZ", "Asia/Jerusalem.")
+    # tzlocal caches the zone it resolved; clear it so this test sees TZ as a fresh
+    # process would, whatever an earlier test already resolved.
+    monkeypatch.setattr("tzlocal.unix._cache_tz", None)
+
+    jobs_engine = build_engine(sqlite_url(str(tmp_path / "tessera.jobs.db")))
+    scheduler = APSchedulerJobScheduler(jobs_engine)
+    scheduler.start()
+    try:
+        scheduler.schedule_at(job_key=DEADLINE_ELAPSED_SWEEP_JOB_KEY + "-once", run_at=utcnow() + timedelta(days=1))
+        scheduler.schedule_interval(job_key=DEADLINE_ELAPSED_SWEEP_JOB_KEY, minutes=60)
+
+        assert str(scheduler._scheduler.timezone) == "UTC"
+        jobs = {job.id: job for job in scheduler._scheduler.get_jobs()}
+        assert set(jobs) == {DEADLINE_ELAPSED_SWEEP_JOB_KEY, DEADLINE_ELAPSED_SWEEP_JOB_KEY + "-once"}
+        assert str(jobs[DEADLINE_ELAPSED_SWEEP_JOB_KEY].trigger.timezone) == "UTC"
+    finally:
+        scheduler.shutdown(wait=True)
+        jobs_engine.dispose()
