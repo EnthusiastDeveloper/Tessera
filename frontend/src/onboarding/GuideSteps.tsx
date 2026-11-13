@@ -348,8 +348,8 @@ export function BudgetStep({
 
   return (
     <StepLayout
-      title="How much in one day?"
-      intro="You can cap how much flexible work Tessera puts on a single day. Fixed tasks aren't counted."
+      title="Your daily budget"
+      intro="A daily budget caps how much flexible work Tessera puts on a single day. Fixed tasks don't count toward it."
       saving={saving}
       submitDisabled={invalid}
       onSubmit={() =>
@@ -370,7 +370,7 @@ export function BudgetStep({
             checked={!limited}
             onChange={() => setLimited(false)}
           />
-          No limit
+          No daily budget
         </label>
         <label className="flex items-center gap-2">
           <input
@@ -379,7 +379,7 @@ export function BudgetStep({
             checked={limited}
             onChange={() => setLimited(true)}
           />
-          Set a limit
+          Set a daily budget
         </label>
         {limited && (
           <div className="mt-2 pl-6">
@@ -391,14 +391,18 @@ export function BudgetStep({
               onChange={setMinutes}
               maxMinutes={MAX_DAILY_BUDGET_MINUTES}
             />
-            {invalid && <p className="field-error">Enter a limit between 1 minute and 24 hours.</p>}
+            {invalid && (
+              <p className="field-error">Enter a budget between 1 minute and 24 hours.</p>
+            )}
           </div>
         )}
       </fieldset>
 
       {limited && (
         <fieldset className="field">
-          <legend>If a task can&apos;t fit under the limit before it&apos;s due</legend>
+          <legend>
+            If a flexible task won&apos;t fit in the daily budget before it&apos;s due
+          </legend>
           <label className="flex items-center gap-2">
             <input
               type="radio"
@@ -406,7 +410,7 @@ export function BudgetStep({
               checked={enforcement === 'soft'}
               onChange={() => setEnforcement('soft')}
             />
-            Go over the limit so it&apos;s done on time
+            Go over the budget so it&apos;s done on time
           </label>
           <label className="flex items-center gap-2">
             <input
@@ -415,14 +419,14 @@ export function BudgetStep({
               checked={enforcement === 'strict'}
               onChange={() => setEnforcement('strict')}
             />
-            Stick to the limit and leave the task unscheduled
+            Keep to the budget and leave the task unscheduled
           </label>
         </fieldset>
       )}
 
       {!initial.uniform && (
         <div className="banner-warning" role="note">
-          Your days have different limits at the moment. If you continue, they&apos;ll all get this
+          Your days have different budgets at the moment. If you continue, they&apos;ll all get this
           one. Press Skip to leave them alone.
         </div>
       )}

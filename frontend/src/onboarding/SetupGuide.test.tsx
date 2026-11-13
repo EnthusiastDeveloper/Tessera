@@ -111,9 +111,9 @@ describe('SetupGuide', () => {
     expect(hours?.saturday).toBeNull();
     expect(hours?.sunday).toBeNull();
 
-    expect(await screen.findByRole('heading', { name: 'How much in one day?' })).toBeInTheDocument();
-    await user.click(screen.getByLabelText('Set a limit'));
-    await user.click(screen.getByLabelText(/Stick to the limit/));
+    expect(await screen.findByRole('heading', { name: 'Your daily budget' })).toBeInTheDocument();
+    await user.click(screen.getByLabelText('Set a daily budget'));
+    await user.click(screen.getByLabelText(/Keep to the budget/));
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     await waitFor(() => expect(mockedSettingsApi.updateSettings).toHaveBeenCalledTimes(4));
     const last = mockedSettingsApi.updateSettings.mock.calls[3][0];

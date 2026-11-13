@@ -41,7 +41,7 @@ test.describe.serial('login against the real backend', () => {
     // through it keeps the defaults every later spec relies on (every day 09:00-17:00,
     // no budget); reaching the end records it done, so later sign-ins open the Timeline.
     await expect(page).toHaveURL(/\/welcome$/);
-    for (const heading of ['Your timezone', 'Your week', 'When should Tessera schedule tasks?', 'How much in one day?']) {
+    for (const heading of ['Your timezone', 'Your week', 'When should Tessera schedule tasks?', 'Your daily budget']) {
       await expect(page.getByRole('heading', { name: heading })).toBeVisible();
       await page.getByRole('button', { name: 'Continue' }).click();
     }
