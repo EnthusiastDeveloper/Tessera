@@ -9,14 +9,14 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.api.dependencies import DB_SESSION, get_request_job_scheduler
+from app.api.dependencies import DB_SESSION, SCHEDULE_UNLOCKED, get_request_job_scheduler
 from app.api.errors import AppError
 from app.api.v1.validation import Description, DurationMinutes, Location, Name
 from app.db.schemas import PRIORITY_TO_INT, Priority, TaskInstance, TaskInstanceStatus, TaskType
 from app.jobs.interface import JobScheduler
 from app.task_instances import service
 
-router = APIRouter(prefix="/api/v1/task-instances", tags=["task-instances"])
+router = APIRouter(prefix="/api/v1/task-instances", tags=["task-instances"], dependencies=[SCHEDULE_UNLOCKED])
 
 
 class PatchInstanceExpected(BaseModel):

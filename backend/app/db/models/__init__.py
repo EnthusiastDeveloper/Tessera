@@ -7,6 +7,7 @@ from app.db.models.external_calendar_connection import ExternalCalendarConnectio
 from app.db.models.external_event import ExternalEventORM
 from app.db.models.notification import NotificationORM
 from app.db.models.oauth_token import OAuthTokenORM
+from app.db.models.schedule_optimization import ScheduleOptimizationORM
 from app.db.models.schedule_repair import ScheduleRepairORM
 from app.db.models.session import SessionORM
 from app.db.models.task_instance import TaskInstanceORM, task_instance_dependencies
@@ -20,6 +21,7 @@ __all__ = [
     "ExternalEventORM",
     "NotificationORM",
     "OAuthTokenORM",
+    "ScheduleOptimizationORM",
     "ScheduleRepairORM",
     "SessionORM",
     "TaskInstanceORM",

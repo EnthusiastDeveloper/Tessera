@@ -15,6 +15,7 @@ moved on since they were scheduled, not RPCs with a guaranteed-current target.
 
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
 from zoneinfo import ZoneInfo
 
@@ -32,6 +33,7 @@ from app.db.repositories import (
 )
 from app.db.schemas import TaskInstance
 from app.jobs.interface import JobScheduler
+from app.scheduling import optimization as schedule_optimization
 from app.scheduling.adapter import attempt_placement, holds_slot
 from app.scheduling.orchestration import (
     DEPENDENCY_AT_RISK,
@@ -48,6 +50,8 @@ from app.scheduling_engine.deadlines import is_deadline_elapsed
 
 REMINDER = "reminder"
 OVERDUE = "overdue"
+
+logger = logging.getLogger(__name__)
 
 
 def run_reminder(db: Session, *, instance_id: str, offset_minutes: int) -> None:
@@ -269,6 +273,21 @@ __all__ = [
     "run_overdue_check",
     "run_reminder",
 ]
+
+
+def run_schedule_optimization(db: Session, jobs: JobScheduler, *, optimization_id: str) -> None:
+    """§6.11 (Rev 14): the background "Optimize Schedule" run. Whatever goes wrong, the row must
+    not stay `running` - that would keep schedule edits locked until the timeout - so a failure
+    rolls back the attempt (the schedule is untouched: applying and recording are one
+    transaction) and records it as `failed` instead of re-raising into the scheduler's log."""
+    try:
+        schedule_optimization.run(db, jobs, optimization_id)
+    except Exception:
+        logger.exception("Schedule optimization %s failed; nothing was changed.", optimization_id)
+        db.rollback()
+        schedule_optimization.mark_failed(
+            db, optimization_id, reason="Something went wrong while optimizing. Nothing was changed."
+        )
 
 
 def run_schedule_repair(db: Session, jobs: JobScheduler, *, repair_id: str) -> None:

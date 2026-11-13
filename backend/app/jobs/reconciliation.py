@@ -35,6 +35,7 @@ from app.jobs.interface import (
     reminder_job_key,
     schedule_repair_job_key,
 )
+from app.scheduling import optimization as schedule_optimization
 from app.scheduling.orchestration import (
     promote_if_unblocked,
     schedule_dependency_at_risk_job,
@@ -56,6 +57,14 @@ def reconcile_on_startup(db: Session, jobs: JobScheduler) -> None:
     _reconcile_calendar_poll_jobs(db, jobs)
     _run_missed_unblocks(db, jobs)
     _resume_schedule_repair(db, jobs)
+    _fail_interrupted_optimization(db)
+
+
+def _fail_interrupted_optimization(db: Session) -> None:
+    """Item 6 (architecture-plan §4.2, Rev 9): a schedule optimization still `running` at startup
+    died with the process. Applying and recording commit together, so nothing was changed; it is
+    recorded as failed, which also releases the edit lock (design doc §6.11)."""
+    schedule_optimization.fail_interrupted(db, now=utcnow())
 
 
 def _resume_schedule_repair(db: Session, jobs: JobScheduler) -> None:
