@@ -469,6 +469,63 @@
   font-size: var(--font-size-xs);
 }
 
+/* Day headers (TimelinePage's dayHeader): "Fri 13/11" on wide screens; on a phone the
+   weekday over the bare day number, since the month is in the toolbar title. */
+.fc .fc-day-head__day {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .fc {
+    padding: var(--space-2);
+  }
+
+  .fc .fc-day-head {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    line-height: 1.15;
+    font-size: var(--font-size-xs);
+    font-weight: 500;
+    color: var(--color-text-muted);
+  }
+
+  .fc .fc-day-head__date {
+    display: none;
+  }
+
+  .fc .fc-day-head__day {
+    display: block;
+    font-family: var(--font-display);
+    font-size: var(--font-size-base);
+    font-weight: 600;
+    color: var(--color-text);
+  }
+
+  .fc .fc-day-today .fc-day-head__day {
+    color: var(--color-accent);
+  }
+
+  /* The toolbar: the title on its own row, then navigation and the view switch. */
+  .fc .fc-header-toolbar {
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .fc .fc-header-toolbar .fc-toolbar-chunk:nth-child(2) {
+    order: -1;
+    width: 100%;
+  }
+
+  .fc .fc-toolbar-title {
+    font-size: var(--font-size-lg);
+  }
+
+  .fc .fc-button {
+    padding: 0.35em 0.6em;
+  }
+}
+
 .fc .fc-day-today .fc-col-header-cell-cushion {
   color: var(--color-accent);
 }

@@ -18,6 +18,7 @@ const BASE_SETTINGS: UserSettings = {
   daily_time_budget_minutes: {},
   budget_enforcement: 'soft',
   first_day_of_week: 'monday',
+  date_format: 'DD/MM/YYYY',
 };
 
 describe('TimezoneSection', () => {

@@ -111,6 +111,15 @@ accent glow, only for "this is happening now" (the now-indicator, an in-progress
   (`.banner-success`, `src/index.css`) - not a new mechanism, the existing one with the
   other status color already reserved for this in the color table above.
 
+## Dates
+
+Every date shown goes through `src/lib/dates.ts` with the user's `date_format` (design
+doc 3.7, Rev 15; read it with `useDisplayPreferences()`), never `toLocaleString()` - the
+browser's locale would otherwise pick the day/month order. Day first is the default.
+Drop the year where it goes without saying (`formatWeekdayDayMonth`: "Fri 13/11"). Times
+keep the device's own clock (`formatTime`). Native date pickers can't be formatted and
+follow the browser's language.
+
 ## Accessibility baseline
 
 Every interactive element reachable by keyboard and has a visible focus ring

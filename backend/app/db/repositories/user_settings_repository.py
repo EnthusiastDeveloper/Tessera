@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models.user_settings import UserSettingsORM
 from app.db.repositories._active_hours import deserialize_active_hours, serialize_active_hours
-from app.db.schemas import BlackoutDate, BudgetEnforcement, DayName, UserSettings
+from app.db.schemas import BlackoutDate, BudgetEnforcement, DateFormat, DayName, UserSettings
 
 
 class UserSettingsRepository:
@@ -54,6 +54,7 @@ def _to_orm_kwargs(settings: UserSettings) -> dict[str, Any]:
         "daily_time_budget_minutes": dict(settings.daily_time_budget_minutes),
         "budget_enforcement": settings.budget_enforcement,
         "first_day_of_week": settings.first_day_of_week,
+        "date_format": settings.date_format,
     }
 
 
@@ -66,4 +67,5 @@ def _to_domain(orm: UserSettingsORM) -> UserSettings:
         daily_time_budget_minutes={cast(DayName, day): budget for day, budget in orm.daily_time_budget_minutes.items()},
         budget_enforcement=cast(BudgetEnforcement, orm.budget_enforcement),
         first_day_of_week=cast(DayName, orm.first_day_of_week),
+        date_format=cast(DateFormat, orm.date_format),
     )

@@ -166,6 +166,11 @@ def upgrade() -> None:
             ),
             nullable=False,
         ),
+        sa.Column(
+            "date_format",
+            sa.Enum("DD/MM/YYYY", "MM/DD/YYYY", "YYYY-MM-DD", name="date_format", create_constraint=True),
+            nullable=False,
+        ),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_table(

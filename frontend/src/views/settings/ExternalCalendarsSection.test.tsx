@@ -5,6 +5,7 @@ import { ExternalCalendarsSection } from './ExternalCalendarsSection';
 import * as calendarConnectionsApi from '../../api/calendarConnections';
 import { ApiError } from '../../api/client';
 import type { ExternalCalendarConnection } from '../../types/calendarConnection';
+import { formatDateTime } from '../../lib/dates';
 
 vi.mock('../../api/calendarConnections');
 
@@ -43,7 +44,7 @@ describe('ExternalCalendarsSection', () => {
     render(<ExternalCalendarsSection />);
 
     expect(await screen.findByText('Google Calendar')).toBeInTheDocument();
-    expect(screen.getByText(new RegExp(new Date(CONNECTION.last_synced_at as string).toLocaleString()))).toBeInTheDocument();
+    expect(screen.getByText(new RegExp(formatDateTime(CONNECTION.last_synced_at as string, 'DD/MM/YYYY')))).toBeInTheDocument();
     expect(screen.getByText(/15 minutes/)).toBeInTheDocument();
   });
 

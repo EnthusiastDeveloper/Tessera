@@ -6,6 +6,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { NotificationsPanel } from './NotificationsPanel';
 import * as notificationsApi from '../../api/notifications';
 import type { Notification } from '../../types/notification';
+import { formatDateTime } from '../../lib/dates';
 
 vi.mock('../../api/notifications');
 
@@ -57,7 +58,8 @@ describe('NotificationsPanel', () => {
 
     expect(await screen.findByText('Unschedulable')).toBeInTheDocument();
     expect(screen.getByText(BASE_NOTIFICATION.message)).toBeInTheDocument();
-    expect(screen.getByText(new Date(BASE_NOTIFICATION.created_at).toLocaleString())).toBeInTheDocument();
+    // Day-first by default (design doc 3.7, date_format).
+    expect(screen.getByText(formatDateTime(BASE_NOTIFICATION.created_at, 'DD/MM/YYYY'))).toBeInTheDocument();
 
     expect(screen.getByText('Overdue')).toBeInTheDocument();
     expect(screen.getByText(second.message)).toBeInTheDocument();

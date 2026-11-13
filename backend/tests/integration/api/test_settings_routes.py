@@ -37,6 +37,7 @@ class TestGetSettings:
         assert body["timezone"] == "UTC"
         assert body["budget_enforcement"] == "soft"
         assert body["first_day_of_week"] == "monday"
+        assert body["date_format"] == "DD/MM/YYYY"
         assert body["blackout_dates"] == []
         assert body["active_hours"]["monday"] == [{"start": "09:00", "end": "17:00"}]
         assert body["daily_time_budget_minutes"]["monday"] is None
@@ -66,6 +67,18 @@ class TestPatchSettings:
     def test_bad_first_day_of_week_enum_is_rejected(self, app_client: TestClient) -> None:
         _login(app_client)
         response = app_client.patch("/api/v1/settings", json={"first_day_of_week": "not-a-day"})
+        assert response.status_code == 422
+
+    def test_date_format_can_be_changed(self, app_client: TestClient) -> None:
+        _login(app_client)
+        response = app_client.patch("/api/v1/settings", json={"date_format": "MM/DD/YYYY"})
+        assert response.status_code == 200, response.text
+        assert response.json()["date_format"] == "MM/DD/YYYY"
+        assert app_client.get("/api/v1/settings").json()["date_format"] == "MM/DD/YYYY"
+
+    def test_bad_date_format_is_rejected(self, app_client: TestClient) -> None:
+        _login(app_client)
+        response = app_client.patch("/api/v1/settings", json={"date_format": "D.M.Y"})
         assert response.status_code == 422
 
     def test_active_hours_missing_a_day_is_rejected(self, app_client: TestClient) -> None:

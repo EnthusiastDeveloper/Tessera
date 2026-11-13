@@ -18,7 +18,11 @@ vi.mock('../api/scheduleOptimizations');
 vi.mock('../auth/AuthContext', () => ({
   useAuth: () => ({ user: { username: 'admin' }, logout: vi.fn() }),
 }));
-vi.mock('../api/settings', () => ({ getScheduleRepair: vi.fn().mockResolvedValue(null) }));
+vi.mock('../api/settings', () => ({
+  getScheduleRepair: vi.fn().mockResolvedValue(null),
+  // The shell's display preferences load settings; failing it keeps the defaults.
+  getSettings: vi.fn().mockRejectedValue(new Error('not needed here')),
+}));
 
 const mocked = vi.mocked(api);
 

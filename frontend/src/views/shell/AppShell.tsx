@@ -3,6 +3,7 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-do
 import { useAuth } from '../../auth/AuthContext';
 import { MosaicMark } from '../../components/MosaicMark';
 import { ScheduleRepairOverlay } from '../../components/ScheduleRepairOverlay';
+import { DisplayPreferencesProvider } from '../../display/DisplayPreferences';
 import { AccountMenu } from './AccountMenu';
 import { OptimizationDialogs } from '../../optimization/OptimizationDialogs';
 import { OptimizationProvider, useOptimization } from '../../optimization/OptimizationContext';
@@ -18,9 +19,11 @@ const NAV_ITEMS = [
 
 export function AppShell(): JSX.Element {
   return (
-    <OptimizationProvider>
-      <Shell />
-    </OptimizationProvider>
+    <DisplayPreferencesProvider>
+      <OptimizationProvider>
+        <Shell />
+      </OptimizationProvider>
+    </DisplayPreferencesProvider>
   );
 }
 

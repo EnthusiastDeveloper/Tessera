@@ -12,7 +12,7 @@ from app.api.dependencies import DB_SESSION, SCHEDULE_UNLOCKED, get_request_job_
 from app.api.errors import AppError
 from app.api.v1.validation import DailyBudgetMinutes, DayWindows
 from app.db.repositories import ScheduleRepairRepository
-from app.db.schemas import BlackoutDate, DayName, UserSettings
+from app.db.schemas import BlackoutDate, DateFormat, DayName, UserSettings
 from app.jobs.interface import JobScheduler
 from app.settings import service
 
@@ -34,6 +34,7 @@ class SettingsPatchRequest(BaseModel):
     daily_time_budget_minutes: dict[DayName, DailyBudgetMinutes | None] | None = None
     budget_enforcement: Literal["strict", "soft"] | None = None
     first_day_of_week: DayName | None = None
+    date_format: DateFormat | None = None
 
 
 @router.get("")

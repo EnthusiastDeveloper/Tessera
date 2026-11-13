@@ -38,6 +38,8 @@ NotificationType = Literal[
 CalendarProvider = Literal["google", "outlook", "other"]
 BudgetEnforcement = Literal["strict", "soft"]
 DayName = Literal["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+# How dates are shown (design doc 3.7, Rev 15) - display only, like `first_day_of_week`.
+DateFormat = Literal["DD/MM/YYYY", "MM/DD/YYYY", "YYYY-MM-DD"]
 
 
 class _Frozen(BaseModel):
@@ -183,6 +185,7 @@ class UserSettings(_Frozen):
     daily_time_budget_minutes: dict[DayName, int | None]
     budget_enforcement: BudgetEnforcement = "soft"
     first_day_of_week: DayName = "monday"
+    date_format: DateFormat = "DD/MM/YYYY"
 
 
 class ExternalEvent(_Frozen):

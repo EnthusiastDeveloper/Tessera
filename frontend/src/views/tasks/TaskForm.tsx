@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { DurationInput } from '../../components/DurationInput';
+import { useDisplayPreferences } from '../../display/DisplayPreferences';
+import { formatWeekdayDayMonth, type DateFormat } from '../../lib/dates';
 import { ScopePrompt } from '../../components/ScopePrompt';
 import { ApiError, toApiError } from '../../api/client';
 import { LOCK_HINT, useOptimization } from '../../optimization/OptimizationContext';
@@ -67,8 +69,8 @@ function skippedOccurrences(series: TaskInstance[], edited: TaskInstance): TaskI
     .sort((a, b) => (a.nominal_date < b.nominal_date ? -1 : 1));
 }
 
-function occurrenceLabel(occurrence: TaskInstance): string {
-  return new Date(occurrence.scheduled_time ?? occurrence.nominal_date).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+function occurrenceLabel(occurrence: TaskInstance, dateFormat: DateFormat): string {
+  return formatWeekdayDayMonth(occurrence.scheduled_time ?? occurrence.nominal_date, dateFormat);
 }
 
 /** Drops null/undefined/'' so "unset" compares equal however each side spells it. */
@@ -126,6 +128,7 @@ export function TaskForm({
   onSaved,
   onCancel,
 }: TaskFormProps): JSX.Element {
+  const { dateFormat } = useDisplayPreferences();
   const isEdit = mode === 'edit';
   const isRecurring = isEdit ? template!.recurrence.pattern !== 'one_time' : false;
 
@@ -312,7 +315,7 @@ export function TaskForm({
             {skipped.length === 1
               ? '1 upcoming occurrence has its own changes and won’t be updated: '
               : `${skipped.length} upcoming occurrences have their own changes and won’t be updated: `}
-            {skipped.map(occurrenceLabel).join(', ')}
+            {skipped.map((occurrence) => occurrenceLabel(occurrence, dateFormat)).join(', ')}
           </p>
           <label>
             <input

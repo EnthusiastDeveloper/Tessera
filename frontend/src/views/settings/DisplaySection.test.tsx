@@ -18,6 +18,7 @@ const BASE_SETTINGS: UserSettings = {
   daily_time_budget_minutes: {},
   budget_enforcement: 'soft',
   first_day_of_week: 'monday',
+  date_format: 'DD/MM/YYYY',
 };
 
 describe('DisplaySection', () => {
@@ -34,9 +35,23 @@ describe('DisplaySection', () => {
     await userEvent.selectOptions(screen.getByLabelText(/first day of the week/i), 'sunday');
     await userEvent.click(screen.getByRole('button', { name: /save display preference/i }));
 
-    await waitFor(() => expect(mockedSettingsApi.updateSettings).toHaveBeenCalledWith({ first_day_of_week: 'sunday' }));
+    await waitFor(() => expect(mockedSettingsApi.updateSettings).toHaveBeenCalledWith({ first_day_of_week: 'sunday', date_format: 'DD/MM/YYYY' }));
     expect(onUpdated).toHaveBeenCalledWith(updated);
-    expect(await screen.findByText('Display preference saved.')).toBeInTheDocument();
+    expect(await screen.findByText('Display preferences saved.')).toBeInTheDocument();
+  });
+
+  it('defaults to day-first dates and saves a different date format', async () => {
+    const updated = { ...BASE_SETTINGS, date_format: 'MM/DD/YYYY' as const };
+    mockedSettingsApi.updateSettings.mockResolvedValue(updated);
+    render(<DisplaySection settings={BASE_SETTINGS} onUpdated={vi.fn()} />);
+
+    expect(screen.getByLabelText(/date format/i)).toHaveValue('DD/MM/YYYY');
+    await userEvent.selectOptions(screen.getByLabelText(/date format/i), 'MM/DD/YYYY');
+    await userEvent.click(screen.getByRole('button', { name: /save display preference/i }));
+
+    await waitFor(() =>
+      expect(mockedSettingsApi.updateSettings).toHaveBeenCalledWith({ first_day_of_week: 'monday', date_format: 'MM/DD/YYYY' })
+    );
   });
 
   it('shows an error banner when the save fails', async () => {
