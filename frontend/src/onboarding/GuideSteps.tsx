@@ -349,7 +349,7 @@ export function BudgetStep({
   return (
     <StepLayout
       title="Your daily budget"
-      intro="A daily budget caps how much flexible work Tessera puts on a single day. Fixed tasks don't count toward it."
+      intro="A daily budget caps how much work Tessera lets a single day hold. Fixed tasks and calendar events count toward it, but are never moved because of it: it only limits the flexible work Tessera adds."
       saving={saving}
       submitDisabled={invalid}
       onSubmit={() =>
