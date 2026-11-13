@@ -10,7 +10,7 @@ import { ApiError, toApiError } from '../../api/client';
 import { LOCK_HINT, useOptimization } from '../../optimization/OptimizationContext';
 import { createTemplate, patchTemplateThisAndFuture } from '../../api/taskTemplates';
 import type { CreateTemplatePayload, PatchTemplatePayload } from '../../api/taskTemplates';
-import { listInstances, patchInstanceThisOccurrence } from '../../api/taskInstances';
+import { listInstances, patchInstanceThisOccurrence, setInstanceDependencies } from '../../api/taskInstances';
 import type { PatchInstancePayload } from '../../api/taskInstances';
 import {
   DEADLINE_OFFSET_UNITS,
@@ -39,6 +39,8 @@ import { ActiveHoursOverrideInput } from './ActiveHoursOverrideInput';
 import { DependenciesPicker } from './DependenciesPicker';
 import { DurationListInput } from './DurationListInput';
 
+/** Design doc 6.1 (Rev 17): dependencies can be changed until the task is started or finished. */
+const DEPENDENCY_EDITABLE_STATUSES: TaskInstance['status'][] = ['pending', 'scheduled', 'blocked', 'missed'];
 const PRIORITIES: Priority[] = ['low', 'medium', 'high', 'critical'];
 const PATTERNS: RecurrencePattern[] = ['one_time', 'daily', 'weekly', 'monthly'];
 
@@ -165,7 +167,13 @@ export function TaskForm({
   const [activeHoursOverride, setActiveHoursOverride] = useState<ActiveHoursOverride | null>(
     template?.active_hours_override ?? null
   );
-  const [dependencies, setDependencies] = useState<string[]>([]);
+  const [dependencies, setDependencies] = useState<string[]>(instance?.dependencies ?? []);
+  // They belong to this occurrence whatever the edit scope (design doc 6.1, Rev 17).
+  const dependenciesEditable = !isEdit || (instance !== undefined && DEPENDENCY_EDITABLE_STATUSES.includes(instance.status));
+  const dependenciesChanged =
+    isEdit &&
+    instance !== undefined &&
+    (dependencies.length !== instance.dependencies.length || dependencies.some((id) => !instance.dependencies.includes(id)));
 
   const [scope, setScope] = useState<EditScope | null>(null);
   const [series, setSeries] = useState<TaskInstance[]>([]);
@@ -227,6 +235,10 @@ export function TaskForm({
     setError(null);
     setSubmitting(true);
     try {
+      // First, so a refused list (a cycle, say) leaves the rest of the edit unsaved too.
+      if (dependenciesChanged && dependenciesEditable) {
+        await setInstanceDependencies(instance!.id, dependencies);
+      }
       if (!isEdit) {
         const payload: CreateTemplatePayload = {
           name,
@@ -571,7 +583,14 @@ export function TaskForm({
         <ActiveHoursOverrideInput value={activeHoursOverride} onChange={setActiveHoursOverride} />
       )}
 
-      {!isEdit && <DependenciesPicker selected={dependencies} onChange={setDependencies} />}
+      {dependenciesEditable && (
+        <DependenciesPicker
+          selected={dependencies}
+          onChange={setDependencies}
+          excludeId={instance?.id}
+          note={isEdit && isRecurring ? 'This changes only this occurrence.' : undefined}
+        />
+      )}
 
       <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
         <button

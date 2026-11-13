@@ -89,6 +89,14 @@ Because a candidate only becomes eligible for scheduling once all its dependenci
 
 Deleting a task that others depend on doesn't cascade: the dependency link is simply removed from the dependent(s), which may unblock them.
 
+**Changing dependencies later.** You can add or remove a task's dependencies after creating it, from its page (**Dependencies → Add dependency / Remove**) or in its edit form, until you start it or it's finished. Say "Change the flickering lights" is already on Tuesday evening when you remember there are no spare bulbs: add "Buy bulbs" and make the lights wait for it. What happens is the same as if you had set it up that way from the start:
+
+- A **flexible** task that now waits on something unfinished leaves the Timeline and waits in the Backlog. Its old slot is simply freed. Once the dependency is done, Tessera finds it a new place.
+- A **fixed** task keeps its time while it waits (see below).
+- Removing the last unfinished dependency frees the task straight away, just as completing it would.
+- A task can't wait for itself, for a skipped task (it would wait for ever), or for something that already waits on it.
+- On a recurring task, the change applies to that one occurrence only.
+
 **A fixed task that's waiting keeps its time.** A fixed task with an unfinished dependency still holds its slot: nothing else can be booked on top of it, flexible tasks stay out of its way, and you get its reminders as usual. The Timeline shows it at its time with a dashed border and a see-through fill, labelled with what it's waiting on. Three days before its time, if the dependency still isn't done, you get a `dependency_at_risk` warning - the same one a flexible task gets before its deadline - and it clears on its own once the dependency is completed. If its time comes while it's still waiting, you get the normal overdue notice, naming what it's waiting on, and can reschedule, mark it complete or skip it. Once the dependency is completed, the task is scheduled at its time as normal. If its time has already passed by then, it stays overdue until you deal with it.
 
 ## Skip vs. delete: two different intents

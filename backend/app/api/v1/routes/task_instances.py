@@ -46,6 +46,12 @@ class PatchInstanceRequest(BaseModel):
     expected: PatchInstanceExpected | None = None
 
 
+class SetDependenciesRequest(BaseModel):
+    """§6.1 (Rev 17): the occurrence's whole new dependency list."""
+
+    dependencies: list[str]
+
+
 class RescheduleRequest(BaseModel):
     scheduled_time: datetime
 
@@ -99,6 +105,19 @@ def patch_instance_endpoint(
     expected = _internal_values(payload.expected) if payload.expected is not None else None
     try:
         return service.edit_this_occurrence(db, jobs, instance_id, patch=patch, expected=expected)
+    except service.InstanceValidationError as exc:
+        raise AppError.for_code(exc.code, str(exc), details=exc.details) from exc
+
+
+@router.put("/{instance_id}/dependencies")
+def set_dependencies_endpoint(
+    instance_id: str,
+    payload: SetDependenciesRequest,
+    db: Session = DB_SESSION,
+    jobs: JobScheduler = Depends(get_request_job_scheduler),
+) -> TaskInstance:
+    try:
+        return service.set_dependencies(db, jobs, instance_id, dependency_ids=tuple(payload.dependencies))
     except service.InstanceValidationError as exc:
         raise AppError.for_code(exc.code, str(exc), details=exc.details) from exc
 
