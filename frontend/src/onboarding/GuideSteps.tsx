@@ -226,13 +226,35 @@ export function HoursStep({
   return (
     <StepLayout
       title="When can Tessera schedule work?"
-      intro="Flexible tasks are only placed on these days, between these hours. Fixed tasks keep the time you give them."
+      intro="Tessera has two kinds of task, and these hours are for one of them."
       saving={saving}
       submitDisabled={days.length === 0}
       onSubmit={() => onContinue({ active_hours: guideHoursToActiveHours(days, hours) })}
       onSkip={onSkip}
       onBack={onBack}
     >
+      {/* The first step where the difference matters (design doc 8.1 screen 0a): name both
+          kinds in the Timeline's own colors before asking anything that depends on it. */}
+      <dl
+        className="mb-6 grid gap-3 rounded-md border border-border bg-surface-raised p-4 text-sm"
+        aria-label="Kinds of task"
+      >
+        <div>
+          <dt className="font-semibold text-fixed">Fixed</dt>
+          <dd className="m-0 text-text-muted">
+            Happens at a time you choose - a meeting, a class, a train. Tessera keeps it exactly
+            there, on any day and at any hour, and plans around it.
+          </dd>
+        </div>
+        <div>
+          <dt className="font-semibold text-flexible-strong">Flexible</dt>
+          <dd className="m-0 text-text-muted">
+            Needs doing by a deadline, not at a set time - write a report, do the shopping. You say
+            how long it takes and by when; Tessera finds the time, only on the days and hours below,
+            and finds it a new place if something fixed takes its slot.
+          </dd>
+        </div>
+      </dl>
       <fieldset className="field">
         <legend>Days</legend>
         <div className="flex flex-wrap gap-2">
@@ -328,7 +350,7 @@ export function BudgetStep({
   return (
     <StepLayout
       title="How much flexible work a day?"
-      intro="A daily budget keeps Tessera from filling every free minute. Fixed tasks don't count against it."
+      intro="A daily budget caps how much flexible work Tessera places on one day, so it doesn't fill every free minute. Fixed tasks don't count against it."
       saving={saving}
       submitDisabled={invalid}
       onSubmit={() =>

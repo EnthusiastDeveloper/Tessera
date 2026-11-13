@@ -96,6 +96,9 @@ describe('SetupGuide', () => {
     );
 
     expect(await screen.findByRole('heading', { name: 'When can Tessera schedule work?' })).toBeInTheDocument();
+    // The first step that depends on it explains fixed vs flexible before asking.
+    expect(screen.getByText('Fixed')).toBeInTheDocument();
+    expect(screen.getByText('Flexible')).toBeInTheDocument();
     // The week the user just chose: Monday first.
     expect(screen.getAllByRole('button', { pressed: true })[0]).toHaveAccessibleName('Monday');
     await user.click(screen.getByRole('button', { name: 'Saturday' }));

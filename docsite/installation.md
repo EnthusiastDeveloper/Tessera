@@ -64,7 +64,7 @@ After setup, log in with `admin` and the password you chose. The first sign-in o
 
 1. **Timezone** - defaults from the container's `TZ` env var; if your device is in a different timezone, the guide offers it in one click. Every scheduling decision is computed in this timezone (see [Configuration](configuration.md)).
 2. **Your week** - first day of the week, date format and time format.
-3. **When to schedule** - which days, and one set of hours for all of them, that flexible tasks may be placed in. Different hours per day, split days and overnight windows are set in **Settings → Scheduling window**.
+3. **When to schedule** - which days, and one set of hours for all of them, that flexible tasks may be placed in. The step starts by explaining the difference: a **fixed** task happens at a time you choose and stays there, whatever these hours say; a **flexible** task has a duration and a deadline, and Tessera finds it a time inside these hours. Different hours per day, split days and overnight windows are set in **Settings → Scheduling window**.
 4. **Daily budget** - no limit, or a cap on flexible work per day, and whether a deadline may break it as a last resort.
 
 **Skip setup** ends the guide at any point and keeps what you've saved. Once you finish or skip it, it doesn't open again; **Settings → Run the setup guide again** brings it back. If you close the page halfway, the next sign-in picks up at the same step.
