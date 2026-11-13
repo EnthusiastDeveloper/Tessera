@@ -10,7 +10,7 @@ import {
   type DateFormat,
   type TimeFormat,
 } from '../../lib/dates';
-import { DAY_LABELS, DAY_ORDER } from '../../lib/days';
+import { DAY_LABELS, daysOfWeekFrom } from '../../lib/days';
 import type { UserSettings } from '../../types/settings';
 
 interface DisplaySectionProps {
@@ -69,7 +69,7 @@ export function DisplaySection({ settings, onUpdated }: DisplaySectionProps): JS
           value={firstDayOfWeek}
           onChange={(event) => setFirstDayOfWeek(event.target.value as UserSettings['first_day_of_week'])}
         >
-          {DAY_ORDER.map((day) => (
+          {daysOfWeekFrom('sunday').map((day) => (
             <option key={day} value={day}>
               {DAY_LABELS[day]}
             </option>

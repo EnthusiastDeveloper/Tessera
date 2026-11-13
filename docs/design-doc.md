@@ -1,7 +1,7 @@
 # Tessera - Design Document (POC)
 ### Revision 15
 
-> **Revision 15 adds `date_format` and `time_format` display settings (3.7, 8.1).** Every date the UI shows is written day first by default (`DD/MM/YYYY`), with month-first and ISO year-first as the alternatives, and every time on a 24-hour clock by default, with 12-hour as the alternative; like `first_day_of_week` both are display only and have no effect on scheduling. Nothing else changes.
+> **Revision 15 adds `date_format` and `time_format` display settings (3.7, 8.1).** Every date the UI shows is written day first by default (`DD/MM/YYYY`), with month-first and ISO year-first as the alternatives, and every time on a 24-hour clock by default, with 12-hour as the alternative; like `first_day_of_week` both are display only and have no effect on scheduling. It also makes **Sunday** the default `first_day_of_week` (was Monday). Nothing else changes.
 >
 > **Revision 14 adds "Optimize Schedule" (Backlog 12.23, now Section 6.11).** One button re-places every flexible task in a single global pass in the background - the escape hatch for 6.2's accepted greedy corner-painting. The user stays in control: while it runs, schedule editing is paused (read-only) and the server refuses schedule-changing writes; if the new arrangement would take a task that is currently scheduled out of the schedule, or put one over its day's budget, nothing happens until the user approves it, as a whole; if it takes nothing away, it applies at once; either way the user sees a summary of every change, and Undo is offered for a short time while it is still safe. Section 11 records the decisions (items 23-29). Everything below about Revisions 9 to 13 still stands unless this revision says otherwise.
 >
@@ -44,7 +44,7 @@ Full diffs are in git; IRR-2 (`docs/implementation-readiness-review-2.md`) holds
 | 12 | IRR-2 Medium findings closed: `custom` recurrence dropped, field validation table (3.13), priority labels on the wire for instances, current external-sync behaviour documented (7), calendar selection and failed-sync visibility recorded as Backlog |
 | 13 | Active hours are a **list of windows per day**, and a window may run **overnight**; a blackout cuts at midnight and budgets count the calendar date (3.7, 6.2, 6.8, 6.10); Worked Examples Q and R |
 | 14 | **"Optimize Schedule" (6.11)** - a user-triggered, background, global re-placement of flexible work that pauses editing while it runs, needs the user's approval only when it would take something away, always shows a summary, and can be undone for a short time; Worked Examples S-V; Section 11 items 23-29; Backlog 12.28-12.30 |
-| 15 | `date_format` and `time_format` display settings (3.7, 8.1): day-first dates and a 24-hour clock by default |
+| 15 | `date_format` and `time_format` display settings (3.7, 8.1): day-first dates and a 24-hour clock by default; `first_day_of_week` defaults to Sunday |
 
 **Revision 9 changelog.** Eighteen IRR-2 findings, following stakeholder decisions taken 2026-08-05 to 2026-08-07. Revision 8's "locked" status meant "no unilateral edits"; it did not mean "verified correct". IRR-2 records what each finding was and why it mattered; this lists only what the specification now says.
 
@@ -420,7 +420,8 @@ interface UserSettings {
 
   first_day_of_week: "sunday" | "monday" | "tuesday" | "wednesday"
                     | "thursday" | "friday" | "saturday";  // display-only, see note below.
-                                                            // default: "monday"
+                                                            // default: "sunday" (Rev 15;
+                                                            // was "monday")
 
   date_format: "DD/MM/YYYY" | "MM/DD/YYYY" | "YYYY-MM-DD";  // (added Revision 15) display-only,
                                                              // how the UI writes dates.
@@ -447,7 +448,7 @@ Everything day-keyed is read by the **calendar date the time falls on**, not by 
 - **Blackout dates cut at midnight.** Whatever part of any window falls on a blacked-out date is unavailable. Monday's `22:00`-`02:00` with Tuesday blacked out leaves Monday `22:00`-`24:00`; with Monday blacked out it leaves Tuesday `00:00`-`02:00`.
 - **The daily budget counts the calendar date.** A task that runs `23:30`-`00:30` spends 30 minutes of the first date's budget and 30 of the next. Obstacles are counted the same way (6.2).
 
-`first_day_of_week` affects **display only** - it controls the Timeline view's calendar layout (8.1) and the row order of the day-of-week settings below (`active_hours`, `daily_time_budget_minutes`, `blackout_dates`). It has no effect on scheduling algorithm behavior: those fields are already keyed by day name rather than position-in-week, so the algorithm doesn't have a concept of "week" to reorder in the first place.
+`first_day_of_week` affects **display only** - it controls the Timeline view's calendar layout (8.1) and the row order of the day-of-week settings below (`active_hours`, `daily_time_budget_minutes`, `blackout_dates`) and of a task's day-of-week controls (3.2's `active_hours_override`, a weekly recurrence's day). It has no effect on scheduling algorithm behavior: those fields are already keyed by day name rather than position-in-week, so the algorithm doesn't have a concept of "week" to reorder in the first place.
 
 **(Added Revision 15) `date_format` is display only too:** the order the UI writes a date in - day first (the default), month first, or ISO year first. Where the year is obvious (the Timeline's column headers, a date in the next few days) the year is dropped and the order kept ("Fri 13/11"); on a phone-width Timeline the column header shows only the day number, since the toolbar names the month. `time_format` picks the clock every displayed time is written on - 24-hour (the default, `17:30`) or 12-hour (`5:30 PM`) - including the Timeline's hour axis and event times. Dates and times on the wire are unaffected: the API always speaks ISO 8601.
 

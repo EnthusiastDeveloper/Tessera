@@ -36,7 +36,7 @@ class TestGetSettings:
         body = response.json()
         assert body["timezone"] == "UTC"
         assert body["budget_enforcement"] == "soft"
-        assert body["first_day_of_week"] == "monday"
+        assert body["first_day_of_week"] == "sunday"
         assert body["date_format"] == "DD/MM/YYYY"
         assert body["time_format"] == "24h"
         assert body["blackout_dates"] == []
@@ -52,7 +52,7 @@ class TestPatchSettings:
         body = response.json()
         assert body["timezone"] == "America/New_York"
         assert body["budget_enforcement"] == "soft"  # untouched
-        assert body["first_day_of_week"] == "monday"  # untouched
+        assert body["first_day_of_week"] == "sunday"  # untouched
 
     def test_bad_timezone_is_rejected(self, app_client: TestClient) -> None:
         _login(app_client)

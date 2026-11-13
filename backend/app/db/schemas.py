@@ -185,7 +185,7 @@ class UserSettings(_Frozen):
     blackout_dates: tuple[BlackoutDate, ...] = ()
     daily_time_budget_minutes: dict[DayName, int | None]
     budget_enforcement: BudgetEnforcement = "soft"
-    first_day_of_week: DayName = "monday"
+    first_day_of_week: DayName = "sunday"
     date_format: DateFormat = "DD/MM/YYYY"
     time_format: TimeFormat = "24h"
 

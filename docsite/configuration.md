@@ -80,7 +80,7 @@ Two enforcement modes:
 
 ### First day of week
 
-Display-only - controls calendar layout and the ordering of day-of-week rows elsewhere in Settings. It has no effect on scheduling: every day-keyed setting above is keyed by day name, not position in the week, so there's nothing for the algorithm to reorder.
+Display-only, **Sunday by default**. It sets where the Timeline's week starts and the order of every list of days: the active hours and daily budget rows in Settings, and a task's active-hours override and weekly day. It has no effect on scheduling: every day-keyed setting above is keyed by day name, not position in the week, so there's nothing for the algorithm to reorder.
 
 ### Date and time format
 

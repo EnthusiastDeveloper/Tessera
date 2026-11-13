@@ -16,7 +16,7 @@ export interface DisplayPreferences {
 const DEFAULTS: DisplayPreferences = {
   dateFormat: DEFAULT_DATE_FORMAT,
   timeFormat: DEFAULT_TIME_FORMAT,
-  firstDayOfWeek: 'monday',
+  firstDayOfWeek: 'sunday',
 };
 
 interface DisplayPreferencesValue {

@@ -1,24 +1,8 @@
 import { WindowListInput } from '../../components/WindowListInput';
+import { useDisplayPreferences } from '../../display/DisplayPreferences';
+import { DAY_LABELS, daysOfWeekFrom } from '../../lib/days';
 import type { ActiveHoursOverride, ActiveHoursWindow, DayName, DayWindows } from '../../types/task';
 
-const DAYS: DayName[] = [
-  'monday',
-  'tuesday',
-  'wednesday',
-  'thursday',
-  'friday',
-  'saturday',
-  'sunday',
-];
-const DAY_LABELS: Record<DayName, string> = {
-  monday: 'Monday',
-  tuesday: 'Tuesday',
-  wednesday: 'Wednesday',
-  thursday: 'Thursday',
-  friday: 'Friday',
-  saturday: 'Saturday',
-  sunday: 'Sunday',
-};
 const DEFAULT_WINDOW: ActiveHoursWindow = { start: '09:00', end: '17:00' };
 
 type DayMode = 'inherit' | 'excluded' | 'custom';
@@ -42,6 +26,7 @@ export function ActiveHoursOverrideInput({
   value,
   onChange,
 }: ActiveHoursOverrideInputProps): JSX.Element {
+  const { firstDayOfWeek } = useDisplayPreferences();
   const emit = (day: DayName, mode: DayMode, windows?: ActiveHoursWindow[]): void => {
     const next: ActiveHoursOverride = { ...(value ?? {}) };
     if (mode === 'inherit') {
@@ -60,7 +45,7 @@ export function ActiveHoursOverrideInput({
       <p style={{ color: 'var(--color-text-muted)', fontSize: 'var(--font-size-sm)' }}>
         Days left as &quot;Inherit&quot; use your global scheduling-window settings.
       </p>
-      {DAYS.map((day) => {
+      {daysOfWeekFrom(firstDayOfWeek).map((day) => {
         const dayValue = value?.[day];
         const mode = modeFor(dayValue);
         return (

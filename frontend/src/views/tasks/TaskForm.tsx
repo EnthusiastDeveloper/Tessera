@@ -3,6 +3,7 @@ import type { FormEvent } from 'react';
 import { DurationInput } from '../../components/DurationInput';
 import { useDisplayPreferences } from '../../display/DisplayPreferences';
 import { formatWeekdayDayMonth, type DateFormat } from '../../lib/dates';
+import { DAY_LABELS, DAY_ORDER, daysOfWeekFrom } from '../../lib/days';
 import { ScopePrompt } from '../../components/ScopePrompt';
 import { ApiError, toApiError } from '../../api/client';
 import { LOCK_HINT, useOptimization } from '../../optimization/OptimizationContext';
@@ -39,7 +40,6 @@ import { DurationListInput } from './DurationListInput';
 
 const PRIORITIES: Priority[] = ['low', 'medium', 'high', 'critical'];
 const PATTERNS: RecurrencePattern[] = ['one_time', 'daily', 'weekly', 'monthly'];
-const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
 function toDatetimeLocal(iso: string | null | undefined): string {
   if (!iso) return '';
@@ -128,7 +128,7 @@ export function TaskForm({
   onSaved,
   onCancel,
 }: TaskFormProps): JSX.Element {
-  const { dateFormat } = useDisplayPreferences();
+  const { dateFormat, firstDayOfWeek } = useDisplayPreferences();
   const isEdit = mode === 'edit';
   const isRecurring = isEdit ? template!.recurrence.pattern !== 'one_time' : false;
 
@@ -439,9 +439,11 @@ export function TaskForm({
                 value={dayOfWeek}
                 onChange={(event) => setDayOfWeek(Number(event.target.value))}
               >
-                {WEEKDAYS.map((day, index) => (
-                  <option key={day} value={index}>
-                    {day}
+                {/* Listed from the user's first day of the week; the value stays the
+                    API's Monday = 0 index. */}
+                {daysOfWeekFrom(firstDayOfWeek).map((day) => (
+                  <option key={day} value={DAY_ORDER.indexOf(day)}>
+                    {DAY_LABELS[day]}
                   </option>
                 ))}
               </select>

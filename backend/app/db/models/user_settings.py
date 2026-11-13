@@ -41,7 +41,7 @@ class UserSettingsORM(Base):
         Enum("strict", "soft", name="budget_enforcement", create_constraint=True), nullable=False, default="soft"
     )
     first_day_of_week: Mapped[str] = mapped_column(
-        Enum(*_DAY_NAMES, name="first_day_of_week", create_constraint=True), nullable=False, default="monday"
+        Enum(*_DAY_NAMES, name="first_day_of_week", create_constraint=True), nullable=False, default="sunday"
     )
     # Display only (design doc 3.7, Rev 15): how the client writes dates and times.
     date_format: Mapped[str] = mapped_column(
