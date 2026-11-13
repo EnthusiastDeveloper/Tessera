@@ -82,9 +82,9 @@ Two enforcement modes:
 
 Display-only - controls calendar layout and the ordering of day-of-week rows elsewhere in Settings. It has no effect on scheduling: every day-keyed setting above is keyed by day name, not position in the week, so there's nothing for the algorithm to reorder.
 
-### Date format
+### Date and time format
 
-Display-only - how every date in the app is written. **Day first (`DD/MM/YYYY`) by default**; month first (`MM/DD/YYYY`) and ISO year first (`YYYY-MM-DD`) are the alternatives, under **Settings → Display**. Where the year goes without saying - the Timeline's column headers, a date a few days away - it's dropped and the order kept (`Fri 13/11`). On a phone-width Timeline, column headers show just the day number under the weekday, since the toolbar already names the month. Times keep your device's own 12- or 24-hour clock.
+Display-only - how every date and time in the app is written. **Day first (`DD/MM/YYYY`) by default**; month first (`MM/DD/YYYY`) and ISO year first (`YYYY-MM-DD`) are the alternatives, under **Settings → Display**. Where the year goes without saying - the Timeline's column headers, a date a few days away - it's dropped and the order kept (`Fri 13/11`). On a phone-width Timeline, column headers show just the day number under the weekday, since the toolbar already names the month. Times are on a **24-hour clock by default** (`17:30`), or 12-hour (`5:30 PM`) - that includes the Timeline's hour axis and the times on its events.
 
 Date *pickers* in forms are your browser's own control and follow the browser's language, not this setting.
 

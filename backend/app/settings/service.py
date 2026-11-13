@@ -64,6 +64,7 @@ def get_or_create_default(db: Session, *, default_timezone: str) -> UserSettings
             budget_enforcement="soft",
             first_day_of_week="monday",
             date_format="DD/MM/YYYY",
+            time_format="24h",
         )
     )
 
@@ -118,6 +119,9 @@ def update_settings(db: Session, jobs: JobScheduler, *, patch: dict[str, Any]) -
 
     if "date_format" in patch:
         updates["date_format"] = patch["date_format"]
+
+    if "time_format" in patch:
+        updates["time_format"] = patch["time_format"]
 
     saved = repo.update(current.model_copy(update=updates))
     if _PLACEMENT_RULES & patch.keys():

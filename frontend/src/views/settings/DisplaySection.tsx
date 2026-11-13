@@ -2,7 +2,14 @@ import { useState } from 'react';
 import { updateSettings } from '../../api/settings';
 import { ApiError } from '../../api/client';
 import { useApplyDisplaySettings } from '../../display/DisplayPreferences';
-import { DATE_FORMAT_OPTIONS, DEFAULT_DATE_FORMAT, type DateFormat } from '../../lib/dates';
+import {
+  DATE_FORMAT_OPTIONS,
+  DEFAULT_DATE_FORMAT,
+  DEFAULT_TIME_FORMAT,
+  TIME_FORMAT_OPTIONS,
+  type DateFormat,
+  type TimeFormat,
+} from '../../lib/dates';
 import { DAY_LABELS, DAY_ORDER } from '../../lib/days';
 import type { UserSettings } from '../../types/settings';
 
@@ -12,13 +19,15 @@ interface DisplaySectionProps {
 }
 
 /** §8.1 screen 6 "Display": the first day of the week (Timeline layout and Settings
- * ordering) and the date format (Rev 15: how every date in the UI is written). Both are
+ * ordering), and the date and time formats (Rev 15: how every date and time in the UI is
+ * written). Both are
  * display-only (§3.7) - neither has any effect on scheduling. A save is pushed to the
  * app-wide display preferences, so other screens pick it up without a reload.
  */
 export function DisplaySection({ settings, onUpdated }: DisplaySectionProps): JSX.Element {
   const [firstDayOfWeek, setFirstDayOfWeek] = useState(settings.first_day_of_week);
   const [dateFormat, setDateFormat] = useState<DateFormat>(settings.date_format ?? DEFAULT_DATE_FORMAT);
+  const [timeFormat, setTimeFormat] = useState<TimeFormat>(settings.time_format ?? DEFAULT_TIME_FORMAT);
   const applyDisplaySettings = useApplyDisplaySettings();
   const [bannerError, setBannerError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -29,7 +38,7 @@ export function DisplaySection({ settings, onUpdated }: DisplaySectionProps): JS
     setSuccessMessage(null);
     setSaving(true);
     try {
-      const updated = await updateSettings({ first_day_of_week: firstDayOfWeek, date_format: dateFormat });
+      const updated = await updateSettings({ first_day_of_week: firstDayOfWeek, date_format: dateFormat, time_format: timeFormat });
       onUpdated(updated);
       applyDisplaySettings(updated);
       setSuccessMessage('Display preferences saved.');
@@ -71,6 +80,16 @@ export function DisplaySection({ settings, onUpdated }: DisplaySectionProps): JS
         <label htmlFor="date-format">Date format</label>
         <select id="date-format" value={dateFormat} onChange={(event) => setDateFormat(event.target.value as DateFormat)}>
           {DATE_FORMAT_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="field">
+        <label htmlFor="time-format">Time format</label>
+        <select id="time-format" value={timeFormat} onChange={(event) => setTimeFormat(event.target.value as TimeFormat)}>
+          {TIME_FORMAT_OPTIONS.map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}
             </option>

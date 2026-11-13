@@ -171,6 +171,7 @@ def upgrade() -> None:
             sa.Enum("DD/MM/YYYY", "MM/DD/YYYY", "YYYY-MM-DD", name="date_format", create_constraint=True),
             nullable=False,
         ),
+        sa.Column("time_format", sa.Enum("24h", "12h", name="time_format", create_constraint=True), nullable=False),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_table(

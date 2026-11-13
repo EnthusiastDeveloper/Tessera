@@ -20,6 +20,7 @@ class TestGetOrCreateDefault:
         assert created.budget_enforcement == "soft"
         assert created.first_day_of_week == "monday"
         assert created.date_format == "DD/MM/YYYY"
+        assert created.time_format == "24h"
         assert created.blackout_dates == ()
         assert created.active_hours == service.DEFAULT_ACTIVE_HOURS
         assert created.daily_time_budget_minutes == service.DEFAULT_DAILY_TIME_BUDGET

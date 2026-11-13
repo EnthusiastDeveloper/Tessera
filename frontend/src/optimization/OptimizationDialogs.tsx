@@ -1,13 +1,13 @@
 import type { ReactNode } from 'react';
 import type { OptimizationSummary, ScheduleOptimization } from '../types/optimization';
 import { useDisplayPreferences } from '../display/DisplayPreferences';
-import { formatWeekdayDayMonthTime, type DateFormat } from '../lib/dates';
+import { formatWeekdayDayMonthTime, type DateFormat, type TimeFormat } from '../lib/dates';
 import { useOptimization } from './OptimizationContext';
 import type { Notice } from './OptimizationContext';
 
-/** The user's own clock, short: "Tue 07/04 18:00" (date order per the date-format setting). */
-function when(iso: string, dateFormat: DateFormat): string {
-  return formatWeekdayDayMonthTime(iso, dateFormat);
+/** Short: "Tue 07/04 18:00" (date order and clock per the display settings). */
+function when(iso: string, dateFormat: DateFormat, timeFormat: TimeFormat): string {
+  return formatWeekdayDayMonthTime(iso, dateFormat, timeFormat);
 }
 
 function plural(count: number, one: string, many: string): string {
@@ -18,7 +18,7 @@ function plural(count: number, one: string, many: string): string {
  * the user would lose first when this is a plan awaiting approval. */
 export function SummaryBody({ summary }: { summary: OptimizationSummary }): JSX.Element {
   const { counts } = summary;
-  const { dateFormat } = useDisplayPreferences();
+  const { dateFormat, timeFormat } = useDisplayPreferences();
   return (
     <div>
       <p>
@@ -39,7 +39,7 @@ export function SummaryBody({ summary }: { summary: OptimizationSummary }): JSX.
           {summary.lost.map((x) => (
             <li key={x.instance_id}>
               <strong>{x.name}</strong> - no free slot before its deadline
-              {x.deadline ? ` (${when(x.deadline, dateFormat)})` : ''}; it was at {when(x.from, dateFormat)}
+              {x.deadline ? ` (${when(x.deadline, dateFormat, timeFormat)})` : ''}; it was at {when(x.from, dateFormat, timeFormat)}
             </li>
           ))}
         </Section>
@@ -57,7 +57,7 @@ export function SummaryBody({ summary }: { summary: OptimizationSummary }): JSX.
         <Section title="Newly scheduled">
           {summary.newly_scheduled.map((x) => (
             <li key={x.instance_id}>
-              <strong>{x.name}</strong> - {when(x.to, dateFormat)}
+              <strong>{x.name}</strong> - {when(x.to, dateFormat, timeFormat)}
             </li>
           ))}
         </Section>
@@ -66,7 +66,7 @@ export function SummaryBody({ summary }: { summary: OptimizationSummary }): JSX.
         <Section title="Moved">
           {summary.moved.map((x) => (
             <li key={x.instance_id}>
-              <strong>{x.name}</strong> - {when(x.from, dateFormat)} → {when(x.to, dateFormat)}
+              <strong>{x.name}</strong> - {when(x.from, dateFormat, timeFormat)} → {when(x.to, dateFormat, timeFormat)}
             </li>
           ))}
         </Section>
@@ -104,7 +104,7 @@ function Dialog({ label, children }: { label: string; children: ReactNode }): JS
 
 function ApprovalDialog({ optimization }: { optimization: ScheduleOptimization }): JSX.Element {
   const { approve, decline } = useOptimization();
-  const { dateFormat } = useDisplayPreferences();
+  const { dateFormat, timeFormat } = useDisplayPreferences();
   return (
     <Dialog label="Optimize Schedule - approval needed">
       <h3>Optimize Schedule</h3>
@@ -117,7 +117,7 @@ function ApprovalDialog({ optimization }: { optimization: ScheduleOptimization }
         A better arrangement exists, but it would take something you have today. Nothing has changed
         yet.
         {optimization.valid_until && (
-          <> This plan stays valid until {when(optimization.valid_until, dateFormat)}.</>
+          <> This plan stays valid until {when(optimization.valid_until, dateFormat, timeFormat)}.</>
         )}
       </p>
       {optimization.summary && <SummaryBody summary={optimization.summary} />}

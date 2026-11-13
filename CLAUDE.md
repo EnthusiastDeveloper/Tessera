@@ -146,7 +146,7 @@ Consistent across all endpoints: HTTP status + machine-readable code + human mes
 - `daily_time_budget_minutes`: {day_name: number | null} - max flexible work per day in minutes, soft cap by default
 - `budget_enforcement`: "soft" | "strict" - whether to allow budget override as last resort
 - `first_day_of_week`: day name (display-only, doesn't affect algorithm)
-- `date_format`: `DD/MM/YYYY` (default) | `MM/DD/YYYY` | `YYYY-MM-DD` (display-only, Rev 15) - the frontend writes every date through `frontend/src/lib/dates.ts`, never `toLocaleString()`
+- `date_format`: `DD/MM/YYYY` (default) | `MM/DD/YYYY` | `YYYY-MM-DD`; `time_format`: `24h` (default) | `12h` (both display-only, Rev 15) - the frontend writes every date and time through `frontend/src/lib/dates.ts`, never `toLocaleString()`
 
 ---
 

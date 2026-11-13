@@ -19,6 +19,7 @@ const BASE_SETTINGS: UserSettings = {
   budget_enforcement: 'soft',
   first_day_of_week: 'monday',
   date_format: 'DD/MM/YYYY',
+  time_format: '24h',
 };
 
 describe('DisplaySection', () => {
@@ -35,7 +36,7 @@ describe('DisplaySection', () => {
     await userEvent.selectOptions(screen.getByLabelText(/first day of the week/i), 'sunday');
     await userEvent.click(screen.getByRole('button', { name: /save display preference/i }));
 
-    await waitFor(() => expect(mockedSettingsApi.updateSettings).toHaveBeenCalledWith({ first_day_of_week: 'sunday', date_format: 'DD/MM/YYYY' }));
+    await waitFor(() => expect(mockedSettingsApi.updateSettings).toHaveBeenCalledWith({ first_day_of_week: 'sunday', date_format: 'DD/MM/YYYY', time_format: '24h' }));
     expect(onUpdated).toHaveBeenCalledWith(updated);
     expect(await screen.findByText('Display preferences saved.')).toBeInTheDocument();
   });
@@ -50,7 +51,20 @@ describe('DisplaySection', () => {
     await userEvent.click(screen.getByRole('button', { name: /save display preference/i }));
 
     await waitFor(() =>
-      expect(mockedSettingsApi.updateSettings).toHaveBeenCalledWith({ first_day_of_week: 'monday', date_format: 'MM/DD/YYYY' })
+      expect(mockedSettingsApi.updateSettings).toHaveBeenCalledWith({ first_day_of_week: 'monday', date_format: 'MM/DD/YYYY', time_format: '24h' })
+    );
+  });
+
+  it('defaults to a 24-hour clock and saves a 12-hour one', async () => {
+    mockedSettingsApi.updateSettings.mockResolvedValue({ ...BASE_SETTINGS, time_format: '12h' });
+    render(<DisplaySection settings={BASE_SETTINGS} onUpdated={vi.fn()} />);
+
+    expect(screen.getByLabelText(/time format/i)).toHaveValue('24h');
+    await userEvent.selectOptions(screen.getByLabelText(/time format/i), '12h');
+    await userEvent.click(screen.getByRole('button', { name: /save display preference/i }));
+
+    await waitFor(() =>
+      expect(mockedSettingsApi.updateSettings).toHaveBeenCalledWith({ first_day_of_week: 'monday', date_format: 'DD/MM/YYYY', time_format: '12h' })
     );
   });
 

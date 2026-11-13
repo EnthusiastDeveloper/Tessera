@@ -66,7 +66,7 @@ function formatStatus(status: TaskInstanceStatus): string {
  */
 export function TaskDetailPage(): JSX.Element {
   const { instanceId } = useParams<{ instanceId: string }>();
-  const { dateFormat } = useDisplayPreferences();
+  const { dateFormat, timeFormat } = useDisplayPreferences();
   const navigate = useNavigate();
   // Read-only while "Optimize Schedule" runs (design doc §6.11).
   const { locked } = useOptimization();
@@ -180,7 +180,7 @@ export function TaskDetailPage(): JSX.Element {
             <li key={`${entry.status}-${entry.at}-${index}`}>
               <span style={{ color: STATUS_COLOR[entry.status] }}>{formatStatus(entry.status)}</span>
               {' - '}
-              {formatDateTime(entry.at, dateFormat)}
+              {formatDateTime(entry.at, dateFormat, timeFormat)}
             </li>
           ))}
         </ul>

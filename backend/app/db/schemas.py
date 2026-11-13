@@ -40,6 +40,7 @@ BudgetEnforcement = Literal["strict", "soft"]
 DayName = Literal["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 # How dates are shown (design doc 3.7, Rev 15) - display only, like `first_day_of_week`.
 DateFormat = Literal["DD/MM/YYYY", "MM/DD/YYYY", "YYYY-MM-DD"]
+TimeFormat = Literal["24h", "12h"]
 
 
 class _Frozen(BaseModel):
@@ -186,6 +187,7 @@ class UserSettings(_Frozen):
     budget_enforcement: BudgetEnforcement = "soft"
     first_day_of_week: DayName = "monday"
     date_format: DateFormat = "DD/MM/YYYY"
+    time_format: TimeFormat = "24h"
 
 
 class ExternalEvent(_Frozen):

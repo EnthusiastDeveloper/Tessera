@@ -113,12 +113,14 @@ accent glow, only for "this is happening now" (the now-indicator, an in-progress
 
 ## Dates
 
-Every date shown goes through `src/lib/dates.ts` with the user's `date_format` (design
-doc 3.7, Rev 15; read it with `useDisplayPreferences()`), never `toLocaleString()` - the
-browser's locale would otherwise pick the day/month order. Day first is the default.
-Drop the year where it goes without saying (`formatWeekdayDayMonth`: "Fri 13/11"). Times
-keep the device's own clock (`formatTime`). Native date pickers can't be formatted and
-follow the browser's language.
+Every date and time shown goes through `src/lib/dates.ts` with the user's `date_format`
+and `time_format` (design doc 3.7, Rev 15; read them with `useDisplayPreferences()`),
+never `toLocaleString()` - the browser's locale would otherwise pick the day/month order
+and the clock. Day first and a 24-hour clock are the defaults. Drop the year where it goes
+without saying (`formatWeekdayDayMonth`: "Fri 13/11"). FullCalendar's own labels take the
+clock through `slotLabelFormat`/`eventTimeFormat` (TimelinePage). Native date pickers
+can't be formatted and follow the browser's language - they get replaced in the task-form
+redesign.
 
 ## Accessibility baseline
 
