@@ -53,14 +53,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     with session_scope() as db:
         apply_reset_admin_password_if_needed(db, reset_value=settings.reset_admin_password)
-        if UserRepository(db).count() == 0:
+        before_setup = UserRepository(db).count() == 0
+        if before_setup:
             token = setup_token_store.issue()
             logger.warning("No account exists yet. Setup token (use it at POST /api/v1/auth/setup): %s", token)
 
         default_timezone = default_timezone_from_env(settings.tz)
         if settings.tz and default_timezone == "UTC" and settings.tz != "UTC":
             logger.warning("TZ=%s is not a valid IANA timezone name - falling back to UTC.", settings.tz)
-        get_or_create_default(db, default_timezone=default_timezone)
+        get_or_create_default(db, default_timezone=default_timezone, before_setup=before_setup)
 
     # IRR-2 H14: refuse to start a second scheduler against the same database - it would
     # fire every job twice. Taken before anything else touches the job store.
