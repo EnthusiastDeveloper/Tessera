@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach, type Mock } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
@@ -14,8 +14,8 @@ vi.mock('../../auth/AuthContext', async () => {
 const mockedUseAuth = vi.mocked(AuthContextModule.useAuth);
 const VALID_PASSWORD = 'correcthorsebatterystaple';
 
-function completeSetupMock(): ReturnType<typeof vi.fn<[string, string], Promise<void>>> {
-  return vi.fn<[string, string], Promise<void>>();
+function completeSetupMock(): Mock<(token: string, password: string) => Promise<void>> {
+  return vi.fn<(token: string, password: string) => Promise<void>>();
 }
 
 function renderScreen(completeSetup: (token: string, password: string) => Promise<void>): void {

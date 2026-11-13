@@ -11,6 +11,7 @@ htmlcov/
 # Node
 node_modules/
 dist/
+*.tsbuildinfo
 
 # Playwright
 test-results/
