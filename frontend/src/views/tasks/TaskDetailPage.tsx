@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ApiError, toApiError } from '../../api/client';
+import { useDisplayPreferences } from '../../display/DisplayPreferences';
+import { formatDateTime } from '../../lib/dates';
 import { useOptimization } from '../../optimization/OptimizationContext';
 import {
   completeInstance,
@@ -64,6 +66,7 @@ function formatStatus(status: TaskInstanceStatus): string {
  */
 export function TaskDetailPage(): JSX.Element {
   const { instanceId } = useParams<{ instanceId: string }>();
+  const { dateFormat, timeFormat } = useDisplayPreferences();
   const navigate = useNavigate();
   // Read-only while "Optimize Schedule" runs (design doc §6.11).
   const { locked } = useOptimization();
@@ -177,7 +180,7 @@ export function TaskDetailPage(): JSX.Element {
             <li key={`${entry.status}-${entry.at}-${index}`}>
               <span style={{ color: STATUS_COLOR[entry.status] }}>{formatStatus(entry.status)}</span>
               {' - '}
-              {new Date(entry.at).toLocaleString()}
+              {formatDateTime(entry.at, dateFormat, timeFormat)}
             </li>
           ))}
         </ul>

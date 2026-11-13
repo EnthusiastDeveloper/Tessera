@@ -54,13 +54,18 @@ describe('buildRealEvent', () => {
     const event = buildRealEvent(BASE_INSTANCE);
     expect(event).not.toBeNull();
     expect(event?.extendedProps).toEqual({ kind: 'real', instanceId: 'instance-1' });
-    expect(event?.classNames).toEqual(['fc-event-real']);
+    expect(event?.classNames).toEqual(['fc-event-real', `fc-event-${BASE_INSTANCE.type}`]);
   });
 
   it('computes end from start + estimated_duration_minutes', () => {
     const event = buildRealEvent(BASE_INSTANCE);
     expect(event?.start).toBe('2026-03-02T18:00:00Z');
     expect(event?.end).toBe('2026-03-02T18:30:00.000Z');
+  });
+
+  it('tags the task type, so fixed and flexible work get their own colours', () => {
+    expect(buildRealEvent({ ...BASE_INSTANCE, type: 'fixed' })?.classNames).toContain('fc-event-fixed');
+    expect(buildRealEvent({ ...BASE_INSTANCE, type: 'flexible' })?.classNames).toContain('fc-event-flexible');
   });
 
   it('returns null when scheduled_time is missing (defensive)', () => {
@@ -79,7 +84,7 @@ describe('buildRealEvent - which instances appear (§8.1, Rev 10)', () => {
     const waiting: TaskInstance = { ...BASE_INSTANCE, id: 'fix-1', name: 'Replace battery', type: 'fixed', status: 'blocked', dependencies: ['dep-1'] };
     const event = buildRealEvent(waiting, new Map([['dep-1', 'Buy battery']]));
     expect(event?.title).toBe('Replace battery (waiting on Buy battery)');
-    expect(event?.classNames).toEqual(['fc-event-real', 'fc-event-waiting']);
+    expect(event?.classNames).toEqual(['fc-event-real', 'fc-event-fixed', 'fc-event-waiting']);
     expect(event?.extendedProps).toEqual({ kind: 'real', instanceId: 'fix-1' });
   });
 

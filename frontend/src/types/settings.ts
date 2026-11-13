@@ -3,6 +3,7 @@
 // `blackout_dates` need; the full Settings screen (Stage 9f, `src/views/settings/`)
 // reads and writes every other field here too.
 
+import type { DateFormat, TimeFormat } from '../lib/dates';
 import type { DayName, DayWindows } from './task';
 
 export interface BlackoutDate {
@@ -21,6 +22,10 @@ export interface UserSettings {
   daily_time_budget_minutes: Partial<Record<DayName, number | null>>;
   budget_enforcement: BudgetEnforcement;
   first_day_of_week: DayName;
+  /** Display only (design doc 3.7, Rev 15). */
+  date_format: DateFormat;
+  /** Display only (design doc 3.7, Rev 15). */
+  time_format: TimeFormat;
 }
 
 /** `GET /settings/schedule-repair` (design doc §6.10, Rev 11) - progress of the latest

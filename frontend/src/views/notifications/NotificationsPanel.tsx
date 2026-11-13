@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ApiError, toApiError } from '../../api/client';
 import { dismissNotification, listNotifications } from '../../api/notifications';
+import { useDisplayPreferences } from '../../display/DisplayPreferences';
+import { formatDateTime } from '../../lib/dates';
 import type { Notification, NotificationType } from '../../types/notification';
 
 type LoadState = 'loading' | 'error' | 'ready';
@@ -50,6 +52,7 @@ interface Row {
  * up-to-date view without acting on anything (e.g. after leaving the tab open a while).
  */
 export function NotificationsPanel(): JSX.Element {
+  const { dateFormat, timeFormat } = useDisplayPreferences();
   const [state, setState] = useState<LoadState>('loading');
   const [rows, setRows] = useState<Row[]>([]);
   const [error, setError] = useState<ApiError | null>(null);
@@ -143,7 +146,7 @@ export function NotificationsPanel(): JSX.Element {
                 <strong>{TYPE_LABELS[row.notification.type]}</strong>
                 <p style={{ margin: 'var(--space-1) 0' }}>{row.notification.message}</p>
                 <p style={{ margin: 0, color: 'var(--color-text-muted)', fontSize: 'var(--font-size-xs)' }}>
-                  {new Date(row.notification.created_at).toLocaleString()}
+                  {formatDateTime(row.notification.created_at, dateFormat, timeFormat)}
                 </p>
                 <Link to={`/tasks/${row.notification.related_instance_id}`}>View task</Link>
               </div>

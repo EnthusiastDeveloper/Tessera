@@ -14,6 +14,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base, generate_id
 
 _DAY_NAMES = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+_DATE_FORMATS = ("DD/MM/YYYY", "MM/DD/YYYY", "YYYY-MM-DD")
+_TIME_FORMATS = ("24h", "12h")
 
 
 class UserSettingsORM(Base):
@@ -39,5 +41,12 @@ class UserSettingsORM(Base):
         Enum("strict", "soft", name="budget_enforcement", create_constraint=True), nullable=False, default="soft"
     )
     first_day_of_week: Mapped[str] = mapped_column(
-        Enum(*_DAY_NAMES, name="first_day_of_week", create_constraint=True), nullable=False, default="monday"
+        Enum(*_DAY_NAMES, name="first_day_of_week", create_constraint=True), nullable=False, default="sunday"
+    )
+    # Display only (design doc 3.7, Rev 15): how the client writes dates and times.
+    date_format: Mapped[str] = mapped_column(
+        Enum(*_DATE_FORMATS, name="date_format", create_constraint=True), nullable=False, default="DD/MM/YYYY"
+    )
+    time_format: Mapped[str] = mapped_column(
+        Enum(*_TIME_FORMATS, name="time_format", create_constraint=True), nullable=False, default="24h"
     )

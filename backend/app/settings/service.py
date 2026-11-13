@@ -30,7 +30,7 @@ DAY_NAMES: tuple[DayName, ...] = (
 
 # Not specified in design doc §3.7 or architecture-plan for a freshly-created row - the
 # only explicitly stated defaults are timezone (from TZ), budget_enforcement ("soft") and
-# first_day_of_week ("monday"). active_hours confirmed with the user: every day open
+# first_day_of_week ("sunday", Rev 15). active_hours confirmed with the user: every day open
 # 09:00-17:00, so scheduling works out of the box rather than silently placing nothing
 # until the user visits Settings (a per-day `null` means *excluded*, not unrestricted -
 # see §3.2/§3.7 - so "every day null" would be the opposite of a usable default).
@@ -62,7 +62,9 @@ def get_or_create_default(db: Session, *, default_timezone: str) -> UserSettings
             blackout_dates=(),
             daily_time_budget_minutes=dict(DEFAULT_DAILY_TIME_BUDGET),
             budget_enforcement="soft",
-            first_day_of_week="monday",
+            first_day_of_week="sunday",
+            date_format="DD/MM/YYYY",
+            time_format="24h",
         )
     )
 
@@ -114,6 +116,12 @@ def update_settings(db: Session, jobs: JobScheduler, *, patch: dict[str, Any]) -
 
     if "first_day_of_week" in patch:
         updates["first_day_of_week"] = patch["first_day_of_week"]
+
+    if "date_format" in patch:
+        updates["date_format"] = patch["date_format"]
+
+    if "time_format" in patch:
+        updates["time_format"] = patch["time_format"]
 
     saved = repo.update(current.model_copy(update=updates))
     if _PLACEMENT_RULES & patch.keys():

@@ -18,7 +18,9 @@ class TestGetOrCreateDefault:
         created = service.get_or_create_default(db_session, default_timezone="America/Chicago")
         assert created.timezone == "America/Chicago"
         assert created.budget_enforcement == "soft"
-        assert created.first_day_of_week == "monday"
+        assert created.first_day_of_week == "sunday"
+        assert created.date_format == "DD/MM/YYYY"
+        assert created.time_format == "24h"
         assert created.blackout_dates == ()
         assert created.active_hours == service.DEFAULT_ACTIVE_HOURS
         assert created.daily_time_budget_minutes == service.DEFAULT_DAILY_TIME_BUDGET
@@ -35,7 +37,7 @@ class TestUpdateSettings:
         updated = service.update_settings(db_session, NoOpJobScheduler(), patch={"timezone": "Asia/Tokyo"})
         assert updated.timezone == "Asia/Tokyo"
         assert updated.budget_enforcement == "soft"
-        assert updated.first_day_of_week == "monday"
+        assert updated.first_day_of_week == "sunday"
         assert updated.active_hours == service.DEFAULT_ACTIVE_HOURS
 
     def test_rejects_invalid_timezone(self, db_session: Session) -> None:

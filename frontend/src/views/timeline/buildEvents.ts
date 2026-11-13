@@ -48,7 +48,8 @@ export function buildRealEvent(instance: TaskInstance, namesById: ReadonlyMap<st
     title: waiting ? `${instance.name} (waiting on ${waitingOn})` : instance.name,
     start: instance.scheduled_time,
     end: addMinutes(instance.scheduled_time, instance.estimated_duration_minutes),
-    classNames: waiting ? ['fc-event-real', 'fc-event-waiting'] : ['fc-event-real'],
+    // `fc-event-fixed`/`-flexible` give the two task types their own colours (DESIGN.md).
+    classNames: ['fc-event-real', `fc-event-${instance.type}`, ...(waiting ? ['fc-event-waiting'] : [])],
     extendedProps,
   };
 }

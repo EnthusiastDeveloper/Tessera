@@ -1,12 +1,12 @@
 import type { ReactNode } from 'react';
 import type { DayName } from '../types/task';
-import { DAY_LABELS, DAY_ORDER } from '../lib/days';
+import { useDisplayPreferences } from '../display/DisplayPreferences';
+import { DAY_LABELS, daysOfWeekFrom } from '../lib/days';
 
 interface DayOfWeekRowsProps {
   legend: string;
   hint?: string;
-  /** One row per day of week, in canonical Monday-first order (§3.7's own field order) -
-   * the caller supplies only the per-day control, this component owns the label/layout
+  /** One row per day of week, starting on the user's `first_day_of_week` (§3.7) - the caller supplies only the per-day control, this component owns the label/layout
    * repetition. Settings §8.1 screen 6 asks for this pattern twice (active-hours,
    * daily-budget); `ActiveHoursOverrideInput` (task form, §3.2) is a close cousin but a
    * genuinely different shape (partial map with an "inherit" state vs. these fields'
@@ -17,13 +17,14 @@ interface DayOfWeekRowsProps {
 }
 
 export function DayOfWeekRows({ legend, hint, renderControl }: DayOfWeekRowsProps): JSX.Element {
+  const { firstDayOfWeek } = useDisplayPreferences();
   return (
     <fieldset className="field">
       <legend>{legend}</legend>
       {hint && (
         <p style={{ color: 'var(--color-text-muted)', fontSize: 'var(--font-size-sm)' }}>{hint}</p>
       )}
-      {DAY_ORDER.map((day) => (
+      {daysOfWeekFrom(firstDayOfWeek).map((day) => (
         <div
           key={day}
           style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}

@@ -3,10 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
-import type { EventClickArg } from '@fullcalendar/core';
+import type { DayHeaderContentArg, EventClickArg, FormatterInput } from '@fullcalendar/core';
 import { ApiError, toApiError } from '../../api/client';
 import { getSettings } from '../../api/settings';
 import { TimezoneNotice } from '../../components/TimezoneNotice';
+import { useDisplayPreferences } from '../../display/DisplayPreferences';
+import { formatDayMonth, formatWeekday, type DateFormat, type TimeFormat } from '../../lib/dates';
 import { listExternalEvents } from '../../api/externalEvents';
 import { listInstances } from '../../api/taskInstances';
 import { listProjections } from '../../api/taskTemplates';
@@ -14,10 +16,46 @@ import { OptimizeControls } from '../../optimization/OptimizeControls';
 import { useOptimization } from '../../optimization/OptimizationContext';
 import { buildCalendarEvents, type TimelineExtendedProps } from './buildEvents';
 import type { BlackoutDate } from '../../types/settings';
-import type { TaskInstance } from '../../types/task';
+import type { DayName, TaskInstance } from '../../types/task';
 import type { ExternalEvent, VirtualOccurrence } from '../../types/timeline';
 
 type LoadState = 'loading' | 'error' | 'ready';
+
+/** FullCalendar's `firstDay` numbering (Sunday = 0) for the `first_day_of_week` setting. */
+const FIRST_DAY_INDEX: Record<DayName, number> = {
+  sunday: 0,
+  monday: 1,
+  tuesday: 2,
+  wednesday: 3,
+  thursday: 4,
+  friday: 5,
+  saturday: 6,
+};
+
+/** FullCalendar's own time labels (the hour axis, an event's time range) on the user's
+ * clock: "17:00" / "17:30 - 18:30" on 24 hours, FullCalendar's "5pm" / "5:30 - 6:30" on 12. */
+const SLOT_LABEL_FORMAT: Record<TimeFormat, FormatterInput> = {
+  '24h': { hour: '2-digit', minute: '2-digit', hour12: false },
+  '12h': { hour: 'numeric', meridiem: 'short' },
+};
+const EVENT_TIME_FORMAT: Record<TimeFormat, FormatterInput> = {
+  '24h': { hour: '2-digit', minute: '2-digit', hour12: false },
+  '12h': { hour: 'numeric', minute: '2-digit', meridiem: 'short' },
+};
+
+/** A time-grid column header: weekday plus day and month in the user's date format
+ * ("Fri 13/11"). On a phone the CSS swaps the date for the bare day number, stacked under
+ * the weekday - the month is already in the toolbar title, and seven "13/11"s don't fit.
+ * The month grid keeps FullCalendar's plain weekday names. */
+function dayHeader(arg: DayHeaderContentArg, dateFormat: DateFormat): JSX.Element | string {
+  if (arg.view.type === 'dayGridMonth') return arg.text;
+  return (
+    <span className="fc-day-head">
+      <span>{formatWeekday(arg.date)}</span> <span className="fc-day-head__date">{formatDayMonth(arg.date, dateFormat)}</span>
+      <span className="fc-day-head__day">{arg.date.getDate()}</span>
+    </span>
+  );
+}
 
 /** Design doc §8.1 screen 2 / §9.2: calendar-style view of real `scheduled` instances
  * (and waiting fixed ones, drawn distinctly - Rev 10),
@@ -42,6 +80,7 @@ export function TimelinePage(): JSX.Element {
   const navigate = useNavigate();
   // Reload when an optimization applied or undone changed the schedule under the page.
   const { scheduleRevision } = useOptimization();
+  const { dateFormat, timeFormat, firstDayOfWeek } = useDisplayPreferences();
   const [state, setState] = useState<LoadState>('loading');
   const [error, setError] = useState<ApiError | null>(null);
   const [instances, setInstances] = useState<TaskInstance[]>([]);
@@ -108,6 +147,10 @@ export function TimelinePage(): JSX.Element {
           headerToolbar={{ left: 'prev,next today', center: 'title', right: 'timeGridWeek,timeGridDay,dayGridMonth' }}
           events={events}
           eventClick={handleEventClick}
+          firstDay={FIRST_DAY_INDEX[firstDayOfWeek]}
+          dayHeaderContent={(arg) => dayHeader(arg, dateFormat)}
+          slotLabelFormat={SLOT_LABEL_FORMAT[timeFormat]}
+          eventTimeFormat={EVENT_TIME_FORMAT[timeFormat]}
           height="auto"
           nowIndicator
         />

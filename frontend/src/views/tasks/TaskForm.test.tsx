@@ -6,6 +6,7 @@ import * as taskTemplatesApi from '../../api/taskTemplates';
 import * as taskInstancesApi from '../../api/taskInstances';
 import { ApiError } from '../../api/client';
 import type { TaskInstance, TaskTemplate } from '../../types/task';
+import { formatWeekdayDayMonth } from '../../lib/dates';
 
 vi.mock('../../api/taskTemplates');
 vi.mock('../../api/taskInstances');
@@ -343,11 +344,7 @@ describe('TaskForm', () => {
           /1 upcoming occurrence has its own changes and won’t be updated/
         );
         expect(note.textContent).toContain(
-          new Date(wednesday.scheduled_time).toLocaleDateString(undefined, {
-            weekday: 'short',
-            day: 'numeric',
-            month: 'short',
-          })
+          formatWeekdayDayMonth(wednesday.scheduled_time, 'DD/MM/YYYY')
         );
         const checkbox = screen.getByLabelText(
           'Apply to all upcoming occurrences, including these'

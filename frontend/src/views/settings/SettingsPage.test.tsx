@@ -37,6 +37,8 @@ const BASE_SETTINGS: UserSettings = {
   },
   budget_enforcement: 'soft',
   first_day_of_week: 'monday',
+  date_format: 'DD/MM/YYYY',
+  time_format: '24h',
 };
 
 function renderAt(path: string, state?: unknown): void {

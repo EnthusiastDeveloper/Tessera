@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Tessera** is a self-hosted task scheduling application that auto-places flexible tasks into your calendar while respecting fixed commitments, deadlines, and priorities. It's a Python FastAPI backend + React frontend, single-user, containerized.
 
 ### Key References
-- **Product specification:** `docs/design-doc.md` (Revision 14) - this is the authoritative source for what the system *does*
+- **Product specification:** `docs/design-doc.md` (Revision 15) - this is the authoritative source for what the system *does*
 - **Implementation plan:** `docs/architecture-plan.md` (Revision 9) - defines how it's structured and built
 - **Findings register / decision log:** `docs/implementation-readiness-review-2.md` (IRR-2) - why Revisions 9 and 3 say what they say (Revision 10's through 13's decisions are recorded in design-doc Section 11); every finding in it - High, Medium and editorial - is now resolved
 - **Architecture enforcement:** `backend/pyproject.toml` has an `import-linter` configuration that blocks layering violations at CI
@@ -145,7 +145,8 @@ Consistent across all endpoints: HTTP status + machine-readable code + human mes
 - `blackout_dates`: [{start, end, label?}] - full-day exclusions
 - `daily_time_budget_minutes`: {day_name: number | null} - max flexible work per day in minutes, soft cap by default
 - `budget_enforcement`: "soft" | "strict" - whether to allow budget override as last resort
-- `first_day_of_week`: day name (display-only, doesn't affect algorithm)
+- `first_day_of_week`: day name, default `sunday` (display-only, doesn't affect algorithm; orders the Timeline week and every day-of-week list, via `daysOfWeekFrom` in `frontend/src/lib/days.ts`)
+- `date_format`: `DD/MM/YYYY` (default) | `MM/DD/YYYY` | `YYYY-MM-DD`; `time_format`: `24h` (default) | `12h` (both display-only, Rev 15) - the frontend writes every date and time through `frontend/src/lib/dates.ts`, never `toLocaleString()`
 
 ---
 

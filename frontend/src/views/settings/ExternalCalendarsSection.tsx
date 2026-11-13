@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { connect as connectProvider, disconnect as disconnectConnection, listConnections } from '../../api/calendarConnections';
 import { ApiError, toApiError } from '../../api/client';
+import { useDisplayPreferences } from '../../display/DisplayPreferences';
+import { formatDateTime, type DateFormat, type TimeFormat } from '../../lib/dates';
 import type { CalendarProvider, ExternalCalendarConnection } from '../../types/calendarConnection';
 
 type LoadState = 'loading' | 'error' | 'ready';
@@ -16,9 +18,9 @@ const PROVIDER_LABELS: Record<CalendarProvider, string> = {
   other: 'Other',
 };
 
-function formatLastSynced(lastSyncedAt: string | null | undefined): string {
+function formatLastSynced(lastSyncedAt: string | null | undefined, dateFormat: DateFormat, timeFormat: TimeFormat): string {
   if (!lastSyncedAt) return 'Never synced';
-  return `Last synced: ${new Date(lastSyncedAt).toLocaleString()}`;
+  return `Last synced: ${formatDateTime(lastSyncedAt, dateFormat, timeFormat)}`;
 }
 
 interface ExternalCalendarsSectionProps {
@@ -42,6 +44,7 @@ interface ExternalCalendarsSectionProps {
  * exposes rather than inventing a new PATCH endpoint this stage doesn't otherwise need.
  */
 export function ExternalCalendarsSection({ justConnectedProvider }: ExternalCalendarsSectionProps): JSX.Element {
+  const { dateFormat, timeFormat } = useDisplayPreferences();
   const [state, setState] = useState<LoadState>('loading');
   const [connections, setConnections] = useState<ExternalCalendarConnection[]>([]);
   const [error, setError] = useState<ApiError | null>(null);
@@ -135,7 +138,7 @@ export function ExternalCalendarsSection({ justConnectedProvider }: ExternalCale
                     <strong>{PROVIDER_LABELS[connection.provider]}</strong>
                     {!connection.enabled && <span style={{ color: 'var(--color-text-muted)' }}> (disabled)</span>}
                     <p style={{ margin: 'var(--space-1) 0 0', color: 'var(--color-text-muted)', fontSize: 'var(--font-size-sm)' }}>
-                      {formatLastSynced(connection.last_synced_at)} · Refresh interval:{' '}
+                      {formatLastSynced(connection.last_synced_at, dateFormat, timeFormat)} · Refresh interval:{' '}
                       {connection.refresh_interval_minutes} minutes (disconnect and reconnect to change)
                     </p>
                   </div>
