@@ -1,29 +1,8 @@
 import { useState } from 'react';
-import { deviceTimezone } from '../../lib/timezone';
+import { availableTimezones, deviceTimezone } from '../../lib/timezone';
 import { updateSettings } from '../../api/settings';
 import { ApiError } from '../../api/client';
 import type { UserSettings } from '../../types/settings';
-
-// `Intl.supportedValuesOf` (ES2022) isn't in this project's `tsconfig.json` `lib`
-// (ES2020, kept narrow deliberately elsewhere in this codebase) - declared locally
-// rather than widening `lib` for the whole app over one call.
-declare global {
-  // eslint-disable-next-line @typescript-eslint/no-namespace
-  namespace Intl {
-    function supportedValuesOf(key: string): string[];
-  }
-}
-
-/** IANA timezone names available in this runtime (`Intl.supportedValuesOf`, Node 18+ /
- * every evergreen browser) - the same source of truth the backend validates against
- * (`zoneinfo.ZoneInfo`, `app.settings.service._validate_timezone`), so every option this
- * select offers is guaranteed valid rather than a hand-maintained list that can drift. */
-function availableTimezones(): string[] {
-  if (typeof Intl.supportedValuesOf === 'function') {
-    return Intl.supportedValuesOf('timeZone');
-  }
-  return ['UTC'];
-}
 
 interface TimezoneSectionProps {
   settings: UserSettings;

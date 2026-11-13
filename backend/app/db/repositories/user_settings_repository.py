@@ -56,6 +56,7 @@ def _to_orm_kwargs(settings: UserSettings) -> dict[str, Any]:
         "first_day_of_week": settings.first_day_of_week,
         "date_format": settings.date_format,
         "time_format": settings.time_format,
+        "onboarding_completed": settings.onboarding_completed,
     }
 
 
@@ -70,4 +71,5 @@ def _to_domain(orm: UserSettingsORM) -> UserSettings:
         first_day_of_week=cast(DayName, orm.first_day_of_week),
         date_format=cast(DateFormat, orm.date_format),
         time_format=cast(TimeFormat, orm.time_format),
+        onboarding_completed=orm.onboarding_completed,
     )

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { getSettings } from '../../api/settings';
 import { ApiError, toApiError } from '../../api/client';
 import type { CalendarProvider } from '../../types/calendarConnection';
@@ -47,7 +47,13 @@ export function SettingsPage(): JSX.Element {
 
   return (
     <div>
-      <h2>Settings</h2>
+      <div className="flex flex-wrap items-baseline justify-between gap-3">
+        <h2>Settings</h2>
+        {/* Design doc 8.1 screen 6 (Rev 16): reopen the first-run guide with the current values. */}
+        <Link to="/welcome" state={{ restart: true }} className="text-sm">
+          Run the setup guide again
+        </Link>
+      </div>
 
       <AccountSection />
       <ExternalCalendarsSection justConnectedProvider={routeState?.calendarConnected ?? null} />

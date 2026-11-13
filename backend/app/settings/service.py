@@ -74,6 +74,7 @@ def get_or_create_default(db: Session, *, default_timezone: str, before_setup: b
             first_day_of_week="sunday",
             date_format="DD/MM/YYYY",
             time_format="24h",
+            onboarding_completed=False,
         )
     )
 
@@ -131,6 +132,9 @@ def update_settings(db: Session, jobs: JobScheduler, *, patch: dict[str, Any]) -
 
     if "time_format" in patch:
         updates["time_format"] = patch["time_format"]
+
+    if "onboarding_completed" in patch:
+        updates["onboarding_completed"] = patch["onboarding_completed"]
 
     saved = repo.update(current.model_copy(update=updates))
     if _PLACEMENT_RULES & patch.keys():

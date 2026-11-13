@@ -1,6 +1,8 @@
 # Tessera - Design Document (POC)
-### Revision 15
+### Revision 16
 
+> **Revision 16 adds a first-run setup guide (3.6, 3.7, 8.1).** After the account is created, the first sign-in opens a short guide instead of an empty Timeline: timezone, the week and date display, when Tessera may schedule work, and a daily budget, each prefilled and each skippable, ending with where to go next. Finishing or skipping it sets the new `onboarding_completed` setting, so it never opens on its own again; Settings can run it again. Nothing about scheduling changes.
+>
 > **Revision 15 adds `date_format` and `time_format` display settings (3.7, 8.1).** Every date the UI shows is written day first by default (`DD/MM/YYYY`), with month-first and ISO year-first as the alternatives, and every time on a 24-hour clock by default, with 12-hour as the alternative; like `first_day_of_week` both are display only and have no effect on scheduling. It also makes **Sunday** the default `first_day_of_week` (was Monday). Nothing else changes.
 >
 > **Revision 14 adds "Optimize Schedule" (Backlog 12.23, now Section 6.11).** One button re-places every flexible task in a single global pass in the background - the escape hatch for 6.2's accepted greedy corner-painting. The user stays in control: while it runs, schedule editing is paused (read-only) and the server refuses schedule-changing writes; if the new arrangement would take a task that is currently scheduled out of the schedule, or put one over its day's budget, nothing happens until the user approves it, as a whole; if it takes nothing away, it applies at once; either way the user sees a summary of every change, and Undo is offered for a short time while it is still safe. Section 11 records the decisions (items 23-29). Everything below about Revisions 9 to 13 still stands unless this revision says otherwise.
@@ -45,6 +47,7 @@ Full diffs are in git; IRR-2 (`docs/implementation-readiness-review-2.md`) holds
 | 13 | Active hours are a **list of windows per day**, and a window may run **overnight**; a blackout cuts at midnight and budgets count the calendar date (3.7, 6.2, 6.8, 6.10); Worked Examples Q and R |
 | 14 | **"Optimize Schedule" (6.11)** - a user-triggered, background, global re-placement of flexible work that pauses editing while it runs, needs the user's approval only when it would take something away, always shows a summary, and can be undone for a short time; Worked Examples S-V; Section 11 items 23-29; Backlog 12.28-12.30 |
 | 15 | `date_format` and `time_format` display settings (3.7, 8.1): day-first dates and a 24-hour clock by default; `first_day_of_week` defaults to Sunday |
+| 16 | First-run **setup guide** (8.1 screen 0a) and the `onboarding_completed` setting (3.7) |
 
 **Revision 9 changelog.** Eighteen IRR-2 findings, following stakeholder decisions taken 2026-08-05 to 2026-08-07. Revision 8's "locked" status meant "no unilateral edits"; it did not mean "verified correct". IRR-2 records what each finding was and why it mattered; this lists only what the specification now says.
 
@@ -368,6 +371,7 @@ interface User {
 - While **zero `User` rows exist**, the app serves a one-time setup screen (8.1) and exposes `POST /api/v1/auth/setup`. Once an account exists, that endpoint is permanently `410 Gone` - not merely unauthorised.
 - **Every other route refuses to serve while unconfigured** and directs to setup. An app serving task data before an account exists would be an unauthenticated app, which 14.2 forbids.
 - The zero-users check and the account insert happen in **one transaction**, backed by a uniqueness guarantee, so two concurrent setup requests cannot both succeed.
+- **(Rev 16)** The first sign-in after setup opens the setup guide (8.1 screen 0a).
 - `username` is fixed as `admin`. Single-user; a configurable username is a knob with no benefit.
 - Minimum password length **12 characters**, no composition rules, validated at the setup endpoint.
 
@@ -429,6 +433,9 @@ interface UserSettings {
 
   time_format: "24h" | "12h";  // (added Revision 15) display-only, the clock the UI writes
                                // times on. default: "24h"
+
+  onboarding_completed: boolean;  // (added Revision 16) the setup guide (8.1 screen 0a) has
+                                  // been finished or skipped. default: false
 }
 ```
 
@@ -451,6 +458,8 @@ Everything day-keyed is read by the **calendar date the time falls on**, not by 
 `first_day_of_week` affects **display only** - it controls the Timeline view's calendar layout (8.1) and the row order of the day-of-week settings below (`active_hours`, `daily_time_budget_minutes`, `blackout_dates`) and of a task's day-of-week controls (3.2's `active_hours_override`, a weekly recurrence's day). It has no effect on scheduling algorithm behavior: those fields are already keyed by day name rather than position-in-week, so the algorithm doesn't have a concept of "week" to reorder in the first place.
 
 **(Added Revision 15) `date_format` is display only too:** the order the UI writes a date in - day first (the default), month first, or ISO year first. Where the year is obvious (the Timeline's column headers, a date in the next few days) the year is dropped and the order kept ("Fri 13/11"); on a phone-width Timeline the column header shows only the day number, since the toolbar names the month. `time_format` picks the clock every displayed time is written on - 24-hour (the default, `17:30`) or 12-hour (`5:30 PM`) - including the Timeline's hour axis and event times. Dates and times on the wire are unaffected: the API always speaks ISO 8601.
+
+**(Added Revision 16) `onboarding_completed`** records that the setup guide (8.1 screen 0a) has been finished or skipped. It lives on the server, not in the browser, so signing in from a second device doesn't open the guide again. Running the guide again from Settings doesn't clear it. It has no effect on scheduling.
 
 A per-day `null` in `active_hours` (not an empty list) means **that day is fully excluded**, and the same rule applies to `TaskTemplate.active_hours_override` (3.2) - one shape, one meaning. A template override **merges** over this map per day: days the override names use the override's value, days it does not name inherit the value here. To allow a task at any hour on a given day, give that day an explicit `00:00`–`23:59` window; there is no `null` that means "unrestricted". A template override replaces a named day's **whole list** (3.2).
 
@@ -1015,6 +1024,15 @@ WebUI only (Backlog 12.2 for IM bot).
 ### 8.1 Screens
 
 0. **First-run setup screen (added Rev 9)** - shown only while zero `User` rows exist (3.6). Takes the **setup token** printed in the container log, and sets the admin password (minimum 12 characters, confirmed twice). The screen must say where to find the token. Unreachable once an account exists; every other screen redirects here until one does.
+0a. **Setup guide (added Rev 16)** - opens instead of the Timeline on any sign-in while `onboarding_completed` (3.7) is false, so a new account starts with a schedule that fits its owner instead of the defaults and a trip through Settings. It is a short sequence of steps; each is **prefilled with the current value**, saved when the user continues, and can be skipped, which keeps the current value:
+   1. **Timezone** - the current setting (defaulted from container `TZ`, 14.1). When the device's timezone differs, the step names it and offers it in one click.
+   2. **Your week** - first day of the week, date format and time format (3.7), each with an example.
+   3. **When to schedule** - which days, and one set of hours for all of them, with presets ("09:00-17:00", "18:00-22:00"). Days not chosen are excluded (3.7). Different hours on different days, split days and overnight windows stay in Settings, and the step says so; when the current hours already differ by day, it says that saving here gives every chosen day the same hours.
+   4. **Daily budget** - no limit, or one cap for every day, and the enforcement choice ("meet the deadline" / "respect the budget", 6.2).
+   5. **Done** - where to go next: create a first task, add days off or connect a calendar (Settings), or the Timeline. Blackout dates and calendar connections are not steps: connecting a calendar leaves the app for the provider's sign-in, and both are optional.
+   - **Back** returns to the previous step. **Skip setup**, available on every step, ends the guide keeping what was already saved. Reaching Done or skipping sets `onboarding_completed`, and the guide never opens on its own again. Leaving the page mid-way does neither: the next sign-in reopens it, at the step reached on that device.
+   - Settings offers **Run the setup guide again**, which opens it with the current values.
+   - A save here is an ordinary settings save. Stricter hours or a strict budget may start a schedule repair (6.10), shown as it is from Settings.
 1. **Login screen** - username/password (see 3.6, 14.2).
 2. **Timeline / Task list view** - calendar-style view of `scheduled` instances and **(Rev 10) `blocked` fixed instances**, plus **display-only virtual/"ghost" projections of upcoming recurring occurrences (9.2, added Revision 6)**, external busy-blocks overlaid read-only and visually distinguished (post-filtering per Section 7), blackout dates visibly marked.
    - **(Rev 14) "Optimize Schedule" action** (6.11) in the Timeline's toolbar (the Backlog view, 5a, is not built yet and gets the same action when it is). **Its three states:** when pressing it would get more tasks scheduled it is **enabled and invites the press** - a hint beside it ("3 more tasks could be scheduled", "1 more task could be scheduled - needs your approval") and a 3px rainbow that travels round its border with a soft glow of the same colors outside it - the one deliberately attention-seeking element in the app (the glow never tints the inside of the button; both are still, not moving, for users who ask for reduced motion; the button keeps exactly its size in every state, so nothing jumps); when it would gain nothing it is **grayed out but still visible**, so the feature stays discoverable, with "Nothing to improve right now" beside it and as its tooltip; when the answer is not known it is an ordinary enabled button. While it runs, a banner says "Optimizing your schedule…" (and, past the slow threshold, "This is taking longer than expected"), **New task** and every task action are disabled with a hint, and the Timeline is read-only. It ends in one of: **"No better arrangement"** (nothing changed); the **approval dialog** when the plan would lose or over-budget something - those first, each with its reason, then the other changes, *Apply* and *Cancel*, naming how long the plan stays valid; or the **summary**. After an applied run an **Undo optimization** button, counting down its 10 minutes, stays in the toolbar - there only while undoing is safe, gone when it is not - beside **What changed**, which reopens the summary (so both survive a reload). A declined plan leaves nothing to undo.
@@ -1035,6 +1053,7 @@ WebUI only (Backlog 12.2 for IM bot).
    - Scheduling window: global active-hours per day of week (**Rev 13: one or more windows per day, any of which may run overnight, with an "ends next day" note**), blackout dates list, daily time-budget cap per day of week, and a budget-enforcement toggle ("respect the budget" / "meet the deadline") controlling whether the last-resort override in 6.2 is allowed at all.
    - Timezone: select IANA timezone, defaulted from container `TZ`.
    - Display: first day of the week (for Timeline layout and Settings ordering), and the date and time formats (Rev 15).
+   - **(Rev 16)** Run the setup guide again (screen 0a).
    - **(Rev 11)** Saving a stricter scheduling window (active hours, blackout dates, a strict budget) may start a schedule repair (6.10); while it runs, a full-screen overlay reads "Fixing the calendar (*n*/*total*)…" and closes with a summary.
 
 ### 8.1a Duration entry (added Revision 9)

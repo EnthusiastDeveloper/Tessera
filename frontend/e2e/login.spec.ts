@@ -37,6 +37,17 @@ test.describe.serial('login against the real backend', () => {
     await page.getByLabel('Password').fill(VALID_PASSWORD);
     await page.getByRole('button', { name: 'Log in' }).click();
 
+    // The first sign-in opens the setup guide (design doc 8.1 screen 0a). Continuing
+    // through it keeps the defaults every later spec relies on (every day 09:00-17:00,
+    // no budget); reaching the end records it done, so later sign-ins open the Timeline.
+    await expect(page).toHaveURL(/\/welcome$/);
+    for (const heading of ['Where are you?', 'Your week', 'When can Tessera schedule work?', 'How much flexible work a day?']) {
+      await expect(page.getByRole('heading', { name: heading })).toBeVisible();
+      await page.getByRole('button', { name: 'Continue' }).click();
+    }
+    await expect(page.getByRole('heading', { name: "You're all set" })).toBeVisible();
+    await page.getByRole('button', { name: 'Go to the Timeline' }).click();
+
     await expect(page).toHaveURL('http://localhost:4173/');
     await expect(page.getByRole('heading', { name: 'Timeline' })).toBeVisible();
     await expect(page.getByText('admin')).toBeVisible();
