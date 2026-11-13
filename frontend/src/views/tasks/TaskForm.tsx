@@ -35,6 +35,7 @@ import type {
   TaskTemplate,
   TaskType,
 } from '../../types/task';
+import type { QuickTaskPrefill } from '../timeline/quickCreate';
 import { ActiveHoursOverrideInput } from './ActiveHoursOverrideInput';
 import { DependenciesPicker } from './DependenciesPicker';
 import { DurationListInput } from './DurationListInput';
@@ -120,6 +121,8 @@ interface TaskFormProps {
    * PATCH target and to seed its own `deadline` (an absolute instant, distinct from the
    * template's relative `deadline_offset_minutes` - see design doc §3.10's field table). */
   instance?: TaskInstance;
+  /** Create mode only: what the Timeline's quick create already has (design doc 8.1, Rev 18). */
+  prefill?: QuickTaskPrefill;
   onSaved: (result: { template?: TaskTemplate; instance?: TaskInstance }) => void;
   onCancel: () => void;
 }
@@ -128,6 +131,7 @@ export function TaskForm({
   mode,
   template,
   instance,
+  prefill,
   onSaved,
   onCancel,
 }: TaskFormProps): JSX.Element {
@@ -135,10 +139,10 @@ export function TaskForm({
   const isEdit = mode === 'edit';
   const isRecurring = isEdit ? template!.recurrence.pattern !== 'one_time' : false;
 
-  const [name, setName] = useState(template?.name ?? '');
-  const [description, setDescription] = useState(template?.description ?? '');
-  const [location, setLocation] = useState(template?.location ?? '');
-  const [type, setType] = useState<TaskType>(template?.type ?? 'flexible');
+  const [name, setName] = useState(template?.name ?? prefill?.name ?? '');
+  const [description, setDescription] = useState(template?.description ?? prefill?.description ?? '');
+  const [location, setLocation] = useState(template?.location ?? prefill?.location ?? '');
+  const [type, setType] = useState<TaskType>(template?.type ?? prefill?.type ?? 'flexible');
   const [pattern, setPattern] = useState<RecurrencePattern>(
     template?.recurrence.pattern ?? 'one_time'
   );
@@ -146,11 +150,11 @@ export function TaskForm({
   const [dayOfWeek, setDayOfWeek] = useState(template?.recurrence.day_of_week ?? 0);
   const [dayOfMonth, setDayOfMonth] = useState(template?.recurrence.day_of_month ?? 1);
   const [anchor, setAnchor] = useState<RecurrenceAnchor>(template?.recurrence.anchor ?? 'calendar');
-  const [startDate, setStartDate] = useState(todayLocalDate);
-  const [fixedTimeOfDay, setFixedTimeOfDay] = useState(template?.fixed_time_of_day ?? '09:00');
+  const [startDate, setStartDate] = useState(() => prefill?.startDate ?? todayLocalDate());
+  const [fixedTimeOfDay, setFixedTimeOfDay] = useState(template?.fixed_time_of_day ?? prefill?.fixedTimeOfDay ?? '09:00');
   const [priority, setPriority] = useState<Priority>(template?.priority ?? 'medium');
   const [estimatedDurationMinutes, setEstimatedDurationMinutes] = useState(
-    template?.estimated_duration_minutes ?? 30
+    template?.estimated_duration_minutes ?? prefill?.estimatedDurationMinutes ?? 30
   );
   const [deadlineOffsetMinutes, setDeadlineOffsetMinutes] = useState(
     template?.deadline_offset_minutes ?? 1440
@@ -167,7 +171,7 @@ export function TaskForm({
   const [activeHoursOverride, setActiveHoursOverride] = useState<ActiveHoursOverride | null>(
     template?.active_hours_override ?? null
   );
-  const [dependencies, setDependencies] = useState<string[]>(instance?.dependencies ?? []);
+  const [dependencies, setDependencies] = useState<string[]>(instance?.dependencies ?? prefill?.dependencies ?? []);
   // They belong to this occurrence whatever the edit scope (design doc 6.1, Rev 17).
   const dependenciesEditable = !isEdit || (instance !== undefined && DEPENDENCY_EDITABLE_STATUSES.includes(instance.status));
   const dependenciesChanged =

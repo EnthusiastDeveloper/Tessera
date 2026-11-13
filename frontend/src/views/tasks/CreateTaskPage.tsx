@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { getSettings } from '../../api/settings';
 import { TimezoneNotice } from '../../components/TimezoneNotice';
+import type { QuickTaskPrefill } from '../timeline/quickCreate';
 import { TaskForm } from './TaskForm';
 
 export function CreateTaskPage(): JSX.Element {
   const navigate = useNavigate();
+  // From the Timeline's "Open full form" (design doc 8.1 screen 3, Rev 18).
+  const prefill = (useLocation().state as { prefill?: QuickTaskPrefill } | null)?.prefill;
   const [settingsTimezone, setSettingsTimezone] = useState<string | null>(null);
 
   useEffect(() => {
@@ -26,7 +29,7 @@ export function CreateTaskPage(): JSX.Element {
     <div>
       <h2>New task</h2>
       <TimezoneNotice settingsTimezone={settingsTimezone} forTimeEntry />
-      <TaskForm mode="create" onSaved={() => navigate('/')} onCancel={() => navigate('/')} />
+      <TaskForm mode="create" prefill={prefill} onSaved={() => navigate('/')} onCancel={() => navigate('/')} />
     </div>
   );
 }
