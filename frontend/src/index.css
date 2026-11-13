@@ -1,204 +1,506 @@
+@import 'tailwindcss';
 @import './styles/tokens.css';
 
-:root {
-  color-scheme: light dark;
-  font-family:
-    system-ui,
-    -apple-system,
-    'Segoe UI',
-    Roboto,
-    Helvetica,
-    Arial,
-    sans-serif;
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+/* Element defaults on top of Tailwind's preflight (which strips margins, list markers,
+   heading sizes and form-control borders). Everything here is in `@layer base`, so a
+   Tailwind utility on an element always wins over it. See DESIGN.md. */
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    margin: 0;
+    min-width: 320px;
+    min-height: 100vh;
+    background-color: var(--color-bg);
+    color: var(--color-text);
+    font-size: var(--font-size-base);
+    line-height: var(--line-height-body);
+    font-variant-numeric: tabular-nums;
+  }
+
+  #root {
+    width: 100%;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    line-height: var(--line-height-heading);
+    margin: 0 0 var(--space-4);
+  }
+
+  h1 {
+    font-size: var(--font-size-2xl);
+  }
+
+  h2 {
+    font-size: var(--font-size-xl);
+  }
+
+  h3 {
+    font-size: var(--font-size-lg);
+  }
+
+  h4 {
+    font-size: var(--font-size-base);
+  }
+
+  p {
+    margin: 0 0 var(--space-3);
+  }
+
+  ul {
+    list-style: disc;
+    padding-left: var(--space-6);
+    margin: 0 0 var(--space-3);
+  }
+
+  a {
+    color: var(--color-accent);
+    text-underline-offset: 2px;
+  }
+
+  a:hover {
+    color: color-mix(in srgb, var(--color-accent) 70%, white);
+  }
+
+  dt {
+    font-size: var(--font-size-sm);
+    color: var(--color-text-muted);
+  }
+
+  dd {
+    margin: 0 0 var(--space-3);
+  }
+
+  fieldset {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: var(--space-3) var(--space-4) var(--space-4);
+    margin: 0 0 var(--space-4);
+  }
+
+  legend {
+    padding: 0 var(--space-1);
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--color-text-muted);
+  }
+
+  button {
+    font: inherit;
+    font-weight: 500;
+    border-radius: var(--radius);
+    border: 1px solid var(--color-border-strong);
+    padding: var(--space-2) var(--space-4);
+    background-color: var(--color-surface-raised);
+    color: var(--color-text);
+    cursor: pointer;
+    transition:
+      background-color 120ms,
+      border-color 120ms,
+      filter 120ms;
+  }
+
+  button:hover:not(:disabled) {
+    background-color: var(--color-border);
+  }
+
+  button:disabled,
+  button[aria-disabled='true'] {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  button.primary {
+    background-color: var(--color-accent);
+    border-color: var(--color-accent);
+    color: var(--color-accent-contrast);
+    font-weight: 600;
+  }
+
+  button.primary:hover:not(:disabled) {
+    background-color: var(--color-accent);
+    filter: brightness(1.08);
+  }
+
+  button.danger {
+    background-color: var(--color-danger);
+    border-color: var(--color-danger);
+    color: var(--color-accent-contrast);
+    font-weight: 600;
+  }
+
+  button.danger:hover:not(:disabled) {
+    background-color: var(--color-danger);
+    filter: brightness(1.08);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+
+  label {
+    display: block;
+    font-size: var(--font-size-sm);
+    font-weight: 500;
+    margin-bottom: var(--space-1);
+  }
+
+  input:not([type='checkbox'], [type='radio']),
+  select,
+  textarea {
+    font: inherit;
+    min-height: 40px;
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius);
+    border: 1px solid var(--color-border-strong);
+    background-color: var(--color-surface-raised);
+    color: var(--color-text);
+  }
+
+  input:not([type='checkbox'], [type='radio']):hover,
+  select:hover,
+  textarea:hover {
+    border-color: var(--color-text-muted);
+  }
+
+  input[type='text'],
+  input[type='password'] {
+    display: block;
+    width: 100%;
+  }
+
+  input::placeholder {
+    color: var(--color-text-muted);
+  }
+
+  input[type='checkbox'],
+  input[type='radio'] {
+    accent-color: var(--color-accent);
+    width: 16px;
+    height: 16px;
+    vertical-align: -3px;
+    margin-right: var(--space-2);
+  }
+
+  progress {
+    accent-color: var(--color-accent);
+  }
 }
 
-* {
-  box-sizing: border-box;
+@layer components {
+  .field {
+    margin-bottom: var(--space-4);
+  }
+
+  .field-error {
+    color: var(--color-danger);
+    font-size: var(--font-size-sm);
+    margin-top: var(--space-1);
+  }
+
+  /* Page-level feedback (DESIGN.md "Feedback"): one banner shape, three status colours.
+     Error: a failed action. Success: a confirmation (e.g. "password changed"). Warning: a
+     standing notice to read but not act on (e.g. the timezone mismatch, design doc 14.1). */
+  .banner-error,
+  .banner-success,
+  .banner-warning {
+    border-radius: var(--radius);
+    padding: var(--space-3) var(--space-4);
+    margin-bottom: var(--space-4);
+    border: 1px solid;
+  }
+
+  .banner-error {
+    background-color: color-mix(in srgb, var(--color-danger) 10%, var(--color-surface));
+    border-color: color-mix(in srgb, var(--color-danger) 50%, transparent);
+    color: var(--color-danger);
+  }
+
+  .banner-success {
+    background-color: color-mix(in srgb, var(--color-success) 10%, var(--color-surface));
+    border-color: color-mix(in srgb, var(--color-success) 45%, transparent);
+    color: var(--color-success);
+  }
+
+  .banner-warning {
+    background-color: color-mix(in srgb, var(--color-warning) 10%, var(--color-surface));
+    border-color: color-mix(in srgb, var(--color-warning) 45%, transparent);
+    color: var(--color-text);
+  }
+
+  /* Settings (§8.1 screen 6) - five independently-saved sections, one panel each. */
+  .settings-section {
+    background-color: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-6);
+    margin-bottom: var(--space-6);
+  }
+
+  .centered-screen {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-6);
+    padding: var(--space-6);
+  }
+
+  .auth-card {
+    width: 100%;
+    max-width: 380px;
+    background-color: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-card);
+    padding: var(--space-8);
+  }
+
+  /* App shell: one top bar (DESIGN.md "Layout"). */
+  .app-shell__bar {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-3) var(--space-4);
+    padding: var(--space-3) var(--space-6);
+    background-color: color-mix(in srgb, var(--color-bg) 88%, transparent);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  /* On a phone the bar wraps to several rows; pinned, it would eat the screen. */
+  @media (max-width: 640px) {
+    .app-shell__bar {
+      position: static;
+      padding: var(--space-3) var(--space-4);
+    }
+  }
+
+  .app-shell__nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+  }
+
+  .app-shell__nav a {
+    display: flex;
+    align-items: center;
+    min-height: 36px;
+    padding: 0 var(--space-3);
+    border-radius: var(--radius);
+    text-decoration: none;
+    color: var(--color-text-muted);
+    font-size: var(--font-size-sm);
+    font-weight: 500;
+  }
+
+  .app-shell__nav a:hover {
+    color: var(--color-text);
+    background-color: var(--color-surface);
+  }
+
+  .app-shell__nav a.active {
+    color: var(--color-text);
+    background-color: var(--color-surface-raised);
+    font-weight: 600;
+  }
+
+  .app-shell__content {
+    max-width: 1440px;
+    margin: 0 auto;
+    padding: var(--space-6);
+  }
+
+  /* Full-screen overlay (design doc §6.10: "Fixing the calendar (n/total)…"). */
+  .overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: rgb(0 0 0 / 60%);
+    backdrop-filter: blur(2px);
+  }
+
+  .overlay__card {
+    background-color: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-card);
+    padding: var(--space-6);
+    min-width: min(380px, 90vw);
+    max-width: 90vw;
+  }
+
+  .overlay__card progress {
+    width: 100%;
+  }
+
+  /* Radix dropdown menus (the account menu). Radix renders them in a portal at the end
+     of <body>, so they are styled here rather than next to their trigger. */
+  .menu {
+    min-width: 200px;
+    padding: var(--space-1);
+    background-color: var(--color-surface-raised);
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-card);
+    z-index: 50;
+  }
+
+  .menu__label {
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--font-size-xs);
+    color: var(--color-text-muted);
+  }
+
+  .menu__item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-height: 36px;
+    padding: 0 var(--space-3);
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-sm);
+    color: var(--color-text);
+    cursor: pointer;
+    outline: none;
+    user-select: none;
+  }
+
+  .menu__item[data-highlighted] {
+    background-color: var(--color-border);
+  }
+
+  .menu__separator {
+    height: 1px;
+    margin: var(--space-1) 0;
+    background-color: var(--color-border);
+  }
 }
 
-body {
-  margin: 0;
-  min-width: 320px;
-  min-height: 100vh;
-  background-color: var(--color-bg);
-  color: var(--color-text);
-  font-size: var(--font-size-base);
-  line-height: var(--line-height-body);
-}
+/* FullCalendar (Timeline, design doc §8.1 screen 2), themed through its own CSS
+   variables so its built-in toolbar, grid and events all take the Mosaic palette. */
+.fc {
+  --fc-border-color: var(--color-border);
+  --fc-page-bg-color: var(--color-surface);
+  --fc-neutral-bg-color: var(--color-surface-raised);
+  --fc-neutral-text-color: var(--color-text-muted);
+  --fc-today-bg-color: color-mix(in srgb, var(--color-accent) 3%, transparent);
+  --fc-now-indicator-color: var(--color-accent);
+  --fc-highlight-color: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  --fc-non-business-color: rgb(0 0 0 / 25%);
+  --fc-event-bg-color: var(--color-flexible);
+  --fc-event-border-color: var(--color-flexible);
+  --fc-event-text-color: var(--color-flexible-text);
+  --fc-button-bg-color: var(--color-surface-raised);
+  --fc-button-border-color: var(--color-border-strong);
+  --fc-button-text-color: var(--color-text);
+  --fc-button-hover-bg-color: var(--color-border);
+  --fc-button-hover-border-color: var(--color-border-strong);
+  --fc-button-active-bg-color: var(--color-accent);
+  --fc-button-active-border-color: var(--color-accent);
+  --fc-small-font-size: var(--font-size-xs);
 
-#root {
-  width: 100%;
-}
-
-h1,
-h2,
-h3 {
-  line-height: var(--line-height-heading);
-  margin: 0 0 var(--space-4);
-}
-
-a {
-  color: var(--color-accent);
-}
-
-button,
-input {
-  font-family: inherit;
-  font-size: var(--font-size-base);
-}
-
-button {
-  border-radius: var(--radius);
+  background-color: var(--color-surface);
   border: 1px solid var(--color-border);
-  padding: var(--space-2) var(--space-4);
-  background-color: var(--color-surface);
-  color: var(--color-text);
-  cursor: pointer;
+  border-radius: var(--radius-lg);
+  padding: var(--space-3);
 }
 
-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
+/* Taller rows than FullCalendar's default (12px per quarter hour), so a 15-minute task
+   (the grid's step, design doc 6.2) shows its name instead of a clipped sliver. */
+.fc .fc-timegrid-slot {
+  height: 2.5em;
 }
 
-button.primary {
-  background-color: var(--color-accent);
-  border-color: var(--color-accent);
-  color: var(--color-accent-contrast);
-}
-
-button.danger {
-  background-color: var(--color-danger);
-  border-color: var(--color-danger);
-  color: var(--color-accent-contrast);
-}
-
-:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-}
-
-label {
-  display: block;
-  font-size: var(--font-size-sm);
-  margin-bottom: var(--space-1);
-}
-
-input[type='text'],
-input[type='password'] {
-  display: block;
-  width: 100%;
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius);
-  border: 1px solid var(--color-border);
-  background-color: var(--color-surface);
-  color: var(--color-text);
-}
-
-.field {
-  margin-bottom: var(--space-4);
-}
-
-.field-error {
-  color: var(--color-danger);
-  font-size: var(--font-size-sm);
-  margin-top: var(--space-1);
-}
-
-.banner-error {
-  background-color: var(--color-surface);
-  border: 1px solid var(--color-danger);
-  color: var(--color-danger);
-  border-radius: var(--radius);
-  padding: var(--space-3) var(--space-4);
-  margin-bottom: var(--space-4);
-}
-
-/* Same shape as .banner-error, `--color-success` instead - a page-level positive
-   confirmation (e.g. "password changed"), not a field error. No toast library for the
-   POC (DESIGN.md's "two feedback mechanisms is enough surface area"). */
-.banner-success {
-  background-color: var(--color-surface);
-  border: 1px solid var(--color-success);
-  color: var(--color-success);
-  border-radius: var(--radius);
-  padding: var(--space-3) var(--space-4);
-  margin-bottom: var(--space-4);
-}
-
-/* Same shape again, `--color-warning`: a standing notice the user should read but
-   need not act on - e.g. the timezone mismatch notice (design doc §14.1, Rev 11). */
-.banner-warning {
-  background-color: var(--color-surface);
-  border: 1px solid var(--color-warning);
-  border-radius: var(--radius);
-  padding: var(--space-3) var(--space-4);
-  margin-bottom: var(--space-4);
-}
-
-/* Settings (§8.1 screen 6) - five independently-saved sections, one card each. */
-.settings-section {
-  background-color: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  padding: var(--space-6);
-  margin-bottom: var(--space-6);
-}
-
-.centered-screen {
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: var(--space-6);
-}
-
-.auth-card {
-  width: 100%;
-  max-width: 360px;
-  background-color: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-card);
-  padding: var(--space-8);
-}
-
-.app-shell__bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--space-3) var(--space-6);
-  border-bottom: 1px solid var(--color-border);
-}
-
-.app-shell__nav {
-  display: flex;
-  gap: var(--space-4);
-}
-
-.app-shell__nav a {
-  text-decoration: none;
-  color: var(--color-text-muted);
-  font-size: var(--font-size-sm);
-}
-
-.app-shell__nav a.active {
-  color: var(--color-text);
+.fc .fc-toolbar-title {
+  font-family: var(--font-display);
+  font-size: var(--font-size-xl);
   font-weight: 600;
 }
 
-.app-shell__content {
-  padding: var(--space-6);
+.fc .fc-button {
+  border-radius: var(--radius);
+  font-weight: 500;
+  text-transform: capitalize;
+  box-shadow: none;
 }
 
-/* Timeline (design doc §8.1 screen 2, §9.2, §7) - visual-distinction rules for the four
-   overlaid layers. Real `scheduled` instances use FullCalendar's own default event
-   styling (they're the one interactive, "normal" layer); everything below is a variant
-   away from that baseline. */
+.fc .fc-button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+
+.fc .fc-button-primary:not(:disabled).fc-button-active {
+  color: var(--color-accent-contrast);
+}
+
+.fc .fc-col-header-cell-cushion,
+.fc .fc-daygrid-day-number {
+  color: var(--color-text);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: var(--font-size-sm);
+}
+
+.fc .fc-timegrid-slot-label-cushion,
+.fc .fc-timegrid-axis-cushion {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.fc .fc-day-today .fc-col-header-cell-cushion {
+  color: var(--color-accent);
+}
+
+.fc .fc-timegrid-now-indicator-line {
+  border-width: 2px 0 0;
+  box-shadow: var(--shadow-glow);
+}
+
+.fc .fc-event {
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+}
+
+.fc .fc-event-main {
+  padding: 2px 4px;
+}
+
+/* Timeline (design doc §8.1 screen 2, §9.2, §7) - visual-distinction rules for the
+   overlaid layers. A real flexible instance takes FullCalendar's defaults above (navy);
+   everything below is a variant away from that baseline. */
+
+/* A fixed task is a commitment the user made: solid amber. */
+.fc .fc-event-fixed {
+  background-color: var(--color-fixed);
+  border-color: var(--color-fixed);
+}
+
+.fc .fc-event-fixed .fc-event-main {
+  color: var(--color-fixed-contrast);
+  font-weight: 600;
+}
 
 /* §9.2: virtual "ghost" projections are dimmed/hatched and never look like a real,
    clickable task. The diagonal hatch (not just opacity) is the class/style signal the
@@ -208,13 +510,17 @@ input[type='password'] {
   opacity: 0.55;
   background-image: repeating-linear-gradient(
     45deg,
-    rgba(255, 255, 255, 0.35),
-    rgba(255, 255, 255, 0.35) 4px,
+    rgb(255 255 255 / 12%),
+    rgb(255 255 255 / 12%) 4px,
     transparent 4px,
     transparent 8px
   );
   cursor: default;
   pointer-events: none;
+}
+
+.fc .fc-event-virtual {
+  border-style: dashed;
 }
 
 /* §9.2 closing paragraph: a completion-anchored ghost is "a best guess by construction,
@@ -225,64 +531,46 @@ input[type='password'] {
 }
 
 /* §8.1 (Rev 10): a fixed task waiting on a prerequisite still holds its time, so it is
-   drawn - but unlike a ready task: dashed border on a half-transparent fill. Uses the
-   accent colour rather than external events' default, so the two dashed styles differ. */
-.fc-event-waiting {
-  border: 2px dashed var(--color-accent);
-  background-color: color-mix(in srgb, var(--color-accent) 35%, transparent);
+   drawn - but unlike a ready task: dashed border on a half-transparent fill. */
+.fc .fc-event-waiting {
+  border: 2px dashed var(--color-fixed);
+  background-color: color-mix(in srgb, var(--color-fixed) 18%, transparent);
+}
+
+.fc .fc-event-waiting .fc-event-main {
   color: var(--color-text);
 }
 
-.fc-event-waiting .fc-event-main {
-  color: var(--color-text);
-}
-
-/* §7: external busy-blocks are read-only overlays, visually distinguished from a real
-   task by a dashed border rather than a solid fill. */
-.fc-event-external {
-  border-style: dashed;
-  opacity: 0.85;
+/* §7: external busy-blocks are read-only overlays: hatched gray with a dashed border, so
+   they never read as a task of the user's own. */
+.fc .fc-event-external {
+  background-color: var(--color-external);
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--color-external) 0 4px,
+    var(--color-external-stripe) 4px 8px
+  );
+  border: 1px dashed var(--color-border-strong);
   cursor: default;
   pointer-events: none;
 }
 
+.fc .fc-event-external .fc-event-main {
+  color: var(--color-external-text);
+}
+
 /* §7: all-day external events are the distinct display-only overlay category ("do not
    block flexible placement"), never rendered as a timed busy-block. */
-.fc-event-external--all-day {
-  background-color: var(--color-text-muted);
-  border-color: var(--color-text-muted);
+.fc .fc-event-external--all-day {
+  background-image: none;
+  background-color: var(--color-surface-raised);
 }
 
 /* §3.7/§8.1 screen 2: blackout ranges mark the day itself, not a foreground event. */
-.fc-event-blackout {
+.fc .fc-event-blackout {
   background-color: var(--color-danger);
-  opacity: 0.15;
+  opacity: 0.12;
 }
-
-/* Full-screen overlay (design doc §6.10: "Fixing the calendar (n/total)…"). */
-.overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background-color: rgb(0 0 0 / 45%);
-}
-
-.overlay__card {
-  background-color: var(--color-bg);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  padding: var(--space-4);
-  min-width: min(360px, 90vw);
-  max-width: 90vw;
-}
-
-.overlay__card progress {
-  width: 100%;
-}
-
 
 /* "Optimize Schedule" when pressing it would get more tasks scheduled (design doc §6.11, §8.1):
    a 3px rainbow border that travels round the button, with a soft glow of the same colors outside
@@ -323,18 +611,19 @@ input[type='password'] {
     #ff4d4d
   );
   filter: blur(8px);
-  opacity: 0.55;
+  opacity: 0.45;
   pointer-events: none;
   z-index: -1;
 }
 
 /* The border is thicker than a normal button's, so the padding gives the difference back and the
    button keeps its size in every state - nothing jumps when it starts or stops inviting. */
-button.optimize-button--attention {
+button.optimize-button--attention,
+button.optimize-button--attention:hover:not(:disabled) {
   border: 3px solid transparent;
   padding: calc(var(--space-2) - 2px) calc(var(--space-4) - 2px);
   background:
-    linear-gradient(var(--color-surface), var(--color-surface)) padding-box,
+    linear-gradient(var(--color-surface-raised), var(--color-surface-raised)) padding-box,
     conic-gradient(
         from var(--optimize-angle),
         #ff4d4d,

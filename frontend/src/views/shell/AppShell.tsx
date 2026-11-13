@@ -1,7 +1,9 @@
 import { useEffect } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthContext';
+import { MosaicMark } from '../../components/MosaicMark';
 import { ScheduleRepairOverlay } from '../../components/ScheduleRepairOverlay';
+import { AccountMenu } from './AccountMenu';
 import { OptimizationDialogs } from '../../optimization/OptimizationDialogs';
 import { OptimizationProvider, useOptimization } from '../../optimization/OptimizationContext';
 import { OptimizingBanner } from '../../optimization/OptimizingBanner';
@@ -46,36 +48,33 @@ function Shell(): JSX.Element {
   return (
     <div>
       <header className="app-shell__bar">
-        <strong>Tessera</strong>
-        <nav className="app-shell__nav">
+        <Link to="/" className="mr-2 flex items-center gap-2.5 text-text no-underline hover:text-text">
+          <MosaicMark />
+          <span className="font-display text-lg font-bold tracking-tight">tessera</span>
+        </Link>
+        <nav className="app-shell__nav" aria-label="Primary">
           {NAV_ITEMS.map((item) => (
             <NavLink key={item.to} to={item.to} end={item.end}>
               {item.label}
             </NavLink>
           ))}
         </nav>
-        <div>
+        <div className="flex-1" />
+        <div className="flex items-center gap-3">
           {/* Read-only while an optimization runs (design doc §6.11): not a link then, and a click
               says why instead of doing nothing. */}
-          <span style={{ marginRight: 'var(--space-4)' }}>
-            {locked ? (
-              <button type="button" className="primary" aria-disabled="true" onClick={showLockHint}>
+          {locked ? (
+            <button type="button" className="primary" aria-disabled="true" onClick={showLockHint}>
+              New task
+            </button>
+          ) : (
+            <Link to="/tasks/new">
+              <button type="button" className="primary">
                 New task
               </button>
-            ) : (
-              <Link to="/tasks/new">
-                <button type="button" className="primary">
-                  New task
-                </button>
-              </Link>
-            )}
-          </span>
-          <span style={{ marginRight: 'var(--space-4)', color: 'var(--color-text-muted)' }}>
-            {user?.username}
-          </span>
-          <button type="button" onClick={() => void logout()}>
-            Log out
-          </button>
+            </Link>
+          )}
+          <AccountMenu username={user?.username} onLogout={() => void logout()} />
         </div>
       </header>
       <main className="app-shell__content">

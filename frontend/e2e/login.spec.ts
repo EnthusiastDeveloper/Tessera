@@ -59,7 +59,9 @@ test.describe.serial('login against the real backend', () => {
     await page.getByRole('button', { name: 'Log in' }).click();
     await expect(page.getByRole('heading', { name: 'Timeline' })).toBeVisible();
 
-    await page.getByRole('button', { name: 'Log out' }).click();
+    // Log out lives in the account menu (the username button in the app bar).
+    await page.getByRole('button', { name: 'admin' }).click();
+    await page.getByRole('menuitem', { name: 'Log out' }).click();
     await expect(page).toHaveURL(/\/login$/);
   });
 });
