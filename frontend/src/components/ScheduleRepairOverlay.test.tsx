@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter } from 'react-router';
 import { ScheduleRepairOverlay } from './ScheduleRepairOverlay';
 import * as settingsApi from '../api/settings';
 import { announcePossibleScheduleRepair } from '../lib/scheduleRepairEvents';

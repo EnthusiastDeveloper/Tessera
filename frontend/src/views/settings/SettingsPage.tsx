@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router';
 import { getSettings } from '../../api/settings';
 import { ApiError, toApiError } from '../../api/client';
 import type { CalendarProvider } from '../../types/calendarConnection';

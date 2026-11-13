@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { ApiError, toApiError } from '../../api/client';
 import { dismissNotification, listNotifications } from '../../api/notifications';
 import { useDisplayPreferences } from '../../display/DisplayPreferences';

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { getScheduleRepair } from '../api/settings';
 import { onPossibleScheduleRepair } from '../lib/scheduleRepairEvents';
 import type { ScheduleRepair } from '../types/settings';

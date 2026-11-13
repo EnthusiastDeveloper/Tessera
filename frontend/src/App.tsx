@@ -1,4 +1,4 @@
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router';
 import { AuthProvider } from './auth/AuthContext';
 import { OnboardingGate } from './onboarding/OnboardingGate';
 import { SetupGuide } from './onboarding/SetupGuide';
@@ -16,7 +16,7 @@ import { TimelinePage } from './views/timeline/TimelinePage';
 
 function App(): JSX.Element {
   return (
-    <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+    <BrowserRouter>
       <AuthProvider>
         <Routes>
           <Route

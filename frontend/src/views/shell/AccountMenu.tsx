@@ -1,5 +1,5 @@
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 
 /** The app bar's account menu: who is signed in, Settings, Log out. Radix handles focus,
  * keyboard navigation (arrows, Esc) and the portal; `.menu*` in index.css styles it. */

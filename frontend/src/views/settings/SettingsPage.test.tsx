@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router';
 import { SettingsPage } from './SettingsPage';
 import * as settingsApi from '../../api/settings';
 import * as calendarConnectionsApi from '../../api/calendarConnections';

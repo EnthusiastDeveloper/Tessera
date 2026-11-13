@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router';
 import { getSettings } from '../../api/settings';
 import { getTemplate } from '../../api/taskTemplates';
 import { TimezoneNotice } from '../../components/TimezoneNotice';
