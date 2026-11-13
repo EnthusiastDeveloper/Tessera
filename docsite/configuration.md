@@ -86,7 +86,7 @@ Display-only, **Sunday by default**. It sets where the Timeline's week starts an
 
 Display-only - how every date and time in the app is written. **Day first (`DD/MM/YYYY`) by default**; month first (`MM/DD/YYYY`) and ISO year first (`YYYY-MM-DD`) are the alternatives, under **Settings → Display**. Where the year goes without saying - the Timeline's column headers, a date a few days away - it's dropped and the order kept (`Fri 13/11`). On a phone-width Timeline, column headers show just the day number under the weekday, since the toolbar already names the month. Times are on a **24-hour clock by default** (`17:30`), or 12-hour (`5:30 PM`) - that includes the Timeline's hour axis and the times on its events.
 
-Date *pickers* in forms are your browser's own control and follow the browser's language, not this setting.
+Date fields in forms (a task's start and due dates, blackout dates) follow it too: type the date in your format, or pick it from the calendar button beside the field. Pasting a year-first date like `2026-12-31` also works. Time fields, and the date-and-time fields on a task's detail page, are still your browser's own controls and follow its language.
 
 ### External calendar connections
 

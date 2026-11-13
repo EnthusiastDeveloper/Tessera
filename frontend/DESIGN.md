@@ -118,9 +118,13 @@ and `time_format` (design doc 3.7, Rev 15; read them with `useDisplayPreferences
 never `toLocaleString()` - the browser's locale would otherwise pick the day/month order
 and the clock. Day first and a 24-hour clock are the defaults. Drop the year where it goes
 without saying (`formatWeekdayDayMonth`: "Fri 13/11"). FullCalendar's own labels take the
-clock through `slotLabelFormat`/`eventTimeFormat` (TimelinePage). Native date pickers
-can't be formatted and follow the browser's language - they get replaced in the task-form
-redesign.
+clock through `slotLabelFormat`/`eventTimeFormat` (TimelinePage).
+
+Date fields use `src/components/DateInput.tsx`, never `<input type="date">`: the native
+field writes dates in the browser's language and can't be told otherwise. `DateInput` is a
+text field in the user's format (a pasted ISO date is accepted too) with a button that
+opens the browser's calendar. Time (`type="time"`) and date-and-time (`datetime-local`)
+fields are still native and follow the browser's clock until the task-form redesign.
 
 ## Accessibility baseline
 
