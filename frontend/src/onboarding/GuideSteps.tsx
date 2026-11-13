@@ -35,7 +35,7 @@ export interface StepProps {
 const DEFAULT_BUDGET_MINUTES = 4 * 60;
 
 const HOUR_PRESETS: ReadonlyArray<{ label: string; window: ActiveHoursWindow }> = [
-  { label: 'Working hours', window: { start: '09:00', end: '17:00' } },
+  { label: 'Work hours', window: { start: '09:00', end: '17:00' } },
   { label: 'Evenings', window: { start: '18:00', end: '22:00' } },
 ];
 
@@ -102,8 +102,8 @@ export function TimezoneStep({
   const device = deviceTimezone();
   return (
     <StepLayout
-      title="Where are you?"
-      intro="Tessera plans your days in this timezone. Moving later changes nothing already on your calendar."
+      title="Your timezone"
+      intro="Tessera uses it to work out when your days start and end."
       saving={saving}
       onSubmit={() => onContinue({ timezone })}
       onSkip={onSkip}
@@ -126,9 +126,9 @@ export function TimezoneStep({
       </div>
       {timezonesDiffer(device, timezone) && (
         <p className="flex flex-wrap items-center gap-3 text-sm text-text-muted">
-          This device is set to {device}.
+          Your browser says you&apos;re in {device}.
           <button type="button" onClick={() => setTimezone(device)}>
-            Use {device}
+            Switch to {device}
           </button>
         </p>
       )}
@@ -144,7 +144,7 @@ export function WeekStep({ settings, saving, onContinue, onSkip, onBack }: StepP
   return (
     <StepLayout
       title="Your week"
-      intro="How the calendar is laid out and how dates and times are written. This only changes what you see, never what gets scheduled."
+      intro="Where your week starts, and how dates and times are shown."
       saving={saving}
       onSubmit={() =>
         onContinue({
@@ -199,8 +199,8 @@ export function WeekStep({ settings, saving, onContinue, onSkip, onBack }: StepP
         </select>
       </div>
       <p className="text-sm text-text-muted" data-testid="guide-date-example">
-        Right now reads as {formatWeekdayDayMonth(now, dateFormat)}, {formatDate(now, dateFormat)}{' '}
-        {formatTime(now, timeFormat)}.
+        Right now that&apos;s {formatWeekdayDayMonth(now, dateFormat)},{' '}
+        {formatTime(now, timeFormat)}({formatDate(now, dateFormat)}).
       </p>
     </StepLayout>
   );
@@ -225,8 +225,8 @@ export function HoursStep({
 
   return (
     <StepLayout
-      title="When can Tessera schedule work?"
-      intro="Tessera has two kinds of task, and these hours are for one of them."
+      title="When should Tessera schedule tasks?"
+      intro="First, a quick word on the two kinds of task you can add."
       saving={saving}
       submitDisabled={days.length === 0}
       onSubmit={() => onContinue({ active_hours: guideHoursToActiveHours(days, hours) })}
@@ -242,16 +242,16 @@ export function HoursStep({
         <div>
           <dt className="font-semibold text-fixed">Fixed</dt>
           <dd className="m-0 text-text-muted">
-            Happens at a time you choose - a meeting, a class, a train. Tessera keeps it exactly
-            there, on any day and at any hour, and plans around it.
+            Has a set time, like a dentist appointment. It stays where you put it, even outside the
+            hours you pick below.
           </dd>
         </div>
         <div>
           <dt className="font-semibold text-flexible-strong">Flexible</dt>
           <dd className="m-0 text-text-muted">
-            Needs doing by a deadline, not at a set time - write a report, do the shopping. You say
-            how long it takes and by when; Tessera finds the time, only on the days and hours below,
-            and finds it a new place if something fixed takes its slot.
+            Has a length and a due date, like &quot;write the report, 2 hours, by Friday&quot;.
+            Tessera picks the time for you, on the days and hours below. If a fixed task later needs
+            that slot, Tessera moves the flexible one somewhere else.
           </dd>
         </div>
       </dl>
@@ -322,13 +322,12 @@ export function HoursStep({
 
       {!initial.uniform && (
         <div className="banner-warning" role="note">
-          Your days currently have different hours. Continuing gives every chosen day the hours
-          above; skip to keep them as they are.
+          Your days don&apos;t all have the same hours at the moment. If you continue, they will.
+          Press Skip to leave them alone.
         </div>
       )}
       <p className="text-sm text-text-muted">
-        Different hours on different days, a split day or an evening that runs past midnight can be
-        set in Settings.
+        Need different hours on different days? You can set that up in Settings later.
       </p>
     </StepLayout>
   );
@@ -349,8 +348,8 @@ export function BudgetStep({
 
   return (
     <StepLayout
-      title="How much flexible work a day?"
-      intro="A daily budget caps how much flexible work Tessera places on one day, so it doesn't fill every free minute. Fixed tasks don't count against it."
+      title="How much in one day?"
+      intro="You can cap how much flexible work Tessera puts on a single day. Fixed tasks aren't counted."
       saving={saving}
       submitDisabled={invalid}
       onSubmit={() =>
@@ -380,28 +379,26 @@ export function BudgetStep({
             checked={limited}
             onChange={() => setLimited(true)}
           />
-          Limit it
+          Set a limit
         </label>
         {limited && (
           <div className="mt-2 pl-6">
             <DurationInput
               id="guide-budget-amount"
-              label="Up to, per day"
+              label="At most, per day"
               initialMinutes={minutes}
               units={DAILY_BUDGET_UNITS}
               onChange={setMinutes}
               maxMinutes={MAX_DAILY_BUDGET_MINUTES}
             />
-            {invalid && (
-              <p className="field-error">Pick an amount between a minute and 24 hours.</p>
-            )}
+            {invalid && <p className="field-error">Enter a limit between 1 minute and 24 hours.</p>}
           </div>
         )}
       </fieldset>
 
       {limited && (
         <fieldset className="field">
-          <legend>When a deadline can't be met within the budget</legend>
+          <legend>If a task can&apos;t fit under the limit before it&apos;s due</legend>
           <label className="flex items-center gap-2">
             <input
               type="radio"
@@ -409,7 +406,7 @@ export function BudgetStep({
               checked={enforcement === 'soft'}
               onChange={() => setEnforcement('soft')}
             />
-            Meet the deadline - go over the budget as a last resort
+            Go over the limit so it&apos;s done on time
           </label>
           <label className="flex items-center gap-2">
             <input
@@ -418,15 +415,15 @@ export function BudgetStep({
               checked={enforcement === 'strict'}
               onChange={() => setEnforcement('strict')}
             />
-            Respect the budget - leave the task unscheduled instead
+            Stick to the limit and leave the task unscheduled
           </label>
         </fieldset>
       )}
 
       {!initial.uniform && (
         <div className="banner-warning" role="note">
-          Your days currently have different budgets. Continuing gives every day the same one; skip
-          to keep them as they are.
+          Your days have different limits at the moment. If you continue, they&apos;ll all get this
+          one. Press Skip to leave them alone.
         </div>
       )}
     </StepLayout>
@@ -436,20 +433,20 @@ export function BudgetStep({
 export function DoneStep({ onNavigate }: { onNavigate: (to: string) => void }): JSX.Element {
   return (
     <div>
-      <h1 className="mb-2 text-2xl">You&apos;re all set</h1>
+      <h1 className="mb-2 text-2xl">That&apos;s it</h1>
       <p className="mb-6 text-text-muted">
-        Add a task and Tessera finds it a place. You can change any of this later in Settings.
+        Your settings are saved, and you can change them any time in Settings.
       </p>
       <div className="flex flex-wrap gap-3">
         <button type="button" className="primary" onClick={() => onNavigate('/tasks/new')}>
-          Create your first task
+          Add your first task
         </button>
         <button type="button" onClick={() => onNavigate('/')}>
           Go to the Timeline
         </button>
       </div>
       <p className="mt-6 text-sm text-text-muted">
-        Taking days off, or want your other calendars to block time?{' '}
+        Days off and calendar connections (Google, Outlook) are in{' '}
         <a
           href="/settings"
           onClick={(event) => {
@@ -457,7 +454,7 @@ export function DoneStep({ onNavigate }: { onNavigate: (to: string) => void }): 
             onNavigate('/settings');
           }}
         >
-          Add days off or connect a calendar in Settings
+          Settings
         </a>
         .
       </p>

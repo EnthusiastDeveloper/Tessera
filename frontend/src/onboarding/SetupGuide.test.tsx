@@ -78,7 +78,7 @@ describe('SetupGuide', () => {
     const user = userEvent.setup();
     renderGuide();
 
-    expect(await screen.findByRole('heading', { name: 'Where are you?' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Your timezone' })).toBeInTheDocument();
     expect(screen.getByText('Step 1 of 4')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     await waitFor(() => expect(mockedSettingsApi.updateSettings).toHaveBeenLastCalledWith({ timezone: 'UTC' }));
@@ -95,7 +95,7 @@ describe('SetupGuide', () => {
       })
     );
 
-    expect(await screen.findByRole('heading', { name: 'When can Tessera schedule work?' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'When should Tessera schedule tasks?' })).toBeInTheDocument();
     // The first step that depends on it explains fixed vs flexible before asking.
     expect(screen.getByText('Fixed')).toBeInTheDocument();
     expect(screen.getByText('Flexible')).toBeInTheDocument();
@@ -111,9 +111,9 @@ describe('SetupGuide', () => {
     expect(hours?.saturday).toBeNull();
     expect(hours?.sunday).toBeNull();
 
-    expect(await screen.findByRole('heading', { name: 'How much flexible work a day?' })).toBeInTheDocument();
-    await user.click(screen.getByLabelText('Limit it'));
-    await user.click(screen.getByLabelText(/Respect the budget/));
+    expect(await screen.findByRole('heading', { name: 'How much in one day?' })).toBeInTheDocument();
+    await user.click(screen.getByLabelText('Set a limit'));
+    await user.click(screen.getByLabelText(/Stick to the limit/));
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     await waitFor(() => expect(mockedSettingsApi.updateSettings).toHaveBeenCalledTimes(4));
     const last = mockedSettingsApi.updateSettings.mock.calls[3][0];
@@ -121,27 +121,27 @@ describe('SetupGuide', () => {
     expect(last.budget_enforcement).toBe('strict');
     expect(last.daily_time_budget_minutes?.monday).toBe(240);
 
-    expect(await screen.findByRole('heading', { name: "You're all set" })).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Create your first task' }));
+    expect(await screen.findByRole('heading', { name: "That's it" })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Add your first task' }));
     expect(await screen.findByText('New task form')).toBeInTheDocument();
   });
 
   it('skips a step without saving it, and goes back', async () => {
     const user = userEvent.setup();
     renderGuide();
-    await screen.findByRole('heading', { name: 'Where are you?' });
+    await screen.findByRole('heading', { name: 'Your timezone' });
     await user.click(screen.getByRole('button', { name: 'Skip' }));
     expect(await screen.findByRole('heading', { name: 'Your week' })).toBeInTheDocument();
     expect(mockedSettingsApi.updateSettings).not.toHaveBeenCalled();
     await user.click(screen.getByRole('button', { name: 'Back' }));
-    expect(await screen.findByRole('heading', { name: 'Where are you?' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Your timezone' })).toBeInTheDocument();
   });
 
   it('won\'t save hours with no day chosen', async () => {
     const user = userEvent.setup();
     window.localStorage.setItem('tessera.setupGuide.step', '2');
     renderGuide();
-    await screen.findByRole('heading', { name: 'When can Tessera schedule work?' });
+    await screen.findByRole('heading', { name: 'When should Tessera schedule tasks?' });
     for (const day of ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']) {
       await user.click(screen.getByRole('button', { name: day }));
     }
@@ -152,7 +152,7 @@ describe('SetupGuide', () => {
   it('skipping the whole setup records it and opens the Timeline', async () => {
     const user = userEvent.setup();
     renderGuide();
-    await screen.findByRole('heading', { name: 'Where are you?' });
+    await screen.findByRole('heading', { name: 'Your timezone' });
     await user.click(screen.getByRole('button', { name: 'Skip setup' }));
     expect(await screen.findByText('The Timeline')).toBeInTheDocument();
     expect(mockedSettingsApi.updateSettings).toHaveBeenCalledWith({ onboarding_completed: true });
@@ -167,7 +167,7 @@ describe('SetupGuide', () => {
   it('starts from the top when run again from Settings', async () => {
     window.localStorage.setItem('tessera.setupGuide.step', '1');
     renderGuide({ restart: true });
-    expect(await screen.findByRole('heading', { name: 'Where are you?' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Your timezone' })).toBeInTheDocument();
   });
 
   it('warns that saving evens out hours that differ by day', async () => {
@@ -177,16 +177,16 @@ describe('SetupGuide', () => {
     });
     window.localStorage.setItem('tessera.setupGuide.step', '2');
     renderGuide();
-    expect(await screen.findByText(/Your days currently have different hours/)).toBeInTheDocument();
+    expect(await screen.findByText(/Your days don't all have the same hours/)).toBeInTheDocument();
   });
 
   it('shows the server\'s error and stays on the step', async () => {
     const user = userEvent.setup();
     mockedSettingsApi.updateSettings.mockRejectedValue(new Error('offline'));
     renderGuide();
-    await screen.findByRole('heading', { name: 'Where are you?' });
+    await screen.findByRole('heading', { name: 'Your timezone' });
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not reach the server.');
-    expect(screen.getByRole('heading', { name: 'Where are you?' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Your timezone' })).toBeInTheDocument();
   });
 });
