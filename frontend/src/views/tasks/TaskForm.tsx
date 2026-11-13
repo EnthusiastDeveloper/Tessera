@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
+import { DateInput } from '../../components/DateInput';
 import { DurationInput } from '../../components/DurationInput';
 import { useDisplayPreferences } from '../../display/DisplayPreferences';
 import { formatWeekdayDayMonth, type DateFormat } from '../../lib/dates';
@@ -389,12 +390,11 @@ export function TaskForm({
       {!isEdit && (
         <div className="field">
           <label htmlFor="task-start-date">Starts on</label>
-          <input
+          <DateInput
             id="task-start-date"
-            type="date"
             value={startDate}
             min={todayLocalDate()}
-            onChange={(event) => changeStartDate(event.target.value)}
+            onChange={changeStartDate}
             required
           />
           {error?.code === 'invalid_start_date' && <p className="field-error">{error.message}</p>}
@@ -538,13 +538,7 @@ export function TaskForm({
       {type === 'flexible' && offersDueDate && (
         <div className="field">
           <label htmlFor="task-due-date">Or pick a due date</label>
-          <input
-            id="task-due-date"
-            type="date"
-            min={startDate}
-            value={dueDate}
-            onChange={(event) => pickDueDate(event.target.value)}
-          />
+          <DateInput id="task-due-date" min={startDate} value={dueDate} onChange={pickDueDate} />
         </div>
       )}
       {type === 'flexible' && showTemplateOnlyFields && (

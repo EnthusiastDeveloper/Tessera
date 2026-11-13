@@ -1,5 +1,8 @@
 import { useState } from 'react';
+import { DateInput } from '../../components/DateInput';
 import { DayOfWeekRows } from '../../components/DayOfWeekRows';
+import { useDisplayPreferences } from '../../display/DisplayPreferences';
+import { formatIsoDate } from '../../lib/dates';
 import { WindowListInput } from '../../components/WindowListInput';
 import { DurationInput } from '../../components/DurationInput';
 import { updateSettings } from '../../api/settings';
@@ -37,6 +40,7 @@ export function SchedulingWindowSection({
   settings,
   onUpdated,
 }: SchedulingWindowSectionProps): JSX.Element {
+  const { dateFormat } = useDisplayPreferences();
   const [activeHours, setActiveHours] = useState<Record<DayName, DayWindows>>(
     settings.active_hours as Record<DayName, DayWindows>
   );
@@ -176,7 +180,8 @@ export function SchedulingWindowSection({
             }}
           >
             <span>
-              {blackout.start} – {blackout.end}
+              {formatIsoDate(blackout.start, dateFormat)} –{' '}
+              {formatIsoDate(blackout.end, dateFormat)}
               {blackout.label ? ` (${blackout.label})` : ''}
             </span>
             <button
@@ -198,20 +203,19 @@ export function SchedulingWindowSection({
         >
           <div>
             <label htmlFor="blackout-start">Start</label>
-            <input
+            <DateInput
               id="blackout-start"
-              type="date"
               value={newBlackoutStart}
-              onChange={(event) => setNewBlackoutStart(event.target.value)}
+              onChange={setNewBlackoutStart}
             />
           </div>
           <div>
             <label htmlFor="blackout-end">End</label>
-            <input
+            <DateInput
               id="blackout-end"
-              type="date"
               value={newBlackoutEnd}
-              onChange={(event) => setNewBlackoutEnd(event.target.value)}
+              min={newBlackoutStart || undefined}
+              onChange={setNewBlackoutEnd}
             />
           </div>
           <div>

@@ -45,7 +45,7 @@ describe('SchedulingWindowSection', () => {
 
   it('renders existing blackout dates and active-hours state', () => {
     render(<SchedulingWindowSection settings={BASE_SETTINGS} onUpdated={vi.fn()} />);
-    expect(screen.getByText(/2026-12-25.*Holiday/)).toBeInTheDocument();
+    expect(screen.getByText(/25\/12\/2026.*Holiday/)).toBeInTheDocument();
     expect(screen.getByLabelText('Saturday active hours')).toHaveValue('excluded');
     expect(screen.getByLabelText('Monday active hours')).toHaveValue('custom');
   });
@@ -127,7 +127,7 @@ describe('SchedulingWindowSection', () => {
     await userEvent.type(screen.getByLabelText(/label/i), 'Trip');
     await userEvent.click(screen.getByRole('button', { name: /add blackout date/i }));
 
-    expect(screen.getByText(/2026-07-01.*2026-07-04.*Trip/)).toBeInTheDocument();
+    expect(screen.getByText(/01\/07\/2026.*04\/07\/2026.*Trip/)).toBeInTheDocument();
   });
 
   it('rejects a blackout date whose end precedes its start, without adding it', async () => {
@@ -138,7 +138,8 @@ describe('SchedulingWindowSection', () => {
     await userEvent.click(screen.getByRole('button', { name: /add blackout date/i }));
 
     expect(screen.getByText(/end date must be on or after/i)).toBeInTheDocument();
-    expect(screen.queryByText(/2026-07-10/)).not.toBeInTheDocument();
+    // Not added: the one existing blackout date is still the only one.
+    expect(screen.queryByRole('button', { name: 'Remove blackout date 2' })).not.toBeInTheDocument();
   });
 
   it('removes a blackout date', async () => {

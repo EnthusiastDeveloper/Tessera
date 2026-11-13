@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { formatDate, formatDateTime, formatDayMonth, formatTime, formatWeekdayDayMonth } from './dates';
+import {
+  formatDate,
+  formatDateTime,
+  formatDayMonth,
+  formatIsoDate,
+  formatTime,
+  formatWeekdayDayMonth,
+  parseDateInput,
+} from './dates';
 
 // Local time, so the expectations hold in any test-runner timezone.
 const NOV_13 = new Date(2026, 10, 13, 8, 5);
@@ -54,5 +62,51 @@ describe('combined formats', () => {
 
   it('leads a short date with the weekday', () => {
     expect(formatWeekdayDayMonth(NOV_13, 'DD/MM/YYYY')).toMatch(/^\S+ 13\/11$/);
+  });
+});
+
+describe('formatIsoDate', () => {
+  it('writes an API date in each format, without shifting the day', () => {
+    expect(formatIsoDate('2026-03-02', 'DD/MM/YYYY')).toBe('02/03/2026');
+    expect(formatIsoDate('2026-03-02', 'MM/DD/YYYY')).toBe('03/02/2026');
+    expect(formatIsoDate('2026-03-02', 'YYYY-MM-DD')).toBe('2026-03-02');
+  });
+
+  it('leaves an empty date empty', () => {
+    expect(formatIsoDate('', 'DD/MM/YYYY')).toBe('');
+  });
+});
+
+describe('parseDateInput', () => {
+  it('reads day first in the default format', () => {
+    expect(parseDateInput('02/03/2026', 'DD/MM/YYYY')).toBe('2026-03-02');
+  });
+
+  it('reads month first when that is the format', () => {
+    expect(parseDateInput('03/02/2026', 'MM/DD/YYYY')).toBe('2026-03-02');
+  });
+
+  it('takes short numbers and other separators', () => {
+    expect(parseDateInput('2/3/2026', 'DD/MM/YYYY')).toBe('2026-03-02');
+    expect(parseDateInput('2.3.2026', 'DD/MM/YYYY')).toBe('2026-03-02');
+    expect(parseDateInput(' 02-03-2026 ', 'DD/MM/YYYY')).toBe('2026-03-02');
+  });
+
+  it('always accepts a pasted ISO date', () => {
+    expect(parseDateInput('2026-03-02', 'DD/MM/YYYY')).toBe('2026-03-02');
+    expect(parseDateInput('2026-03-02', 'MM/DD/YYYY')).toBe('2026-03-02');
+  });
+
+  it('rejects dates that do not exist', () => {
+    expect(parseDateInput('31/02/2026', 'DD/MM/YYYY')).toBeNull();
+    expect(parseDateInput('29/02/2026', 'DD/MM/YYYY')).toBeNull();
+    expect(parseDateInput('29/02/2028', 'DD/MM/YYYY')).toBe('2028-02-29');
+    expect(parseDateInput('13/13/2026', 'DD/MM/YYYY')).toBeNull();
+  });
+
+  it('waits for a whole date', () => {
+    expect(parseDateInput('02/03/20', 'DD/MM/YYYY')).toBeNull();
+    expect(parseDateInput('', 'DD/MM/YYYY')).toBeNull();
+    expect(parseDateInput('soon', 'DD/MM/YYYY')).toBeNull();
   });
 });

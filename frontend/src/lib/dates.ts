@@ -74,7 +74,11 @@ export function formatTime(value: DateInput, timeFormat: TimeFormat = DEFAULT_TI
 }
 
 /** "13/11/2026 08:44" - a full timestamp (history, notifications, last sync). */
-export function formatDateTime(value: DateInput, format: DateFormat, timeFormat: TimeFormat = DEFAULT_TIME_FORMAT): string {
+export function formatDateTime(
+  value: DateInput,
+  format: DateFormat,
+  timeFormat: TimeFormat = DEFAULT_TIME_FORMAT
+): string {
   return `${formatDate(value, format)} ${formatTime(value, timeFormat)}`;
 }
 
@@ -90,4 +94,44 @@ export function formatWeekdayDayMonthTime(
   timeFormat: TimeFormat = DEFAULT_TIME_FORMAT
 ): string {
   return `${formatWeekdayDayMonth(value, format)} ${formatTime(value, timeFormat)}`;
+}
+
+/** A calendar date as the API sends it ("2026-11-13", no time or zone) in the user's
+ * format. Split by hand: `new Date("2026-11-13")` is midnight UTC, which is the previous
+ * day anywhere west of Greenwich. Empty in, empty out. */
+export function formatIsoDate(iso: string, format: DateFormat): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (!match) return '';
+  const [, yyyy, mm, dd] = match;
+  if (format === 'MM/DD/YYYY') return `${mm}/${dd}/${yyyy}`;
+  if (format === 'YYYY-MM-DD') return iso;
+  return `${dd}/${mm}/${yyyy}`;
+}
+
+function daysInMonth(year: number, month: number): number {
+  return new Date(year, month, 0).getDate();
+}
+
+/** What the user typed in a date field, as an API date ("2026-11-13"), or null if it isn't
+ * a real date yet. Reads day and month in the order of their `format`; "/", "." and "-"
+ * all separate, and leading zeros are optional ("4/5/2026"). A year-first ISO date is
+ * always accepted too, so a pasted "2026-11-13" works whatever the format. */
+export function parseDateInput(text: string, format: DateFormat): string | null {
+  const trimmed = text.trim();
+  let year: number;
+  let month: number;
+  let day: number;
+  const yearFirst = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/.exec(trimmed);
+  const yearLast = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/.exec(trimmed);
+  if (yearFirst) {
+    [year, month, day] = yearFirst.slice(1).map(Number);
+  } else if (yearLast) {
+    const [first, second, y] = yearLast.slice(1).map(Number);
+    year = y;
+    [day, month] = format === 'MM/DD/YYYY' ? [second, first] : [first, second];
+  } else {
+    return null;
+  }
+  if (month < 1 || month > 12 || day < 1 || day > daysInMonth(year, month)) return null;
+  return `${year}-${pad(month)}-${pad(day)}`;
 }
