@@ -17,6 +17,7 @@
 - CI: the container smoke test runs on a named volume and checks the admin account survives recreating the container.
 - `docker-compose.yml` drops the obsolete `version` key.
 - Frontend: React Router 6 -> 7 (`react-router` replaces `react-router-dom`), closing its open-redirect advisory (GHSA-wrjc-x8rr-h8h6). No behaviour change: the app already ran with both v7 future flags on.
+- Frontend build and test tooling: Vite 5 -> 8, Vitest 0.34 -> 5, jsdom 25 -> 31. `npm audit` is clean (the esbuild dev-server and tinypool advisories are gone), and production builds are several times faster (Vite 8 bundles with Rolldown).
 
 ## 0.3.0
 

@@ -14,7 +14,7 @@
     "moduleResolution": "bundler",
     "allowSyntheticDefaultImports": true,
     "allowImportingTsExtensions": true,
-    "types": ["vitest/globals", "@testing-library/jest-dom"],
+    "types": ["vitest/globals"],
     "noImplicitAny": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,

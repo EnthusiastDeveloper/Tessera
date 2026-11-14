@@ -39,7 +39,9 @@ describe('LoginScreen', () => {
   });
 
   it('submits the entered credentials', async () => {
-    const login = vi.fn<[string, string], Promise<void>>().mockResolvedValue(undefined);
+    const login = vi
+      .fn<(username: string, password: string) => Promise<void>>()
+      .mockResolvedValue(undefined);
     renderScreen(login);
 
     await userEvent.clear(screen.getByLabelText(/username/i));
@@ -52,7 +54,7 @@ describe('LoginScreen', () => {
 
   it('shows a banner for invalid credentials', async () => {
     const login = vi
-      .fn<[string, string], Promise<void>>()
+      .fn<(username: string, password: string) => Promise<void>>()
       .mockRejectedValue(
         new ApiError(401, 'invalid_credentials', 'Incorrect username or password.')
       );
@@ -66,7 +68,7 @@ describe('LoginScreen', () => {
 
   it('shows a banner for throttled login attempts', async () => {
     const login = vi
-      .fn<[string, string], Promise<void>>()
+      .fn<(username: string, password: string) => Promise<void>>()
       .mockRejectedValue(new ApiError(429, 'too_many_attempts', 'Too many failed login attempts.'));
     renderScreen(login);
 
