@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
-import type { DayHeaderContentArg, EventClickArg, FormatterInput } from '@fullcalendar/core';
+import interactionPlugin from '@fullcalendar/interaction';
+import type { DateSelectArg, DayHeaderContentArg, EventClickArg, FormatterInput } from '@fullcalendar/core';
 import { ApiError, toApiError } from '../../api/client';
 import { getSettings } from '../../api/settings';
 import { TimezoneNotice } from '../../components/TimezoneNotice';
@@ -15,6 +16,8 @@ import { listProjections } from '../../api/taskTemplates';
 import { OptimizeControls } from '../../optimization/OptimizeControls';
 import { useOptimization } from '../../optimization/OptimizationContext';
 import { buildCalendarEvents, type TimelineExtendedProps } from './buildEvents';
+import { QuickCreatePanel } from './QuickCreatePanel';
+import { SNAP_MINUTES, selectedSlot, selectionAllowed, type SlotSelection } from './quickCreate';
 import type { BlackoutDate } from '../../types/settings';
 import type { DayName, TaskInstance } from '../../types/task';
 import type { ExternalEvent, VirtualOccurrence } from '../../types/timeline';
@@ -79,7 +82,7 @@ function dayHeader(arg: DayHeaderContentArg, dateFormat: DateFormat): JSX.Elemen
 export function TimelinePage(): JSX.Element {
   const navigate = useNavigate();
   // Reload when an optimization applied or undone changed the schedule under the page.
-  const { scheduleRevision } = useOptimization();
+  const { scheduleRevision, locked } = useOptimization();
   const { dateFormat, timeFormat, firstDayOfWeek } = useDisplayPreferences();
   const [state, setState] = useState<LoadState>('loading');
   const [error, setError] = useState<ApiError | null>(null);
@@ -88,6 +91,10 @@ export function TimelinePage(): JSX.Element {
   const [externalEvents, setExternalEvents] = useState<ExternalEvent[]>([]);
   const [blackoutDates, setBlackoutDates] = useState<BlackoutDate[]>([]);
   const [settingsTimezone, setSettingsTimezone] = useState<string | null>(null);
+  // Quick create (design doc 8.1 screen 2, Rev 18): the selection being turned into a task.
+  const [quick, setQuick] = useState<{ selection: SlotSelection; point: { x: number; y: number } | null } | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const calendar = useRef<FullCalendar>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -111,7 +118,18 @@ export function TimelinePage(): JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, [scheduleRevision]);
+  }, [scheduleRevision, reloadKey]);
+
+  function handleSelect(arg: DateSelectArg): void {
+    const pointer = arg.jsEvent as MouseEvent | null;
+    const point = pointer && 'clientX' in pointer ? { x: pointer.clientX, y: pointer.clientY } : null;
+    setQuick({ selection: { start: arg.start, end: arg.end }, point });
+  }
+
+  function closeQuickCreate(): void {
+    setQuick(null);
+    calendar.current?.getApi().unselect();
+  }
 
   function handleEventClick(arg: EventClickArg): void {
     const props = arg.event.extendedProps as TimelineExtendedProps;
@@ -142,7 +160,8 @@ export function TimelinePage(): JSX.Element {
         <p style={{ color: 'var(--color-text-muted)' }}>Loading...</p>
       ) : (
         <FullCalendar
-          plugins={[dayGridPlugin, timeGridPlugin]}
+          ref={calendar}
+          plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
           initialView="timeGridWeek"
           headerToolbar={{ left: 'prev,next today', center: 'title', right: 'timeGridWeek,timeGridDay,dayGridMonth' }}
           events={events}
@@ -153,6 +172,29 @@ export function TimelinePage(): JSX.Element {
           eventTimeFormat={EVENT_TIME_FORMAT[timeFormat]}
           height="auto"
           nowIndicator
+          // Quick create: empty time in the week/day grids only (a month cell has no time),
+          // from now on, within one day; read-only while an optimization runs (6.11).
+          selectable={!locked}
+          selectMirror
+          snapDuration={{ minutes: SNAP_MINUTES }}
+          selectLongPressDelay={400}
+          selectAllow={(span) => !span.allDay && selectionAllowed({ start: span.start, end: span.end })}
+          unselectCancel=".quick-create"
+          select={handleSelect}
+        />
+      )}
+      {quick && (
+        <QuickCreatePanel
+          key={`${quick.selection.start.getTime()}-${quick.selection.end.getTime()}`}
+          selection={quick.selection}
+          slot={selectedSlot(quick.selection)}
+          point={quick.point}
+          onClose={closeQuickCreate}
+          onCreated={() => {
+            closeQuickCreate();
+            setReloadKey((key) => key + 1);
+          }}
+          onOpenFullForm={(prefill) => navigate('/tasks/new', { state: { prefill } })}
         />
       )}
     </div>

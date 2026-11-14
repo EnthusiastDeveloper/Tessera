@@ -16,6 +16,17 @@ The template holds recurrence rules and defaults (name, priority, duration, dead
 | Bound by active hours / budget | No - never constrained by your scheduling window | Yes - the whole point of the setting |
 | Still counts against the daily budget | Yes - a fixed task's duration counts toward the day's cap even though it isn't *placed* by the algorithm | Yes |
 
+## Quick create from the Timeline
+
+In the Timeline's week or day view, click an empty time slot, or drag across several (on a phone, press and hold, then drag), and a small form opens beside it. A click selects half an hour; a drag selects in 15-minute steps. You can select any time from now on, within one day.
+
+- Give the task a name, and optionally a description, a location and dependencies.
+- It's **fixed** by default: it's booked at exactly the time you selected.
+- Switch it to **flexible** and the selection gives its date and length only. Tessera picks the time itself, and the task is due by the end of that day.
+- Anything else (repeating, priority, reminders, a later deadline) is under **Open full form**, which opens the full task form with what you've already entered and the selected time filled in.
+
+The quick form creates a one-time task through the same rules as the full form, so a fixed task that collides with another is refused and the reason is shown right there. Press **Escape**, **Cancel** or click elsewhere to close it without creating anything.
+
 ## Recurrence
 
 Templates support four patterns: `one_time`, `daily`, `weekly` and `monthly`. Every repeating pattern takes an interval ("every 3 days", "every 2 weeks"), and weekly/monthly also take a day of the week or month. A monthly task set to the 29th-31st lands on the last day of any shorter month, then returns to its day the month after.

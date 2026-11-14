@@ -210,6 +210,34 @@ describe('TaskForm', () => {
     });
   });
 
+  describe('create mode, from the Timeline quick create (design doc 8.1, Rev 18)', () => {
+    it('starts with what quick create had', () => {
+      render(
+        <TaskForm
+          mode="create"
+          prefill={{
+            name: 'Dentist',
+            description: 'Check-up',
+            location: 'Clinic',
+            type: 'fixed',
+            startDate: '2099-11-20',
+            fixedTimeOfDay: '14:00',
+            estimatedDurationMinutes: 90,
+            dependencies: [],
+          }}
+          onSaved={vi.fn()}
+          onCancel={vi.fn()}
+        />
+      );
+      expect(screen.getByLabelText('Name')).toHaveValue('Dentist');
+      expect(screen.getByLabelText('Location')).toHaveValue('Clinic');
+      expect(screen.getByLabelText('Fixed')).toBeChecked();
+      expect(screen.getByLabelText('Starts on')).toHaveValue('20/11/2099');
+      expect(screen.getByLabelText(/time of day/i)).toHaveValue('14:00');
+      expect(screen.getByLabelText('Estimated duration', { exact: true })).toHaveValue(90);
+    });
+  });
+
   describe('edit mode, dependencies (design doc 6.1, Rev 17)', () => {
     const BULBS: TaskInstance = { ...BASE_INSTANCE, id: 'bulbs', name: 'Buy bulbs', status: 'pending' };
 
