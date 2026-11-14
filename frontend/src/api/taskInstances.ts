@@ -73,6 +73,12 @@ export function rescheduleInstance(instanceId: string, scheduledTime: string): P
   return apiClient.post<TaskInstance>(`/task-instances/${instanceId}/reschedule`, { scheduled_time: scheduledTime });
 }
 
+/** §6.1 (Rev 17): replace one occurrence's dependency list. Adding an unfinished one blocks
+ * it, removing the last one unblocks it; refused once the task is in progress or finished. */
+export function setInstanceDependencies(instanceId: string, dependencies: string[]): Promise<TaskInstance> {
+  return apiClient.put<TaskInstance>(`/task-instances/${instanceId}/dependencies`, { dependencies });
+}
+
 /** §6.7 resolution path: `missed` -> `pending`, a "this occurrence" edit of `deadline`. */
 export function extendDeadline(instanceId: string, deadline: string): Promise<TaskInstance> {
   return apiClient.post<TaskInstance>(`/task-instances/${instanceId}/extend-deadline`, { deadline });

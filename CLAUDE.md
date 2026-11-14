@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Tessera** is a self-hosted task scheduling application that auto-places flexible tasks into your calendar while respecting fixed commitments, deadlines, and priorities. It's a Python FastAPI backend + React frontend, single-user, containerized.
 
 ### Key References
-- **Product specification:** `docs/design-doc.md` (Revision 16) - this is the authoritative source for what the system *does*
+- **Product specification:** `docs/design-doc.md` (Revision 17) - this is the authoritative source for what the system *does*
 - **Implementation plan:** `docs/architecture-plan.md` (Revision 9) - defines how it's structured and built
 - **Findings register / decision log:** `docs/implementation-readiness-review-2.md` (IRR-2) - why Revisions 9 and 3 say what they say (Revision 10's through 13's decisions are recorded in design-doc Section 11); every finding in it - High, Medium and editorial - is now resolved
 - **Architecture enforcement:** `backend/pyproject.toml` has an `import-linter` configuration that blocks layering violations at CI
@@ -89,6 +89,7 @@ Background job wiring and reconciliation rules: see `backend/CLAUDE.md`.
 - `POST /api/v1/task-instances/{id}/extend-deadline` - extend deadline on a `missed` instance (also a "this occurrence" edit per design-doc 6.7)
 - `PATCH /api/v1/task-templates/{id}?scope=this_and_future&from_instance={id}` - "this and future" edit (template + the edited and later open occurrences; `include_detached` to include individually edited ones)
 - `DELETE /api/v1/task-instances/{id}` - delete (dependency unlink, not cascade)
+- `PUT /api/v1/task-instances/{id}/dependencies` - replace one occurrence's dependency list (design-doc 6.1, Rev 17): adding an unfinished one blocks it, removing the last one unblocks it (6.9); refused on `in_progress`/terminal instances; never detaches
 - `POST /api/v1/auth/login`, `/logout` - session-based auth
 - `POST /api/v1/task-instances/{id}/dismiss` - "skip this occurrence"; terminal, preserves the row, and for a completion-anchored template **must generate the successor** or the series silently ends
 - `POST /api/v1/auth/setup` - first-run account creation; requires the setup token logged at startup; `410 Gone` once a user exists

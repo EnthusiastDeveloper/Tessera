@@ -210,6 +210,45 @@ describe('TaskForm', () => {
     });
   });
 
+  describe('edit mode, dependencies (design doc 6.1, Rev 17)', () => {
+    const BULBS: TaskInstance = { ...BASE_INSTANCE, id: 'bulbs', name: 'Buy bulbs', status: 'pending' };
+
+    it('saves a changed dependency list for this occurrence, before the rest of the edit', async () => {
+      const editable = { ...BASE_INSTANCE, status: 'scheduled' as const };
+      mockedInstances.listInstances.mockResolvedValue([editable, BULBS]);
+      mockedInstances.setInstanceDependencies.mockResolvedValue({ ...editable, status: 'blocked', dependencies: ['bulbs'] });
+      mockedTemplates.patchTemplateThisAndFuture.mockResolvedValue(BASE_TEMPLATE);
+      render(<TaskForm mode="edit" template={BASE_TEMPLATE} instance={editable} onSaved={vi.fn()} onCancel={vi.fn()} />);
+
+      // Not offered as its own dependency.
+      expect(await screen.findByLabelText('Buy bulbs')).toBeInTheDocument();
+      expect(screen.queryByRole('checkbox', { name: 'Water the plants' })).not.toBeInTheDocument();
+      await userEvent.click(screen.getByLabelText('Buy bulbs'));
+      await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+      await waitFor(() => expect(mockedTemplates.patchTemplateThisAndFuture).toHaveBeenCalled());
+      expect(mockedInstances.setInstanceDependencies).toHaveBeenCalledWith('instance-1', ['bulbs']);
+      expect(mockedInstances.setInstanceDependencies.mock.invocationCallOrder[0]).toBeLessThan(
+        mockedTemplates.patchTemplateThisAndFuture.mock.invocationCallOrder[0]
+      );
+    });
+
+    it('leaves dependencies alone when they did not change', async () => {
+      const editable = { ...BASE_INSTANCE, status: 'scheduled' as const };
+      mockedTemplates.patchTemplateThisAndFuture.mockResolvedValue(BASE_TEMPLATE);
+      render(<TaskForm mode="edit" template={BASE_TEMPLATE} instance={editable} onSaved={vi.fn()} onCancel={vi.fn()} />);
+      await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(mockedTemplates.patchTemplateThisAndFuture).toHaveBeenCalled());
+      expect(mockedInstances.setInstanceDependencies).not.toHaveBeenCalled();
+    });
+
+    it('hides them once the task is in progress', () => {
+      const started = { ...BASE_INSTANCE, status: 'in_progress' as const };
+      render(<TaskForm mode="edit" template={BASE_TEMPLATE} instance={started} onSaved={vi.fn()} onCancel={vi.fn()} />);
+      expect(screen.queryByText('Dependencies')).not.toBeInTheDocument();
+    });
+  });
+
   describe('edit mode, recurring template', () => {
     const recurringTemplate: TaskTemplate = {
       ...BASE_TEMPLATE,

@@ -18,12 +18,13 @@ from app.db.repositories import (
     TaskTemplateRepository,
 )
 from app.db.schemas import StatusHistoryEntry, TaskInstance, TaskTemplate
-from app.jobs.interface import JobScheduler
+from app.jobs.interface import JobScheduler, deadline_elapsed_job_key, overdue_job_key, reminder_job_key
 from app.scheduling.adapter import build_active_hours_map, has_fixed_conflict
 from app.scheduling.orchestration import (
     DEADLINE_MISSED,
     TERMINAL_STATUSES,
     UNSCHEDULABLE,
+    all_dependencies_completed,
     displace_flexible_under,
     end_series,
     fixed_slot_change_conflicts,
@@ -38,6 +39,7 @@ from app.scheduling.orchestration import (
     schedule_dependency_at_risk_job,
     schedule_reminder_and_overdue_jobs,
 )
+from app.scheduling_engine.dependencies import cycle_check
 from app.scheduling_engine.feasibility import validate_feasible_duration
 
 #: Fields a "this occurrence" edit may touch directly (§3.10). scheduled_time is
@@ -52,6 +54,10 @@ _THIS_OCCURRENCE_FIELDS = ("name", "description", "location", "priority", "estim
 _DISMISS_RESOLVED_NOTIFICATION_TYPES = ("overdue", UNSCHEDULABLE, DEADLINE_MISSED)
 
 DeleteScope = Literal["this_occurrence", "this_and_future"]
+
+#: §6.1 (Rev 17): statuses whose dependencies can still be changed. A task in progress or
+#: finished is refused - a prerequisite added to work already started has no meaning.
+_DEPENDENCY_EDITABLE_STATUSES = frozenset({"pending", "scheduled", "blocked", "missed"})
 
 
 class InstanceValidationError(Exception):
@@ -315,18 +321,96 @@ def extend_deadline(db: Session, jobs: JobScheduler, instance_id: str, *, new_de
     template = _require_template(db, instance.template_id)
     settings = require_settings(db)
 
-    pending_instance = TaskInstanceRepository(db).update(
+    # It re-enters the pool through the same gate as any instance (§4, §6.1 Rev 17): one
+    # still waiting on a prerequisite goes back to `blocked`, not into placement.
+    waiting = not all_dependencies_completed(db, instance)
+    next_status = "blocked" if waiting else "pending"
+    reopened = TaskInstanceRepository(db).update(
         instance.model_copy(
             update={
-                "status": "pending",
+                "status": next_status,
                 "deadline": new_deadline,
                 "detached": True,
-                "status_history": (*instance.status_history, StatusHistoryEntry(status="pending", at=now)),
+                "status_history": (*instance.status_history, StatusHistoryEntry(status=next_status, at=now)),
             }
         )
     )
     resolve_notifications(db, instance_id=instance.id, types=(DEADLINE_MISSED,), now=now)
-    return place_or_defer(db, jobs, instance=pending_instance, template=template, settings=settings, now=now)
+    if waiting:
+        schedule_dependency_at_risk_job(jobs, reopened)
+        return reopened
+    return place_or_defer(db, jobs, instance=reopened, template=template, settings=settings, now=now)
+
+
+def set_dependencies(db: Session, jobs: JobScheduler, instance_id: str, *, dependency_ids: tuple[str, ...]) -> TaskInstance:
+    """§6.1 (Rev 17): replace one occurrence's dependency list after it was created.
+
+    The result is what a task created with the new list would be: an unfinished dependency
+    blocks it (a flexible one leaves its slot, a fixed one keeps its time, §6.5), and
+    removing the last one unblocks it exactly as a completion would (§6.9). A `missed`
+    instance only has its list changed - extending its deadline re-enters the gate. Not a
+    "this occurrence" edit: dependencies are never a series field (§9.1), so `detached`
+    is left alone.
+    """
+    instance = _require_instance(db, instance_id)
+    if instance.status not in _DEPENDENCY_EDITABLE_STATUSES:
+        label = instance.status.replace("_", " ")
+        raise InstanceValidationError("invalid_field", f"The dependencies of a {label} task can't be changed.")
+
+    wanted = tuple(dict.fromkeys(dependency_ids))
+    if instance.id in wanted:
+        raise InstanceValidationError("cycle_detected", "A task can't depend on itself.")
+    repo = TaskInstanceRepository(db)
+    for dependency_id in wanted:
+        dependency = repo.get(dependency_id)
+        if dependency is None:
+            raise InstanceValidationError("invalid_field", f"Dependency {dependency_id} does not exist.")
+        if dependency.status == "dismissed":
+            raise InstanceValidationError(
+                "invalid_field", f'"{dependency.name}" was skipped and will never be done, so nothing can wait on it.'
+            )
+    edges = [(dependent, dependency) for dependent, dependency in repo.list_all_dependency_edges() if dependent != instance.id]
+    edges.extend((instance.id, dependency_id) for dependency_id in wanted)
+    if cycle_check(edges):
+        raise InstanceValidationError("cycle_detected", "This dependency list would create a cycle.")
+
+    if set(wanted) == set(instance.dependencies):
+        return instance
+    now = utcnow()
+    updated = repo.update(instance.model_copy(update={"dependencies": wanted}))
+    if updated.status == "missed":
+        return updated
+    waiting = not all_dependencies_completed(db, updated)
+    if updated.status == "blocked":
+        if waiting:
+            return updated
+        return promote_if_unblocked(db, jobs, updated, now=now) or updated
+    if waiting:
+        return _block_on_dependencies(db, jobs, updated, now=now)
+    return updated
+
+
+def _block_on_dependencies(db: Session, jobs: JobScheduler, instance: TaskInstance, *, now: datetime) -> TaskInstance:
+    """A `pending`/`scheduled` instance that now waits on an unfinished dependency goes
+    `blocked` (§4, §6.1 Rev 17). A flexible one gives up its slot and the jobs tied to it;
+    its slot is freed, nothing moves into it (§6.2). A fixed one keeps its time and its
+    jobs and holds the slot while it waits (§6.5)."""
+    update: dict[str, Any] = {
+        "status": "blocked",
+        "status_history": (*instance.status_history, StatusHistoryEntry(status="blocked", at=now)),
+    }
+    if instance.type == "flexible":
+        template = _require_template(db, instance.template_id)
+        jobs.cancel(job_key=overdue_job_key(instance.id))
+        jobs.cancel(job_key=deadline_elapsed_job_key(instance.id))
+        for offset in template.reminder_offsets_minutes:
+            jobs.cancel(job_key=reminder_job_key(instance.id, offset))
+        update["scheduled_time"] = None
+        # §3.9: it is no longer waiting for room but for a prerequisite.
+        resolve_notifications(db, instance_id=instance.id, types=(UNSCHEDULABLE,), now=now)
+    blocked = TaskInstanceRepository(db).update(instance.model_copy(update=update))
+    schedule_dependency_at_risk_job(jobs, blocked)
+    return blocked
 
 
 def delete_instance(db: Session, jobs: JobScheduler, instance_id: str, *, scope: DeleteScope | None = None) -> DeleteResult:
@@ -425,5 +509,6 @@ __all__ = [
     "extend_deadline",
     "list_instances",
     "reschedule",
+    "set_dependencies",
     "start_progress",
 ]

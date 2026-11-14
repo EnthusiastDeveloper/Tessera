@@ -266,3 +266,51 @@ class TestJobChangesFollowTheTransaction:
 
         assert app_client.post(f"/api/v1/task-instances/{instance['id']}/complete").status_code == 200
         assert recorder.cancelled_instances == [instance["id"]]
+
+
+def _create_flexible(client: TestClient, name: str) -> dict[str, object]:
+    payload = {
+        "name": name,
+        "type": "flexible",
+        "recurrence": {"pattern": "one_time", "anchor": "calendar"},
+        "priority": "medium",
+        "start_date": app_today().isoformat(),
+        "estimated_duration_minutes": 30,
+        "deadline_offset_minutes": 60 * 24 * 5,
+    }
+    return client.post("/api/v1/task-templates", json=payload).json()["instance"]  # type: ignore[no-any-return]
+
+
+class TestSetDependencies:
+    """Design doc §6.1 (Rev 17). The rules are covered in test_set_dependencies.py."""
+
+    def test_replaces_the_list_and_blocks_the_task(self, app_client: TestClient) -> None:
+        _login(app_client)
+        lights = _create_flexible(app_client, "Change the lights")
+        bulbs = _create_flexible(app_client, "Buy bulbs")
+
+        response = app_client.put(f"/api/v1/task-instances/{lights['id']}/dependencies", json={"dependencies": [bulbs["id"]]})
+
+        assert response.status_code == 200, response.text
+        assert response.json()["status"] == "blocked"
+        assert response.json()["dependencies"] == [bulbs["id"]]
+
+    def test_a_cycle_is_a_409(self, app_client: TestClient) -> None:
+        _login(app_client)
+        lights = _create_flexible(app_client, "Change the lights")
+
+        response = app_client.put(f"/api/v1/task-instances/{lights['id']}/dependencies", json={"dependencies": [lights["id"]]})
+
+        assert response.status_code == 409
+        assert response.json()["code"] == "cycle_detected"
+
+    def test_a_finished_task_is_a_422(self, app_client: TestClient) -> None:
+        _login(app_client)
+        sync = _create_fixed(app_client)
+        other = _create_flexible(app_client, "Prepare slides")
+        app_client.post(f"/api/v1/task-instances/{sync['id']}/complete")
+
+        response = app_client.put(f"/api/v1/task-instances/{sync['id']}/dependencies", json={"dependencies": [other["id"]]})
+
+        assert response.status_code == 422
+        assert response.json()["code"] == "invalid_field"

@@ -10,6 +10,7 @@ import {
   extendDeadline,
   listInstances,
   rescheduleInstance,
+  setInstanceDependencies,
   startInstance,
 } from '../../api/taskInstances';
 import type { TaskInstance, TaskInstanceStatus } from '../../types/task';
@@ -18,6 +19,8 @@ type LoadState = 'loading' | 'error' | 'ready';
 
 
 const TERMINAL_STATUSES: TaskInstanceStatus[] = ['completed', 'dismissed'];
+/** Design doc 6.1 (Rev 17): dependencies can be changed until the task is started or finished. */
+const DEPENDENCY_EDITABLE_STATUSES: TaskInstanceStatus[] = ['pending', 'scheduled', 'blocked', 'missed'];
 
 interface DependencyDisplay {
   id: string;
@@ -73,6 +76,7 @@ export function TaskDetailPage(): JSX.Element {
   const [state, setState] = useState<LoadState>('loading');
   const [instances, setInstances] = useState<TaskInstance[]>([]);
   const [error, setError] = useState<ApiError | null>(null);
+  const [newDependency, setNewDependency] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [rescheduleAt, setRescheduleAt] = useState('');
   const [showRescheduleForm, setShowRescheduleForm] = useState(false);
@@ -111,6 +115,15 @@ export function TaskDetailPage(): JSX.Element {
     (id) => instances.find((candidate) => candidate.id === id) ?? { id, name: id, status: undefined }
   );
   const blocking = instances.filter((candidate) => candidate.dependencies.includes(instance.id));
+  const canEditDependencies = DEPENDENCY_EDITABLE_STATUSES.includes(instance.status);
+  // Not itself, not already listed, and not finished: a completed task would change
+  // nothing and a dismissed one would block this task for good (design doc 6.1).
+  const addableDependencies = instances.filter(
+    (candidate) =>
+      candidate.id !== instance.id &&
+      !instance.dependencies.includes(candidate.id) &&
+      !TERMINAL_STATUSES.includes(candidate.status)
+  );
 
   const applyUpdate = (updated: TaskInstance): void => {
     setInstances((prev) => prev.map((candidate) => (candidate.id === updated.id ? updated : candidate)));
@@ -129,6 +142,11 @@ export function TaskDetailPage(): JSX.Element {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const changeDependencies = (ids: string[]): void => {
+    setNewDependency('');
+    void runAction(() => setInstanceDependencies(instance.id, ids));
   };
 
   return (
@@ -195,9 +213,39 @@ export function TaskDetailPage(): JSX.Element {
             <li key={dep.id}>
               {dep.name}
               {dep.status ? ` - ${formatStatus(dep.status)}` : ''}
+              {canEditDependencies && (
+                <button
+                  type="button"
+                  className="ml-3 px-2 py-0.5 text-sm"
+                  disabled={submitting || locked}
+                  aria-label={`Remove dependency ${dep.name}`}
+                  onClick={() => changeDependencies(instance.dependencies.filter((id) => id !== dep.id))}
+                >
+                  Remove
+                </button>
+              )}
             </li>
           ))}
         </ul>
+      )}
+      {canEditDependencies && addableDependencies.length > 0 && (
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <select aria-label="Task to wait for" value={newDependency} onChange={(event) => setNewDependency(event.target.value)}>
+            <option value="">Wait for another task…</option>
+            {addableDependencies.map((candidate) => (
+              <option key={candidate.id} value={candidate.id}>
+                {candidate.name}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            disabled={!newDependency || submitting || locked}
+            onClick={() => changeDependencies([...instance.dependencies, newDependency])}
+          >
+            Add dependency
+          </button>
+        </div>
       )}
 
       <h3>Blocking</h3>

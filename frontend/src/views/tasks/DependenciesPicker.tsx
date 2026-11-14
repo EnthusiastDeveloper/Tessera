@@ -5,15 +5,17 @@ import type { TaskInstance } from '../../types/task';
 interface DependenciesPickerProps {
   selected: string[];
   onChange: (ids: string[]) => void;
+  /** The task being edited, which can't depend on itself. */
+  excludeId?: string;
+  /** Shown under the legend - e.g. that only this occurrence is affected. */
+  note?: string;
 }
 
-/** Dependencies are only ever set at creation (design doc §3.2 note: "dependencies is
- * not a template field... POC"; there is no endpoint to edit them afterwards other than
- * removing one by deleting the depended-on instance, §3.8) - this component is only
- * used from the create form. Excludes `completed`/`dismissed` candidates: depending on
+/** The dependency checklist of the task form, at creation and (Rev 17, design doc 6.1)
+ * when editing an occurrence. Excludes `completed`/`dismissed` candidates: depending on
  * an already-completed task is a trivial no-op, and `dismissed` never satisfies a
  * dependency (§3.3), so offering either as a choice would just be a footgun. */
-export function DependenciesPicker({ selected, onChange }: DependenciesPickerProps): JSX.Element {
+export function DependenciesPicker({ selected, onChange, excludeId, note }: DependenciesPickerProps): JSX.Element {
   const [candidates, setCandidates] = useState<TaskInstance[] | null>(null);
 
   useEffect(() => {
@@ -21,7 +23,11 @@ export function DependenciesPicker({ selected, onChange }: DependenciesPickerPro
     listInstances()
       .then((instances) => {
         if (cancelled) return;
-        setCandidates(instances.filter((instance) => instance.status !== 'completed' && instance.status !== 'dismissed'));
+        setCandidates(
+          instances.filter(
+            (instance) => instance.id !== excludeId && instance.status !== 'completed' && instance.status !== 'dismissed'
+          )
+        );
       })
       .catch(() => {
         if (!cancelled) setCandidates([]);
@@ -29,7 +35,7 @@ export function DependenciesPicker({ selected, onChange }: DependenciesPickerPro
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [excludeId]);
 
   const toggle = (id: string): void => {
     onChange(selected.includes(id) ? selected.filter((existing) => existing !== id) : [...selected, id]);
@@ -40,6 +46,7 @@ export function DependenciesPicker({ selected, onChange }: DependenciesPickerPro
       <legend>Dependencies</legend>
       <p style={{ color: 'var(--color-text-muted)', fontSize: 'var(--font-size-sm)' }}>
         This task can&apos;t start until everything checked below is completed.
+        {note ? ` ${note}` : ''}
       </p>
       {candidates === null && <p>Loading tasks…</p>}
       {candidates !== null && candidates.length === 0 && (

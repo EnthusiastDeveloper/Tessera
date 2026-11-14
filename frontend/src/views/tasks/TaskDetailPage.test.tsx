@@ -135,4 +135,43 @@ describe('TaskDetailPage', () => {
     await waitFor(() => expect(mockedInstances.completeInstance).toHaveBeenCalledWith('instance-1'));
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Mark complete' })).not.toBeInTheDocument());
   });
+
+  describe('changing dependencies (design doc 6.1, Rev 17)', () => {
+    const LIGHTS: TaskInstance = { ...BASE_INSTANCE, id: 'lights', name: 'Change the lights', status: 'scheduled' };
+    const BULBS: TaskInstance = { ...BASE_INSTANCE, id: 'bulbs', name: 'Buy bulbs', status: 'pending' };
+    const DONE: TaskInstance = { ...BASE_INSTANCE, id: 'done', name: 'Old chore', status: 'completed' };
+
+    it('adds a dependency from the other open tasks', async () => {
+      mockedInstances.setInstanceDependencies.mockResolvedValue({ ...LIGHTS, status: 'blocked', dependencies: ['bulbs'] });
+      renderDetail([LIGHTS, BULBS, DONE], 'lights');
+      await screen.findByRole('heading', { name: 'Change the lights' });
+
+      // Not itself, and not a finished task.
+      expect(screen.queryByRole('option', { name: 'Change the lights' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('option', { name: 'Old chore' })).not.toBeInTheDocument();
+      await userEvent.selectOptions(screen.getByLabelText('Task to wait for'), 'bulbs');
+      await userEvent.click(screen.getByRole('button', { name: 'Add dependency' }));
+
+      await waitFor(() => expect(mockedInstances.setInstanceDependencies).toHaveBeenCalledWith('lights', ['bulbs']));
+      expect(await screen.findByText('blocked')).toBeInTheDocument();
+    });
+
+    it('removes one', async () => {
+      const blocked = { ...LIGHTS, status: 'blocked' as const, dependencies: ['bulbs'] };
+      mockedInstances.setInstanceDependencies.mockResolvedValue({ ...blocked, status: 'pending', dependencies: [] });
+      renderDetail([blocked, BULBS], 'lights');
+      await screen.findByRole('heading', { name: 'Change the lights' });
+
+      await userEvent.click(screen.getByRole('button', { name: 'Remove dependency Buy bulbs' }));
+
+      await waitFor(() => expect(mockedInstances.setInstanceDependencies).toHaveBeenCalledWith('lights', []));
+    });
+
+    it('offers no changes once the task is in progress', async () => {
+      renderDetail([{ ...LIGHTS, status: 'in_progress', dependencies: ['bulbs'] }, BULBS], 'lights');
+      await screen.findByRole('heading', { name: 'Change the lights' });
+      expect(screen.queryByLabelText('Task to wait for')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Remove dependency/ })).not.toBeInTheDocument();
+    });
+  });
 });

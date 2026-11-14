@@ -122,6 +122,7 @@ class TestTheServerSideEditLock:
                 },
             ),
             client.patch(f"/api/v1/task-instances/{instance_id}", json={"name": "Renamed"}),
+            client.put(f"/api/v1/task-instances/{instance_id}/dependencies", json={"dependencies": []}),
             client.post(f"/api/v1/task-instances/{instance_id}/complete"),
             client.post(f"/api/v1/task-instances/{instance_id}/dismiss"),
             client.delete(f"/api/v1/task-instances/{instance_id}"),
