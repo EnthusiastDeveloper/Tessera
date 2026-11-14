@@ -1,4 +1,6 @@
 # Tessera - Design Document (POC)
+
+
 ### Revision 17
 
 > **Revision 17 lets an occurrence's dependencies be changed after it is created (6.1, 8.1).** Until now they could only be set when the task was created, though 6.1's save-time cycle check and the Backlog's "edit what is blocking it" (8.1) both assumed otherwise. Adding an unfinished dependency blocks the task the way a dependency set at creation does - a flexible task leaves the Timeline until it is unblocked, a fixed one keeps its time - and removing the last one unblocks it as a completion would (6.9). A task that is in progress, completed or dismissed can't have its dependencies changed. Nothing about placement itself changes.
@@ -51,6 +53,7 @@ Full diffs are in git; IRR-2 (`docs/implementation-readiness-review-2.md`) holds
 | 15 | `date_format` and `time_format` display settings (3.7, 8.1): day-first dates and a 24-hour clock by default; `first_day_of_week` defaults to Sunday |
 | 16 | First-run **setup guide** (8.1 screen 0a) and the `onboarding_completed` setting (3.7) |
 | 17 | An occurrence's **dependencies can be changed after creation** (6.1, 8.1 screens 3 and 4) |
+
 
 **Revision 9 changelog.** Eighteen IRR-2 findings, following stakeholder decisions taken 2026-08-05 to 2026-08-07. Revision 8's "locked" status meant "no unilateral edits"; it did not mean "verified correct". IRR-2 records what each finding was and why it mattered; this lists only what the specification now says.
 
