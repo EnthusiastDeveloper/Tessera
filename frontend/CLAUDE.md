@@ -1,5 +1,7 @@
 # frontend/CLAUDE.md
 
+Data model and API contract notes (fields, endpoints, error codes, optimistic locking): `docs/claude/data-model.md` and `docs/claude/api-contract.md`.
+
 ## Frontend Notes
 
 React + Vite, same-origin served from the FastAPI app (no CORS). Key features:

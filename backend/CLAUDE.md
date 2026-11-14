@@ -1,5 +1,7 @@
 # backend/CLAUDE.md
 
+Domain rules, data model, API contract and deployment notes: `docs/claude/` (the root `CLAUDE.md` says which to read before changing what).
+
 ## Architecture Layers & Module Map
 
 **Binding rule:** backend architecture has three **strictly enforced** layers (import-linter blocks violations):
