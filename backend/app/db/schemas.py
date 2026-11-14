@@ -188,6 +188,8 @@ class UserSettings(_Frozen):
     first_day_of_week: DayName = "sunday"
     date_format: DateFormat = "DD/MM/YYYY"
     time_format: TimeFormat = "24h"
+    # The first-run setup guide (design doc 3.7, 8.1, Rev 16) has been finished or skipped.
+    onboarding_completed: bool = False
 
 
 class ExternalEvent(_Frozen):

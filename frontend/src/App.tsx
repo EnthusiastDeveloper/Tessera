@@ -1,5 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { AuthProvider } from './auth/AuthContext';
+import { OnboardingGate } from './onboarding/OnboardingGate';
+import { SetupGuide } from './onboarding/SetupGuide';
 import { RouteGuard } from './routes/RouteGuard';
 import { LoginScreen } from './views/auth/LoginScreen';
 import { SetupScreen } from './views/auth/SetupScreen';
@@ -34,10 +36,20 @@ function App(): JSX.Element {
             }
           />
           <Route
+            path="/welcome"
+            element={
+              <RouteGuard allow={['authenticated']}>
+                <SetupGuide />
+              </RouteGuard>
+            }
+          />
+          <Route
             path="/"
             element={
               <RouteGuard allow={['authenticated']}>
-                <AppShell />
+                <OnboardingGate>
+                  <AppShell />
+                </OnboardingGate>
               </RouteGuard>
             }
           >

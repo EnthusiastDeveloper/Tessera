@@ -172,6 +172,7 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.Column("time_format", sa.Enum("24h", "12h", name="time_format", create_constraint=True), nullable=False),
+        sa.Column("onboarding_completed", sa.Boolean(), nullable=False),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_table(

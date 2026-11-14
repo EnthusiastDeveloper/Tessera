@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import JSON, Enum, String
+from sqlalchemy import JSON, Boolean, Enum, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, generate_id
@@ -50,3 +50,5 @@ class UserSettingsORM(Base):
     time_format: Mapped[str] = mapped_column(
         Enum(*_TIME_FORMATS, name="time_format", create_constraint=True), nullable=False, default="24h"
     )
+    # Design doc 3.7, 8.1 (Rev 16): the first-run setup guide has been finished or skipped.
+    onboarding_completed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

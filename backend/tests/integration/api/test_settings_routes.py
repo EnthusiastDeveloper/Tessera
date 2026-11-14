@@ -39,6 +39,7 @@ class TestGetSettings:
         assert body["first_day_of_week"] == "sunday"
         assert body["date_format"] == "DD/MM/YYYY"
         assert body["time_format"] == "24h"
+        assert body["onboarding_completed"] is False
         assert body["blackout_dates"] == []
         assert body["active_hours"]["monday"] == [{"start": "09:00", "end": "17:00"}]
         assert body["daily_time_budget_minutes"]["monday"] is None
@@ -83,6 +84,13 @@ class TestPatchSettings:
         assert response.status_code == 200, response.text
         assert response.json()["time_format"] == "12h"
         assert response.json()["date_format"] == "DD/MM/YYYY"  # untouched
+
+    def test_onboarding_can_be_marked_completed(self, app_client: TestClient) -> None:
+        _login(app_client)
+        response = app_client.patch("/api/v1/settings", json={"onboarding_completed": True})
+        assert response.status_code == 200, response.text
+        assert response.json()["onboarding_completed"] is True
+        assert app_client.get("/api/v1/settings").json()["onboarding_completed"] is True
 
     def test_bad_time_format_is_rejected(self, app_client: TestClient) -> None:
         _login(app_client)

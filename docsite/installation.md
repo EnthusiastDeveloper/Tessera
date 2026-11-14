@@ -58,14 +58,18 @@ Once that submits, the setup endpoint is permanently closed (`410 Gone`) and the
 !!! tip "Lost the token before finishing setup?"
     Restart the container. A fresh token is generated on every startup while zero accounts exist - the old one was never persisted, so there's nothing stale to clean up.
 
-## 4. Log in and configure Settings
+## 4. Log in and follow the setup guide
 
-After setup, log in with `admin` and the password you chose, then head to **Settings** and set:
+After setup, log in with `admin` and the password you chose. The first sign-in opens a short **setup guide** instead of the Timeline. Each step shows the current value, saves when you press **Continue**, and can be skipped:
 
-- **Timezone** - defaults from the container's `TZ` env var, but confirm it's actually yours; every scheduling decision is computed in this timezone (see [Configuration](configuration.md)).
-- **Active hours** - the default window(s), per day of week, that flexible tasks may be scheduled into.
-- **Daily time budget** - an optional soft cap on flexible-task minutes per day.
-- **External calendars** - connect Google/Outlook if you want Tessera to read your existing events as scheduling obstacles (see [Connecting an External Calendar](calendar-integration.md) for the full setup steps).
+1. **Timezone** - defaults from the container's `TZ` env var; if your device is in a different timezone, the guide offers it in one click. Every scheduling decision is computed in this timezone (see [Configuration](configuration.md)).
+2. **Your week** - first day of the week, date format and time format.
+3. **When to schedule** - which days, and one set of hours for all of them, that flexible tasks may be placed in. The step starts by explaining the difference: a **fixed** task happens at a time you choose and stays there, whatever these hours say; a **flexible** task has a duration and a deadline, and Tessera finds it a time inside these hours. Different hours per day, split days and overnight windows are set in **Settings → Scheduling window**.
+4. **Daily budget** - none, or a cap on flexible work per day, and what happens when a flexible task won't fit in it before it's due: go over the budget, or leave the task unscheduled.
+
+**Skip setup** ends the guide at any point and keeps what you've saved. Once you finish or skip it, it doesn't open again; **Settings → Run the setup guide again** brings it back. If you close the page halfway, the next sign-in picks up at the same step.
+
+Days off (blackout dates) and **external calendars** aren't in the guide. Set them in **Settings** - see [Connecting an External Calendar](calendar-integration.md) for connecting Google or Outlook.
 
 You're now ready to create your first task - see [Tasks & Events](tasks-and-events.md).
 

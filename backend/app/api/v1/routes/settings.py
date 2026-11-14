@@ -36,6 +36,7 @@ class SettingsPatchRequest(BaseModel):
     first_day_of_week: DayName | None = None
     date_format: DateFormat | None = None
     time_format: TimeFormat | None = None
+    onboarding_completed: bool | None = None
 
 
 @router.get("")
