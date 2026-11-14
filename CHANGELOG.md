@@ -18,6 +18,7 @@
 - `docker-compose.yml` drops the obsolete `version` key.
 - Frontend: React Router 6 -> 7 (`react-router` replaces `react-router-dom`), closing its open-redirect advisory (GHSA-wrjc-x8rr-h8h6). No behaviour change: the app already ran with both v7 future flags on.
 - Frontend build and test tooling: Vite 5 -> 8, Vitest 0.34 -> 5, jsdom 25 -> 31. `npm audit` is clean (the esbuild dev-server and tinypool advisories are gone), and production builds are several times faster (Vite 8 bundles with Rolldown).
+- Frontend lint: ESLint 8 -> 10 with a flat config (`frontend/eslint.config.js` replaces `.eslintrc.cjs`), `typescript-eslint` 8 and `eslint-plugin-react-hooks` 7. Same rules as before. `npm ci` no longer prints deprecation warnings.
 
 ## 0.3.0
 
