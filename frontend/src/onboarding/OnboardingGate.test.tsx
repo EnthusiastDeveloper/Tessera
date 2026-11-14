@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router';
 import { OnboardingGate } from './OnboardingGate';
 import * as settingsApi from '../api/settings';
 import type { UserSettings } from '../types/settings';

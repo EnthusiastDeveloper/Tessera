@@ -16,6 +16,7 @@
 - Docs: the last editorial findings of IRR-2 (L1-L10) are closed. The status-lifecycle diagram (design doc 4) now shows every transition into and out of `blocked` and `missed`, and its stale rule that a blocked instance never has a `scheduled_time` is corrected for fixed ones; the holiday-calendar subsection no longer shares the number 12.15 with its backlog row.
 - CI: the container smoke test runs on a named volume and checks the admin account survives recreating the container.
 - `docker-compose.yml` drops the obsolete `version` key.
+- Frontend: React Router 6 -> 7 (`react-router` replaces `react-router-dom`), closing its open-redirect advisory (GHSA-wrjc-x8rr-h8h6). No behaviour change: the app already ran with both v7 future flags on.
 
 ## 0.3.0
 

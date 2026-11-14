@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router';
 import { ApiError, toApiError } from '../../api/client';
 import { useDisplayPreferences } from '../../display/DisplayPreferences';
 import { formatDateTime } from '../../lib/dates';

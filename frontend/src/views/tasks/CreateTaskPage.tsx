@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router';
 import { getSettings } from '../../api/settings';
 import { TimezoneNotice } from '../../components/TimezoneNotice';
 import type { QuickTaskPrefill } from '../timeline/quickCreate';

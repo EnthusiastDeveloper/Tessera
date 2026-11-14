@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import { useAuth } from '../../auth/AuthContext';
 import { MosaicMark } from '../../components/MosaicMark';
 import { ScheduleRepairOverlay } from '../../components/ScheduleRepairOverlay';

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter } from 'react-router';
 import { SetupScreen } from './SetupScreen';
 import * as AuthContextModule from '../../auth/AuthContext';
 import { ApiError } from '../../api/client';

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router';
 import { ApiError, toApiError } from '../api/client';
 import { getSettings, updateSettings } from '../api/settings';
 import { MosaicMark } from '../components/MosaicMark';
