@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
+from typing import cast
 
 from apscheduler.jobstores.base import JobLookupError
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
@@ -40,6 +41,27 @@ logger = logging.getLogger(__name__)
 _INSTANCE_SCOPED_PREFIXES = frozenset({"reminder", "overdue", "deadline_elapsed", "dependency_at_risk"})
 
 
+class _ResilientBackgroundScheduler(BackgroundScheduler):  # type: ignore[misc]  # APScheduler ships no types
+    """A `BackgroundScheduler` whose thread survives an error in its own job processing.
+
+    APScheduler 3.x lets an exception from `_process_jobs` escape `_main_loop`, which ends
+    the scheduler thread. Nothing is logged, and from then on no reminder, overdue check,
+    deadline sweep or calendar poll fires until the process restarts - architecture-plan
+    4.1's silent miss. One such error seen in the test suite: the job store's delete of a
+    one-off job that has just fired finds no row and raises `JobLookupError`.
+    `_dispatch` already guards handler errors; this guards the scheduler's own.
+    """
+
+    def _process_jobs(self) -> float | None:
+        try:
+            return cast(float | None, super()._process_jobs())
+        except Exception:
+            logger.exception("Job processing raised - the scheduler continues and retries in %ss.", self.jobstore_retry_interval)
+            # Never None here: that would sleep until the next add_job wakes the thread,
+            # leaving jobs that are already due unprocessed until then.
+            return cast(float, self.jobstore_retry_interval)
+
+
 class APSchedulerJobScheduler(JobScheduler):
     def __init__(self, engine: Engine) -> None:
         """`engine` should be `app.db.session.get_jobs_engine()` in production - its own
@@ -53,7 +75,7 @@ class APSchedulerJobScheduler(JobScheduler):
         # where app.main promises a fallback to UTC. Every job here is an absolute UTC
         # instant or an interval, so this zone never decides when anything fires (design
         # doc 14.1: persisted timestamps are UTC; the user's zone lives in their settings).
-        self._scheduler = BackgroundScheduler(jobstores={"default": jobstore}, timezone=UTC)
+        self._scheduler = _ResilientBackgroundScheduler(jobstores={"default": jobstore}, timezone=UTC)
 
     def start(self) -> None:
         self._scheduler.start()

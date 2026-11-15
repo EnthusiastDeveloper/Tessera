@@ -249,6 +249,40 @@ class TestDispatchRoutesEveryJobKind:
         wired_scheduler.schedule_at(job_key=overdue_job_key("instance-after-boom"), run_at=utcnow())
         assert _wait_until(lambda: calls == ["instance-after-boom"])
 
+    def test_a_job_store_error_in_job_processing_is_logged_and_does_not_kill_the_scheduler_thread(
+        self, wired_scheduler: APSchedulerJobScheduler, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """APScheduler's own loop, not a handler, raising: after a one-off job fires, its
+        row is deleted, and a missing row raises `JobLookupError` on the scheduler thread.
+        Unguarded, that ends the thread and every later job silently never fires.
+        """
+        import logging
+        import threading
+
+        from apscheduler.jobstores.base import JobLookupError
+        from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
+
+        calls: list[str] = []
+        monkeypatch.setattr(handlers, "run_overdue_check", lambda db, jobs, *, instance_id: calls.append(instance_id))
+
+        failing_key = overdue_job_key("instance-row-gone")
+        real_remove_job = SQLAlchemyJobStore.remove_job
+
+        def _remove_job(self: SQLAlchemyJobStore, job_id: str) -> None:
+            real_remove_job(self, job_id)
+            if job_id == failing_key and threading.current_thread().name == "APScheduler":
+                raise JobLookupError(job_id)  # as if the row had already been deleted
+
+        monkeypatch.setattr(SQLAlchemyJobStore, "remove_job", _remove_job)
+
+        with caplog.at_level(logging.ERROR, logger="app.jobs.scheduler"):
+            wired_scheduler.schedule_at(job_key=failing_key, run_at=utcnow())
+            assert _wait_until(lambda: "Job processing raised" in caplog.text)
+
+        assert wired_scheduler._scheduler._thread.is_alive()
+        wired_scheduler.schedule_at(job_key=overdue_job_key("instance-after-row-gone"), run_at=utcnow())
+        assert _wait_until(lambda: "instance-after-row-gone" in calls)
+
 
 class TestCancel:
     def test_cancelling_before_it_fires_prevents_the_side_effect(self, wired_scheduler: APSchedulerJobScheduler) -> None:

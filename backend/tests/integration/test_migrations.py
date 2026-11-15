@@ -12,6 +12,7 @@ import os
 import sqlite3
 import subprocess
 import sys
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -45,7 +46,10 @@ def _run_alembic(*args: str, database_path: Path) -> None:
 
 def _table_names(database_path: Path) -> set[str]:
     engine = create_engine(f"sqlite:///{database_path}")
-    return set(inspect(engine).get_table_names())
+    try:
+        return set(inspect(engine).get_table_names())
+    finally:
+        engine.dispose()
 
 
 def test_upgrade_head_creates_every_entity_table(tmp_path: Path) -> None:
@@ -98,7 +102,8 @@ def test_database_level_constraints_survive_in_the_baseline(tmp_path: Path) -> N
         " estimated_duration_minutes, reminder_offsets_minutes, archived, start_date, created_at, updated_at, version)"
         " VALUES ('t', 'x', 'flexible', ?, 'calendar', 2, 30, '[]', 0, '2026-03-01', ?, ?, 1)"
     )
-    with sqlite3.connect(db_path) as conn:
+    # closing(): sqlite3's own context manager only commits, it never closes the connection.
+    with closing(sqlite3.connect(db_path)) as conn:
         conn.execute(insert, ("daily", ts, ts))
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute(insert.replace("'t'", "'u'"), ("custom", ts, ts))

@@ -25,6 +25,11 @@ def _fresh_lru_caches() -> Iterator[None]:
     get_jobs_engine.cache_clear()
     get_session_factory.cache_clear()
     yield
+    # Dispose what a test left cached before dropping it - clearing the cache alone leaves
+    # its pooled connections for the garbage collector ("unclosed database" warnings).
+    for cached_engine in (get_engine, get_jobs_engine):
+        if cached_engine.cache_info().currsize:
+            cached_engine().dispose()
     get_settings.cache_clear()
     get_engine.cache_clear()
     get_jobs_engine.cache_clear()
@@ -65,7 +70,10 @@ def test_every_connection_gets_the_documented_sqlite_pragmas(tmp_path: Path) -> 
     """architecture-plan §5.3 (IRR-2 M12): foreign keys on, WAL journal, 5 s busy timeout.
     A file database, since `:memory:` cannot use WAL."""
     engine = build_engine(sqlite_url(str(tmp_path / "pragmas.db")))
-    with engine.connect() as connection:
-        assert connection.execute(text("PRAGMA foreign_keys")).scalar() == 1
-        assert connection.execute(text("PRAGMA journal_mode")).scalar() == "wal"
-        assert connection.execute(text("PRAGMA busy_timeout")).scalar() == 5000
+    try:
+        with engine.connect() as connection:
+            assert connection.execute(text("PRAGMA foreign_keys")).scalar() == 1
+            assert connection.execute(text("PRAGMA journal_mode")).scalar() == "wal"
+            assert connection.execute(text("PRAGMA busy_timeout")).scalar() == 5000
+    finally:
+        engine.dispose()
