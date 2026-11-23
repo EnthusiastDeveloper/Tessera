@@ -6,7 +6,7 @@ import { RouteGuard } from './routes/RouteGuard';
 import { LoginScreen } from './views/auth/LoginScreen';
 import { SetupScreen } from './views/auth/SetupScreen';
 import { AppShell } from './views/shell/AppShell';
-import { ComingSoon } from './views/shell/ComingSoon';
+import { BacklogPage } from './views/backlog/BacklogPage';
 import { CreateTaskPage } from './views/tasks/CreateTaskPage';
 import { EditTaskPage } from './views/tasks/EditTaskPage';
 import { TaskDetailPage } from './views/tasks/TaskDetailPage';
@@ -57,10 +57,7 @@ function App(): JSX.Element {
             <Route path="tasks/new" element={<CreateTaskPage />} />
             <Route path="tasks/:instanceId/edit" element={<EditTaskPage />} />
             <Route path="tasks/:instanceId" element={<TaskDetailPage />} />
-            <Route
-              path="backlog"
-              element={<ComingSoon title="Backlog" note="Not yet scheduled - see implementation-plan.md." />}
-            />
+            <Route path="backlog" element={<BacklogPage />} />
             <Route path="notifications" element={<NotificationsPanel />} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />

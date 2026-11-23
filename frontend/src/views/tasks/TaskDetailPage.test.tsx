@@ -112,15 +112,18 @@ describe('TaskDetailPage', () => {
     const dependent: TaskInstance = { ...BASE_INSTANCE, id: 'instance-1', dependencies: ['dep-1'] };
     renderDetail([dependency, dependent]);
     await screen.findByRole('heading', { name: 'Water the plants' });
-    expect(screen.getByText(/Prepare car/)).toBeInTheDocument();
-    expect(screen.getByText(/Prepare car - completed/)).toBeInTheDocument();
+    const link = screen.getByRole('link', { name: 'Prepare car' });
+    expect(link).toHaveAttribute('href', '/tasks/dep-1');
+    expect(link.closest('li')).toHaveTextContent('Prepare car - completed');
   });
 
   it('renders reverse "blocking" links', async () => {
     const blocked: TaskInstance = { ...BASE_INSTANCE, id: 'dep-2', name: 'Perform annual inspection', status: 'blocked', dependencies: ['instance-1'] };
     renderDetail([BASE_INSTANCE, blocked]);
     await screen.findByRole('heading', { name: 'Water the plants' });
-    expect(screen.getByText(/Perform annual inspection - blocked/)).toBeInTheDocument();
+    const link = screen.getByRole('link', { name: 'Perform annual inspection' });
+    expect(link).toHaveAttribute('href', '/tasks/dep-2');
+    expect(link.closest('li')).toHaveTextContent('Perform annual inspection - blocked');
   });
 
   it('marks complete and updates the button set in place', async () => {
