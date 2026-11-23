@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router';
+import { Link, useNavigate, useParams } from 'react-router';
 import { ApiError, toApiError } from '../../api/client';
 import { useDisplayPreferences } from '../../display/DisplayPreferences';
 import { formatDateTime } from '../../lib/dates';
@@ -211,7 +211,7 @@ export function TaskDetailPage(): JSX.Element {
         <ul>
           {dependencies.map((dep) => (
             <li key={dep.id}>
-              {dep.name}
+              {dep.status ? <Link to={`/tasks/${dep.id}`}>{dep.name}</Link> : dep.name}
               {dep.status ? ` - ${formatStatus(dep.status)}` : ''}
               {canEditDependencies && (
                 <button
@@ -255,7 +255,7 @@ export function TaskDetailPage(): JSX.Element {
         <ul>
           {blocking.map((dependent) => (
             <li key={dependent.id}>
-              {dependent.name} - {formatStatus(dependent.status)}
+              <Link to={`/tasks/${dependent.id}`}>{dependent.name}</Link> - {formatStatus(dependent.status)}
             </li>
           ))}
         </ul>
