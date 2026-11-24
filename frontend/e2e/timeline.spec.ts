@@ -41,4 +41,30 @@ test.describe('timeline view against the real backend', () => {
     await expect(page).toHaveURL(/\/tasks\/[^/]+$/);
     await expect(page.getByRole('heading', { name: 'Timeline smoke test task' })).toBeVisible();
   });
+
+  test('the Optimize Schedule introduction is shown once per account, not once per device (Rev 19)', async ({ browser }) => {
+    // Two separate browser contexts share nothing - no cookies, no storage - like two devices.
+    async function signIn(): Promise<import('@playwright/test').Page> {
+      const page = await (await browser.newContext()).newPage();
+      await page.goto('/login');
+      await page.getByLabel('Username').fill('admin');
+      await page.getByLabel('Password').fill(VALID_PASSWORD);
+      await page.getByRole('button', { name: 'Log in' }).click();
+      await expect(page.getByRole('heading', { name: 'Timeline' })).toBeVisible();
+      return page;
+    }
+
+    // The test above left a task on this week's Timeline, so the introduction is due.
+    const laptop = await signIn();
+    const note = laptop.getByRole('note', { name: 'About Optimize Schedule' });
+    await expect(note).toBeVisible();
+    const saved = laptop.waitForResponse((r) => r.url().includes('/api/v1/settings/introductions-seen') && r.ok());
+    await note.getByRole('button', { name: 'Got it' }).click();
+    await saved;
+    await expect(note).toHaveCount(0);
+
+    const phone = await signIn();
+    await expect(phone.locator('.fc-event-real').first()).toBeVisible();
+    await expect(phone.getByRole('note', { name: 'About Optimize Schedule' })).toHaveCount(0);
+  });
 });

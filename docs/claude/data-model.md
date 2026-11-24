@@ -39,4 +39,5 @@
 - `budget_enforcement`: "soft" | "strict" - whether to allow budget override as last resort
 - `first_day_of_week`: day name, default `sunday` (display-only, doesn't affect algorithm; orders the Timeline week and every day-of-week list, via `daysOfWeekFrom` in `frontend/src/lib/days.ts`)
 - `onboarding_completed`: boolean, default false - the first-run setup guide (`/welcome`, design-doc 8.1 screen 0a, Rev 16) opens on sign-in until it is finished or skipped
+- `introductions_seen`: list of keys, default `[]` - one-time introductions already dismissed (design-doc 3.7, 8.1, Rev 19), once per account, not per device. Every future one-time introduction uses it: pick a new key, show the note while the key is absent
 - `date_format`: `DD/MM/YYYY` (default) | `MM/DD/YYYY` | `YYYY-MM-DD`; `time_format`: `24h` (default) | `12h` (both display-only, Rev 15) - the frontend writes every date and time through `frontend/src/lib/dates.ts`, never `toLocaleString()`

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { getOptimizationOpportunity } from '../api/scheduleOptimizations';
 import type { OptimizationOpportunity } from '../types/optimization';
+import { useIntroduction } from '../introductions/Introductions';
 import { useOptimization } from './OptimizationContext';
 
 function remaining(until: string | null): number {
@@ -14,27 +15,6 @@ export function gainHint(opportunity: OptimizationOpportunity): string {
 }
 
 export const NOTHING_TO_IMPROVE = 'Nothing to improve right now';
-
-// The one-time note (design doc 8.1 screen 2, Rev 19) is remembered by the browser only:
-// shown once more on a new device costs nothing. Storage can be unavailable; then the note
-// stays dismissed for this page's life once "Got it" is pressed.
-export const NOTE_DISMISSED_KEY = 'tessera.optimizeNote.dismissed';
-
-function noteDismissed(): boolean {
-  try {
-    return window.localStorage.getItem(NOTE_DISMISSED_KEY) === 'true';
-  } catch {
-    return false;
-  }
-}
-
-function rememberNoteDismissed(): void {
-  try {
-    window.localStorage.setItem(NOTE_DISMISSED_KEY, 'true');
-  } catch {
-    // Not remembering it only means it may be shown again.
-  }
-}
 
 /** What Optimize Schedule is for, shown beside the button once (Rev 19). */
 function OptimizeNote({ onDismiss }: { onDismiss: () => void }): JSX.Element {
@@ -71,7 +51,7 @@ export function OptimizeControls({ introduce = false }: { introduce?: boolean })
   const undoUntil =
     latest?.status === 'applied' && latest.undo_available ? latest.undo_until : null;
   const [seconds, setSeconds] = useState(() => remaining(undoUntil));
-  const [noteHidden, setNoteHidden] = useState(noteDismissed);
+  const note = useIntroduction('optimize_schedule');
 
   useEffect(() => {
     if (!loaded || locked) return undefined;
@@ -99,7 +79,7 @@ export function OptimizeControls({ introduce = false }: { introduce?: boolean })
   const worthwhile = opportunity?.worthwhile === true;
   const nothingToGain = opportunity !== null && !opportunity.worthwhile;
 
-  const showNote = introduce && !noteHidden && !locked;
+  const showNote = introduce && note.show && !locked;
 
   return (
     <>
@@ -146,12 +126,7 @@ export function OptimizeControls({ introduce = false }: { introduce?: boolean })
         )}
       </div>
       {showNote && (
-        <OptimizeNote
-          onDismiss={() => {
-            rememberNoteDismissed();
-            setNoteHidden(true);
-          }}
-        />
+        <OptimizeNote onDismiss={note.dismiss} />
       )}
     </>
   );

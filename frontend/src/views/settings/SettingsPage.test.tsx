@@ -40,6 +40,7 @@ const BASE_SETTINGS: UserSettings = {
   date_format: 'DD/MM/YYYY',
   time_format: '24h',
   onboarding_completed: true,
+  introductions_seen: [],
 };
 
 function renderAt(path: string, state?: unknown): void {

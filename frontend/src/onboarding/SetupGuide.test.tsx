@@ -51,6 +51,7 @@ const SETTINGS: UserSettings = {
   date_format: 'DD/MM/YYYY',
   time_format: '24h',
   onboarding_completed: false,
+  introductions_seen: [],
 };
 
 function renderGuide(state?: { restart: boolean }): void {

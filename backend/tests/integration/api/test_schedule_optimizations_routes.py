@@ -131,6 +131,11 @@ class TestTheServerSideEditLock:
         assert [a.status_code for a in attempts] == [409] * len(attempts)
         assert {a.json()["code"] for a in attempts} == {"optimization_in_progress"}
 
+    def test_dismissing_an_introduction_is_not_a_schedule_change(self, client: TestClient, running: str) -> None:
+        # Design doc 3.7 (Rev 19): recording that an introduction was seen stays open.
+        response = client.post("/api/v1/settings/introductions-seen", json={"key": "optimize_schedule"})
+        assert response.status_code == 200, response.text
+
     def test_reads_still_work_while_it_runs(self, client: TestClient, running: str) -> None:
         assert client.get("/api/v1/task-instances").status_code == 200
         assert client.get("/api/v1/settings").status_code == 200

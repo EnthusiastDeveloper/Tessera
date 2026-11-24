@@ -3,6 +3,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { TimelinePage } from './TimelinePage';
+import { IntroductionsProvider } from '../../introductions/Introductions';
 import * as taskInstancesApi from '../../api/taskInstances';
 import * as taskTemplatesApi from '../../api/taskTemplates';
 import * as externalEventsApi from '../../api/externalEvents';
@@ -87,16 +88,19 @@ const SETTINGS: UserSettings = {
   date_format: 'DD/MM/YYYY',
   time_format: '24h',
   onboarding_completed: true,
+  introductions_seen: [],
 };
 
 function renderTimeline(): ReturnType<typeof render> {
   return render(
-    <MemoryRouter initialEntries={['/']}>
-      <Routes>
-        <Route path="/" element={<TimelinePage />} />
-        <Route path="/tasks/:instanceId" element={<div>Task detail screen</div>} />
-      </Routes>
-    </MemoryRouter>
+    <IntroductionsProvider>
+      <MemoryRouter initialEntries={['/']}>
+        <Routes>
+          <Route path="/" element={<TimelinePage />} />
+          <Route path="/tasks/:instanceId" element={<div>Task detail screen</div>} />
+        </Routes>
+      </MemoryRouter>
+    </IntroductionsProvider>
   );
 }
 
@@ -107,7 +111,7 @@ describe('TimelinePage', () => {
     mockedTemplates.listProjections.mockResolvedValue([VIRTUAL_OCCURRENCE]);
     mockedExternalEvents.listExternalEvents.mockResolvedValue([EXTERNAL_EVENT]);
     mockedSettings.getSettings.mockResolvedValue(SETTINGS);
-    window.localStorage.clear();
+    mockedSettings.markIntroductionSeen.mockResolvedValue({ ...SETTINGS, introductions_seen: ['optimize_schedule'] });
   });
 
   it('requests scheduled instances, projections, external events, and settings on load', async () => {
@@ -203,15 +207,19 @@ describe('TimelinePage', () => {
     expect(screen.queryByRole('note', { name: 'Your Timeline is empty' })).not.toBeInTheDocument();
   });
 
-  it('explains Optimize Schedule once, until Got it is pressed', async () => {
-    const first = renderTimeline();
+  it('introduces Optimize Schedule until Got it, and records that on the server (Rev 19)', async () => {
+    renderTimeline();
     const note = await screen.findByRole('note', { name: 'About Optimize Schedule' });
     await userEvent.click(within(note).getByRole('button', { name: 'Got it' }));
     expect(screen.queryByRole('note', { name: 'About Optimize Schedule' })).not.toBeInTheDocument();
-    first.unmount();
+    expect(mockedSettings.markIntroductionSeen).toHaveBeenCalledWith('optimize_schedule');
+  });
 
+  it('does not introduce Optimize Schedule again once the account has seen it, on any device', async () => {
+    mockedSettings.getSettings.mockResolvedValue({ ...SETTINGS, introductions_seen: ['optimize_schedule'] });
     renderTimeline();
     await screen.findByText('Water the plants');
     expect(screen.queryByRole('note', { name: 'About Optimize Schedule' })).not.toBeInTheDocument();
   });
+
 });

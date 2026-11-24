@@ -18,6 +18,10 @@ from app.settings import service
 
 router = APIRouter(prefix="/api/v1/settings", tags=["settings"], dependencies=[SCHEDULE_UNLOCKED])
 
+# Recording that an introduction was seen changes nothing about the schedule, so it stays
+# open while an optimization runs (6.11) - unlike every route on `router`.
+introductions_router = APIRouter(prefix="/api/v1/settings", tags=["settings"])
+
 
 class SettingsPatchRequest(BaseModel):
     """All fields optional - only keys actually present in the request body are applied.
@@ -88,5 +92,19 @@ def patch_settings_endpoint(
         patch["blackout_dates"] = tuple(patch["blackout_dates"])
     try:
         return service.update_settings(db, jobs, patch=patch)
+    except service.SettingsValidationError as exc:
+        raise AppError.for_code(exc.code, str(exc)) from exc
+
+
+class IntroductionSeenRequest(BaseModel):
+    key: str
+
+
+@introductions_router.post("/introductions-seen")
+def mark_introduction_seen_endpoint(payload: IntroductionSeenRequest, db: Session = DB_SESSION) -> UserSettings:
+    """Design doc 3.7, 8.1 (Rev 19): a one-time introduction was dismissed; never show it
+    again, on any device. Idempotent. Returns the settings, `introductions_seen` included."""
+    try:
+        return service.mark_introduction_seen(db, key=payload.key)
     except service.SettingsValidationError as exc:
         raise AppError.for_code(exc.code, str(exc)) from exc

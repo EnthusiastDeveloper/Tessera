@@ -6,6 +6,7 @@ other service-layer module (architecture-plan §2) - no FastAPI imports here.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -75,6 +76,7 @@ def get_or_create_default(db: Session, *, default_timezone: str, before_setup: b
             date_format="DD/MM/YYYY",
             time_format="24h",
             onboarding_completed=False,
+            introductions_seen=(),
         )
     )
 
@@ -142,6 +144,31 @@ def update_settings(db: Session, jobs: JobScheduler, *, patch: dict[str, Any]) -
     return saved
 
 
+#: An introduction's key (design doc 3.7, Rev 19): named by the client, so only its shape is
+#: checked - a new introduction needs no server change. The cap only stops a runaway client.
+_INTRODUCTION_KEY = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
+MAX_INTRODUCTIONS_SEEN = 200
+
+
+def mark_introduction_seen(db: Session, *, key: str) -> UserSettings:
+    """Record that the one-time introduction `key` was shown and dismissed. Idempotent:
+    adding a key twice keeps one. An append, not a list the client replaces, so two
+    devices dismissing different introductions can't undo each other."""
+    if not _INTRODUCTION_KEY.fullmatch(key):
+        raise SettingsValidationError(
+            "invalid_field", "An introduction key is 1-64 lowercase letters, digits, '_', '.' or '-', starting with a letter."
+        )
+    repo = UserSettingsRepository(db)
+    current = repo.get()
+    if current is None:
+        raise SettingsValidationError("settings_not_initialized", "Settings have not been created yet.")
+    if key in current.introductions_seen:
+        return current
+    if len(current.introductions_seen) >= MAX_INTRODUCTIONS_SEEN:
+        raise SettingsValidationError("invalid_field", f"At most {MAX_INTRODUCTIONS_SEEN} introductions can be recorded.")
+    return repo.update(current.model_copy(update={"introductions_seen": (*current.introductions_seen, key)}))
+
+
 def _validate_blackout_dates(blackouts: list[Any]) -> None:
     for blackout in blackouts:
         if blackout.end < blackout.start:
@@ -196,5 +223,6 @@ __all__ = [
     "SettingsValidationError",
     "default_timezone_from_env",
     "get_or_create_default",
+    "mark_introduction_seen",
     "update_settings",
 ]

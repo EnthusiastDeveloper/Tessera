@@ -190,6 +190,8 @@ class UserSettings(_Frozen):
     time_format: TimeFormat = "24h"
     # The first-run setup guide (design doc 3.7, 8.1, Rev 16) has been finished or skipped.
     onboarding_completed: bool = False
+    # One-time introductions already shown and dismissed (design doc 3.7, 8.1, Rev 19).
+    introductions_seen: tuple[str, ...] = ()
 
 
 class ExternalEvent(_Frozen):

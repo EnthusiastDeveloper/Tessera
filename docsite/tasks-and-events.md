@@ -38,7 +38,7 @@ A legend under the Timeline's toolbar names every kind of block it draws:
 - **Other calendar** (hatched gray) - an event from a connected calendar, read only.
 - **Blackout day** (tinted red) - nothing is scheduled on this day.
 
-Hover a label for a one-line explanation. While you have no task on the Timeline, a note above it says how to add one; it goes away once you do. The first time you see the Timeline with a task on it, a short note explains **Optimize Schedule**; press **Got it** to hide it. That is remembered by your browser, so a new browser or device shows it once more. The Backlog and Notifications pages say what would appear there when they're empty.
+Hover a label for a one-line explanation. While you have no task on the Timeline, a note above it says how to add one; it goes away once you do. The first time you see the Timeline with a task on it, a short note explains **Optimize Schedule**; press **Got it** to hide it. That is remembered for your account, so it won't come back on another browser or device. New features that get an introduction like this show it once, the same way. The Backlog and Notifications pages say what would appear there when they're empty.
 
 ## Recurrence
 
