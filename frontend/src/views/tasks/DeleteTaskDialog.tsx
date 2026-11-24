@@ -108,7 +108,7 @@ export function DeleteTaskDialog({ template, instance, onDeleted, onCancel }: De
         <p>This task will be permanently deleted.</p>
       )}
 
-      <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
+      <div className="flex gap-3">
         <button type="button" className="danger" onClick={() => void handleConfirm()} disabled={submitting || scopeChoicePending}>
           {submitting ? 'Deleting…' : 'Delete'}
         </button>

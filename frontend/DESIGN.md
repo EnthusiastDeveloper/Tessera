@@ -98,6 +98,12 @@ accent glow, only for "this is happening now" (the now-indicator, an in-progress
   error text in `--color-danger` directly under the field, not a toast - errors need to
   stay visible while the user fixes them. Duration fields follow §8.1a's "number + unit
   control" pattern from 9b onward - not relevant to 9a's forms (setup/login have none).
+- **Long forms (Rev 20, the task form):** a column of cards (`.task-form`, `.form-card` -
+  a `fieldset` whose floated `legend` is the card's heading), one per group of fields,
+  with the actions in a sticky `.form-actions` bar at the bottom (primary last, a
+  destructive action at the far start). Exclusive choices that should all be visible use
+  `.segmented` (priority) or `.choice-card` (task type, a short hint under each title; name
+  the radio with `aria-labelledby` the title and `aria-describedby` the hint).
 - **Layout:** a single top app bar (mark and wordmark, primary nav, New task, the account
   menu with Log out) once authenticated; pinned on wide screens, scrolling on phones. No
   sidebar for the POC's screen count (six top-level destinations, a top bar scales fine,
@@ -123,8 +129,15 @@ clock through `slotLabelFormat`/`eventTimeFormat` (TimelinePage).
 Date fields use `src/components/DateInput.tsx`, never `<input type="date">`: the native
 field writes dates in the browser's language and can't be told otherwise. `DateInput` is a
 text field in the user's format (a pasted ISO date is accepted too) with a button that
-opens the browser's calendar. Time (`type="time"`) and date-and-time (`datetime-local`)
-fields are still native and follow the browser's clock until the task-form redesign.
+opens the browser's calendar.
+
+**(Rev 20, design doc 8.1b)** Times of day use `src/components/TimeInput.tsx`, never
+`<input type="time">`: a text field on the user's clock ("17:30" / "5:30 PM", via
+`src/lib/times.ts`) with a Radix popover listing the day in 15-minute steps. Typing accepts
+either clock. A moment uses `src/components/DateTimeInput.tsx` (a `DateInput` and a
+`TimeInput` side by side, read in the browser's zone), never `datetime-local`. A
+`TimeInput` with no `<label>` takes an `aria-label`; keep its picker button's name generic
+("Choose from a list of times") so it never contains the field's own label.
 
 ## Accessibility baseline
 

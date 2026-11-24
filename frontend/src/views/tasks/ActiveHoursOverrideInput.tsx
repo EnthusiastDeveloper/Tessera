@@ -42,7 +42,7 @@ export function ActiveHoursOverrideInput({
   return (
     <fieldset className="field">
       <legend>Active-hours override</legend>
-      <p style={{ color: 'var(--color-text-muted)', fontSize: 'var(--font-size-sm)' }}>
+      <p className="text-sm text-text-muted">
         Days left as &quot;Inherit&quot; use your global scheduling-window settings.
       </p>
       {daysOfWeekFrom(firstDayOfWeek).map((day) => {
@@ -51,14 +51,9 @@ export function ActiveHoursOverrideInput({
         return (
           <div
             key={day}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 'var(--space-2)',
-              marginBottom: 'var(--space-2)',
-            }}
+            className="mb-2 flex flex-wrap items-center gap-2"
           >
-            <span style={{ width: '6rem' }}>{DAY_LABELS[day]}</span>
+            <span className="w-24 shrink-0">{DAY_LABELS[day]}</span>
             <select
               aria-label={`${DAY_LABELS[day]} active hours`}
               value={mode}

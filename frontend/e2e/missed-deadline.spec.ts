@@ -48,7 +48,10 @@ test.describe('missed and skipped flexible tasks against the real backend', () =
 
     await page.getByRole('button', { name: 'Extend deadline' }).click();
     const newDeadline = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-    await page.getByLabel('New deadline').fill(toDatetimeLocal(newDeadline));
+    // A date and a time of day (design doc 8.1b, Rev 20); the date field also takes an ISO date.
+    const [date, time] = toDatetimeLocal(newDeadline).split('T');
+    await page.getByLabel('New deadline', { exact: true }).fill(date);
+    await page.getByLabel('New deadline time').fill(time);
     await page.getByRole('button', { name: 'Confirm extension' }).click();
 
     // Design doc §6.7: extending the deadline re-enters §6.2, and a week of default

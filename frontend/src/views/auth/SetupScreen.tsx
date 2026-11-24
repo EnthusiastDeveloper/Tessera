@@ -56,7 +56,7 @@ export function SetupScreen(): JSX.Element {
     <div className="centered-screen">
       <div className="auth-card">
         <h1>Set up Tessera</h1>
-        <p style={{ color: 'var(--color-text-muted)', fontSize: 'var(--font-size-sm)' }}>
+        <p className="text-sm text-text-muted">
           Find the setup token in the server startup log (search for &quot;Setup token&quot;), then
           choose an admin password.
         </p>

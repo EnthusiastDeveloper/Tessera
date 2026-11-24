@@ -1,6 +1,9 @@
-import { useEffect, useState } from 'react';
-import type { FormEvent } from 'react';
+import { useEffect, useId, useState } from 'react';
+import type { FormEvent, ReactNode } from 'react';
 import { DateInput } from '../../components/DateInput';
+import { DateTimeInput } from '../../components/DateTimeInput';
+import { TimeInput } from '../../components/TimeInput';
+import { splitLocalDateTime } from '../../lib/times';
 import { DurationInput } from '../../components/DurationInput';
 import { useDisplayPreferences } from '../../display/DisplayPreferences';
 import { formatWeekdayDayMonth, type DateFormat } from '../../lib/dates';
@@ -45,16 +48,6 @@ const DEPENDENCY_EDITABLE_STATUSES: TaskInstance['status'][] = ['pending', 'sche
 const PRIORITIES: Priority[] = ['low', 'medium', 'high', 'critical'];
 const PATTERNS: RecurrencePattern[] = ['one_time', 'daily', 'weekly', 'monthly'];
 
-function toDatetimeLocal(iso: string | null | undefined): string {
-  if (!iso) return '';
-  const d = new Date(iso);
-  const pad = (n: number): string => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-function fromDatetimeLocal(value: string): string {
-  return new Date(value).toISOString();
-}
 
 const TERMINAL_STATUSES = new Set(['completed', 'dismissed']);
 
@@ -110,8 +103,35 @@ function changedFields(
 
 /** Today as a local "YYYY-MM-DD" - the earliest start date a new task may take. */
 function todayLocalDate(): string {
-  return toDatetimeLocal(new Date().toISOString()).slice(0, 10);
+  return splitLocalDateTime(new Date().toISOString()).date;
 }
+
+/** One card of the form (design doc 8.1 screen 3, Rev 20): a named group of related fields. */
+function FormSection({ title, hint, children }: { title: string; hint?: string; children: ReactNode }): JSX.Element {
+  const hintId = useId();
+  return (
+    <fieldset className="form-card" aria-describedby={hint ? hintId : undefined}>
+      <legend>{title}</legend>
+      {hint && (
+        <p id={hintId} className="form-card__hint">
+          {hint}
+        </p>
+      )}
+      {children}
+    </fieldset>
+  );
+}
+
+const TYPE_CHOICES: { value: TaskType; label: string; hint: string }[] = [
+  { value: 'flexible', label: 'Flexible', hint: 'Tessera finds the time, inside your active hours and before the deadline.' },
+  { value: 'fixed', label: 'Fixed', hint: 'At a set time, like an appointment. It never moves on its own.' },
+];
+
+const REPEAT_UNIT: Record<Exclude<RecurrencePattern, 'one_time'>, [string, string]> = {
+  daily: ['day', 'days'],
+  weekly: ['week', 'weeks'],
+  monthly: ['month', 'months'],
+};
 
 interface TaskFormProps {
   mode: 'create' | 'edit';
@@ -123,6 +143,8 @@ interface TaskFormProps {
   instance?: TaskInstance;
   /** Create mode only: what the Timeline's quick create already has (design doc 8.1, Rev 18). */
   prefill?: QuickTaskPrefill;
+  /** Shown at the start of the action bar, e.g. the edit page's "Delete task". */
+  secondaryAction?: ReactNode;
   onSaved: (result: { template?: TaskTemplate; instance?: TaskInstance }) => void;
   onCancel: () => void;
 }
@@ -132,6 +154,7 @@ export function TaskForm({
   template,
   instance,
   prefill,
+  secondaryAction,
   onSaved,
   onCancel,
 }: TaskFormProps): JSX.Element {
@@ -164,7 +187,7 @@ export function TaskForm({
   // and is remounted (`durationKey`) to show what the date resolved to.
   const [dueDate, setDueDate] = useState('');
   const [durationKey, setDurationKey] = useState(0);
-  const [deadlineAt, setDeadlineAt] = useState(toDatetimeLocal(instance?.deadline));
+  const [deadlineAt, setDeadlineAt] = useState(instance?.deadline ?? '');
   const [reminderOffsetsMinutes, setReminderOffsetsMinutes] = useState<number[]>(
     template?.reminder_offsets_minutes ?? []
   );
@@ -304,7 +327,7 @@ export function TaskForm({
           location: location || undefined,
           priority,
           estimated_duration_minutes: estimatedDurationMinutes,
-          ...(type === 'flexible' && deadlineAt ? { deadline: fromDatetimeLocal(deadlineAt) } : {}),
+          ...(type === 'flexible' && deadlineAt ? { deadline: deadlineAt } : {}),
         };
         const updated = await patchInstanceThisOccurrence(instance!.id, payload);
         onSaved({ instance: updated });
@@ -316,287 +339,285 @@ export function TaskForm({
     }
   };
 
+  const repeatUnit = pattern === 'one_time' ? null : REPEAT_UNIT[pattern][interval === 1 ? 0 : 1];
+
   return (
-    <form onSubmit={(event) => void handleSubmit(event)} noValidate>
+    <form className="task-form" onSubmit={(event) => void handleSubmit(event)} noValidate>
       {error && (
         <div className="banner-error" role="alert">
           {error.message}
         </div>
       )}
 
-      {isEdit && isRecurring && <ScopePrompt value={scope} onChange={setScope} />}
-
-      {effectiveScope === 'this_and_future' && skipped.length > 0 && (
-        <div className="field" role="note">
-          <p>
-            {skipped.length === 1
-              ? '1 upcoming occurrence has its own changes and won’t be updated: '
-              : `${skipped.length} upcoming occurrences have their own changes and won’t be updated: `}
-            {skipped.map((occurrence) => occurrenceLabel(occurrence, dateFormat)).join(', ')}
-          </p>
-          <label>
-            <input
-              type="checkbox"
-              checked={includeDetached}
-              onChange={(event) => setIncludeDetached(event.target.checked)}
-            />{' '}
-            Apply to all upcoming occurrences, including these
-          </label>
+      {isEdit && isRecurring && (
+        <div className="form-card">
+          <ScopePrompt value={scope} onChange={setScope} />
+          {effectiveScope === 'this_and_future' && skipped.length > 0 && (
+            <div className="banner-warning" role="note">
+              <p className="mt-0">
+                {skipped.length === 1
+                  ? '1 upcoming occurrence has its own changes and won’t be updated: '
+                  : `${skipped.length} upcoming occurrences have their own changes and won’t be updated: `}
+                {skipped.map((occurrence) => occurrenceLabel(occurrence, dateFormat)).join(', ')}
+              </p>
+              <label className="mb-0 font-normal">
+                <input
+                  type="checkbox"
+                  checked={includeDetached}
+                  onChange={(event) => setIncludeDetached(event.target.checked)}
+                />
+                Apply to all upcoming occurrences, including these
+              </label>
+            </div>
+          )}
         </div>
       )}
 
-      <div className="field">
-        <label htmlFor="task-name">Name</label>
-        <input
-          id="task-name"
-          type="text"
-          value={name}
-          maxLength={MAX_NAME_LENGTH}
-          onChange={(event) => setName(event.target.value)}
-          required
-        />
-      </div>
-
-      <div className="field">
-        <label htmlFor="task-description">Description</label>
-        <input
-          id="task-description"
-          type="text"
-          value={description}
-          maxLength={MAX_DESCRIPTION_LENGTH}
-          onChange={(event) => setDescription(event.target.value)}
-        />
-      </div>
-
-      <div className="field">
-        <label htmlFor="task-location">Location</label>
-        <input
-          id="task-location"
-          type="text"
-          value={location}
-          maxLength={MAX_LOCATION_LENGTH}
-          onChange={(event) => setLocation(event.target.value)}
-        />
-      </div>
-
-      {!isEdit && (
-        <fieldset className="field">
-          <legend>Type</legend>
-          <label style={{ marginRight: 'var(--space-4)' }}>
-            <input
-              type="radio"
-              name="task-type"
-              checked={type === 'flexible'}
-              onChange={() => setType('flexible')}
-            />{' '}
-            Flexible
-          </label>
-          <label>
-            <input
-              type="radio"
-              name="task-type"
-              checked={type === 'fixed'}
-              onChange={() => setType('fixed')}
-            />{' '}
-            Fixed
-          </label>
-        </fieldset>
-      )}
-
-      {!isEdit && (
+      <FormSection title="Task">
         <div className="field">
-          <label htmlFor="task-start-date">Starts on</label>
-          <DateInput
-            id="task-start-date"
-            value={startDate}
-            min={todayLocalDate()}
-            onChange={changeStartDate}
+          <label htmlFor="task-name">Name</label>
+          <input
+            id="task-name"
+            type="text"
+            className="text-lg"
+            value={name}
+            maxLength={MAX_NAME_LENGTH}
+            placeholder="What needs doing?"
+            onChange={(event) => setName(event.target.value)}
             required
           />
-          {error?.code === 'invalid_start_date' && <p className="field-error">{error.message}</p>}
         </div>
+        <div className="grid gap-x-4 sm:grid-cols-2">
+          <div className="field">
+            <label htmlFor="task-description">Description</label>
+            <input
+              id="task-description"
+              type="text"
+              value={description}
+              maxLength={MAX_DESCRIPTION_LENGTH}
+              onChange={(event) => setDescription(event.target.value)}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="task-location">Location</label>
+            <input
+              id="task-location"
+              type="text"
+              value={location}
+              maxLength={MAX_LOCATION_LENGTH}
+              onChange={(event) => setLocation(event.target.value)}
+            />
+          </div>
+        </div>
+      </FormSection>
+
+      {!isEdit && (
+        <FormSection title="Type">
+          <div className="grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label="Type">
+            {TYPE_CHOICES.map((choice) => (
+              <label key={choice.value} className={`choice-card ${type === choice.value ? 'choice-card--on' : ''}`}>
+                <span className="flex items-center font-semibold">
+                  <input
+                    type="radio"
+                    name="task-type"
+                    aria-labelledby={`task-type-${choice.value}`}
+                    aria-describedby={`task-type-${choice.value}-hint`}
+                    checked={type === choice.value}
+                    onChange={() => setType(choice.value)}
+                  />
+                  <span id={`task-type-${choice.value}`}>{choice.label}</span>
+                </span>
+                <span id={`task-type-${choice.value}-hint`} className="choice-card__hint">
+                  {choice.hint}
+                </span>
+              </label>
+            ))}
+          </div>
+        </FormSection>
       )}
 
-      {showTemplateOnlyFields && (
-        <fieldset className="field">
-          <legend>Recurrence</legend>
-          <div className="field">
-            <label htmlFor="task-pattern">Repeats</label>
-            <select
-              id="task-pattern"
-              value={pattern}
-              onChange={(event) => setPattern(event.target.value as RecurrencePattern)}
-            >
-              {PATTERNS.map((p) => (
-                <option key={p} value={p}>
-                  {p === 'one_time' ? 'Does not repeat' : p.charAt(0).toUpperCase() + p.slice(1)}
-                </option>
-              ))}
-            </select>
+      <FormSection title="When">
+        <div className="flex flex-wrap gap-x-6">
+          {!isEdit && (
+            <div className="field">
+              <label htmlFor="task-start-date">Starts on</label>
+              <DateInput id="task-start-date" value={startDate} min={todayLocalDate()} onChange={changeStartDate} required />
+              {error?.code === 'invalid_start_date' && <p className="field-error">{error.message}</p>}
+            </div>
+          )}
+          {type === 'fixed' && showTemplateOnlyFields && (
+            <div className="field">
+              <label htmlFor="task-fixed-time">Time of day</label>
+              <TimeInput id="task-fixed-time" value={fixedTimeOfDay} onChange={setFixedTimeOfDay} required />
+            </div>
+          )}
+          <div className="duration-field">
+            <DurationInput
+              id="task-duration"
+              label="Estimated duration"
+              initialMinutes={estimatedDurationMinutes}
+              units={ESTIMATED_DURATION_UNITS}
+              onChange={setEstimatedDurationMinutes}
+              min={1}
+              maxMinutes={MAX_DURATION_MINUTES}
+            />
+            {error?.code === 'infeasible_duration' && <p className="field-error -mt-2">{error.message}</p>}
           </div>
-          {pattern !== 'one_time' && (
-            <div className="field">
-              <label htmlFor="task-interval">Every</label>
-              <input
-                id="task-interval"
-                type="number"
-                min={1}
-                max={MAX_RECURRENCE_INTERVAL}
-                value={interval}
-                onChange={(event) => setInterval_(Number(event.target.value) || 1)}
-              />
-            </div>
-          )}
-          {pattern === 'weekly' && (
-            <div className="field">
-              <label htmlFor="task-day-of-week">On</label>
-              <select
-                id="task-day-of-week"
-                value={dayOfWeek}
-                onChange={(event) => setDayOfWeek(Number(event.target.value))}
-              >
-                {/* Listed from the user's first day of the week; the value stays the
-                    API's Monday = 0 index. */}
-                {daysOfWeekFrom(firstDayOfWeek).map((day) => (
-                  <option key={day} value={DAY_ORDER.indexOf(day)}>
-                    {DAY_LABELS[day]}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-          {pattern === 'monthly' && (
-            <div className="field">
-              <label htmlFor="task-day-of-month">Day of month</label>
-              <input
-                id="task-day-of-month"
-                type="number"
-                min={1}
-                max={31}
-                value={dayOfMonth}
-                onChange={(event) => setDayOfMonth(Number(event.target.value) || 1)}
-              />
-            </div>
-          )}
-          {pattern !== 'one_time' && type === 'flexible' && (
-            <div className="field">
-              <label htmlFor="task-anchor">Next occurrence is based on</label>
-              <select
-                id="task-anchor"
-                value={anchor}
-                onChange={(event) => setAnchor(event.target.value as RecurrenceAnchor)}
-              >
-                <option value="calendar">The calendar (rigid schedule)</option>
-                <option value="completion">When you complete it (upkeep work)</option>
-              </select>
-              {error?.code === 'invalid_recurrence_anchor' && (
-                <p className="field-error">{error.message}</p>
+        </div>
+
+        {showTemplateOnlyFields && (
+          <fieldset className="field">
+            <legend>Recurrence</legend>
+            <div className="flex flex-wrap items-end gap-x-3">
+              <div className="field">
+                <label htmlFor="task-pattern">Repeats</label>
+                <select id="task-pattern" value={pattern} onChange={(event) => setPattern(event.target.value as RecurrencePattern)}>
+                  {PATTERNS.map((p) => (
+                    <option key={p} value={p}>
+                      {p === 'one_time' ? 'Does not repeat' : p.charAt(0).toUpperCase() + p.slice(1)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {pattern !== 'one_time' && (
+                <div className="field">
+                  <label htmlFor="task-interval">Every</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      id="task-interval"
+                      type="number"
+                      className="w-20"
+                      min={1}
+                      max={MAX_RECURRENCE_INTERVAL}
+                      value={interval}
+                      onChange={(event) => setInterval_(Number(event.target.value) || 1)}
+                    />
+                    <span className="text-text-muted">{repeatUnit}</span>
+                  </div>
+                </div>
+              )}
+              {pattern === 'weekly' && (
+                <div className="field">
+                  <label htmlFor="task-day-of-week">On</label>
+                  <select id="task-day-of-week" value={dayOfWeek} onChange={(event) => setDayOfWeek(Number(event.target.value))}>
+                    {/* Listed from the user's first day of the week; the value stays the
+                        API's Monday = 0 index. */}
+                    {daysOfWeekFrom(firstDayOfWeek).map((day) => (
+                      <option key={day} value={DAY_ORDER.indexOf(day)}>
+                        {DAY_LABELS[day]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {pattern === 'monthly' && (
+                <div className="field">
+                  <label htmlFor="task-day-of-month">Day of month</label>
+                  <input
+                    id="task-day-of-month"
+                    type="number"
+                    className="w-20"
+                    min={1}
+                    max={31}
+                    value={dayOfMonth}
+                    onChange={(event) => setDayOfMonth(Number(event.target.value) || 1)}
+                  />
+                </div>
               )}
             </div>
-          )}
-        </fieldset>
-      )}
+            {pattern !== 'one_time' && type === 'flexible' && (
+              <div className="field">
+                <label htmlFor="task-anchor">Next occurrence is based on</label>
+                <select id="task-anchor" value={anchor} onChange={(event) => setAnchor(event.target.value as RecurrenceAnchor)}>
+                  <option value="calendar">The calendar (rigid schedule)</option>
+                  <option value="completion">When you complete it (upkeep work)</option>
+                </select>
+                {error?.code === 'invalid_recurrence_anchor' && <p className="field-error">{error.message}</p>}
+              </div>
+            )}
+          </fieldset>
+        )}
 
-      {type === 'fixed' && showTemplateOnlyFields && (
-        <div className="field">
-          <label htmlFor="task-fixed-time">Time of day</label>
-          <input
-            id="task-fixed-time"
-            type="time"
-            value={fixedTimeOfDay}
-            onChange={(event) => setFixedTimeOfDay(event.target.value)}
-            required
-          />
-        </div>
-      )}
+        {type === 'flexible' && showTemplateOnlyFields && (
+          <div className="rounded-md border border-border bg-surface-raised/40 p-3">
+            <div className="flex flex-wrap items-start gap-x-6">
+              <DurationInput
+                key={durationKey}
+                id="task-deadline-offset"
+                label="Deadline"
+                initialMinutes={deadlineOffsetMinutes}
+                units={DEADLINE_OFFSET_UNITS}
+                onChange={(minutes) => {
+                  setDeadlineOffsetMinutes(minutes);
+                  setDueDate('');
+                }}
+                min={1}
+                maxMinutes={MAX_DEADLINE_OFFSET_MINUTES}
+              />
+              {offersDueDate && (
+                <div className="field">
+                  <label htmlFor="task-due-date">Or pick a due date</label>
+                  <DateInput id="task-due-date" min={startDate} value={dueDate} onChange={pickDueDate} />
+                </div>
+              )}
+            </div>
+            <p className="m-0 text-sm text-text-muted">
+              How long each occurrence may take to get done, counted from the start of its date.
+            </p>
+          </div>
+        )}
 
-      <div className="field">
-        <label htmlFor="task-priority">Priority</label>
-        <select
-          id="task-priority"
-          value={priority}
-          onChange={(event) => setPriority(event.target.value as Priority)}
-        >
+        {type === 'flexible' && !showTemplateOnlyFields && (
+          <div className="field">
+            <label htmlFor="task-deadline-at">Deadline</label>
+            <DateTimeInput id="task-deadline-at" label="Deadline" value={deadlineAt} onChange={setDeadlineAt} />
+          </div>
+        )}
+      </FormSection>
+
+      <FormSection title="Priority" hint="Higher priority work is placed first when time is short.">
+        <div className="segmented" role="radiogroup" aria-label="Priority">
           {PRIORITIES.map((p) => (
-            <option key={p} value={p}>
+            <label key={p} className={`segmented__option ${priority === p ? 'segmented__option--on' : ''}`}>
+              <input
+                type="radio"
+                name="task-priority"
+                className="sr-only"
+                checked={priority === p}
+                onChange={() => setPriority(p)}
+              />
               {p.charAt(0).toUpperCase() + p.slice(1)}
-            </option>
+            </label>
           ))}
-        </select>
-      </div>
-
-      <DurationInput
-        id="task-duration"
-        label="Estimated duration"
-        initialMinutes={estimatedDurationMinutes}
-        units={ESTIMATED_DURATION_UNITS}
-        onChange={setEstimatedDurationMinutes}
-        min={1}
-        maxMinutes={MAX_DURATION_MINUTES}
-      />
-      {error?.code === 'infeasible_duration' && <p className="field-error">{error.message}</p>}
-
-      {type === 'flexible' && showTemplateOnlyFields && (
-        <DurationInput
-          key={durationKey}
-          id="task-deadline-offset"
-          label="Deadline"
-          initialMinutes={deadlineOffsetMinutes}
-          units={DEADLINE_OFFSET_UNITS}
-          onChange={(minutes) => {
-            setDeadlineOffsetMinutes(minutes);
-            setDueDate('');
-          }}
-          min={1}
-          maxMinutes={MAX_DEADLINE_OFFSET_MINUTES}
-        />
-      )}
-      {type === 'flexible' && offersDueDate && (
-        <div className="field">
-          <label htmlFor="task-due-date">Or pick a due date</label>
-          <DateInput id="task-due-date" min={startDate} value={dueDate} onChange={pickDueDate} />
         </div>
-      )}
-      {type === 'flexible' && showTemplateOnlyFields && (
-        <p style={{ color: 'var(--color-text-muted)', fontSize: 'var(--font-size-sm)' }}>
-          How long each occurrence may take to get done, counted from the start of its date.
-        </p>
-      )}
-
-      {type === 'flexible' && !showTemplateOnlyFields && (
-        <div className="field">
-          <label htmlFor="task-deadline-at">Deadline</label>
-          <input
-            id="task-deadline-at"
-            type="datetime-local"
-            value={deadlineAt}
-            onChange={(event) => setDeadlineAt(event.target.value)}
-          />
-        </div>
-      )}
+      </FormSection>
 
       {showTemplateOnlyFields && (
-        <DurationListInput
-          label="Reminders"
-          values={reminderOffsetsMinutes}
-          onChange={setReminderOffsetsMinutes}
-        />
-      )}
-
-      {showTemplateOnlyFields && (
-        <ActiveHoursOverrideInput value={activeHoursOverride} onChange={setActiveHoursOverride} />
+        <FormSection title="Reminders and hours">
+          <DurationListInput label="Reminders" values={reminderOffsetsMinutes} onChange={setReminderOffsetsMinutes} />
+          <details className="form-details" open={activeHoursOverride !== null}>
+            <summary>Limit the hours for this task</summary>
+            <ActiveHoursOverrideInput value={activeHoursOverride} onChange={setActiveHoursOverride} />
+          </details>
+        </FormSection>
       )}
 
       {dependenciesEditable && (
-        <DependenciesPicker
-          selected={dependencies}
-          onChange={setDependencies}
-          excludeId={instance?.id}
-          note={isEdit && isRecurring ? 'This changes only this occurrence.' : undefined}
-        />
+        <div className="form-card--plain">
+          <DependenciesPicker
+            selected={dependencies}
+            onChange={setDependencies}
+            excludeId={instance?.id}
+            note={isEdit && isRecurring ? 'This changes only this occurrence.' : undefined}
+          />
+        </div>
       )}
 
-      <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
+      <div className="form-actions">
+        {secondaryAction && <div className="mr-auto">{secondaryAction}</div>}
+        <button type="button" onClick={onCancel}>
+          Cancel
+        </button>
         <button
           type="submit"
           className="primary"
@@ -604,9 +625,6 @@ export function TaskForm({
           title={locked ? LOCK_HINT : undefined}
         >
           {submitting ? 'Saving…' : 'Save'}
-        </button>
-        <button type="button" onClick={onCancel}>
-          Cancel
         </button>
       </div>
     </form>

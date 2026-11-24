@@ -15,6 +15,7 @@ import { MAX_DAILY_BUDGET_MINUTES } from '../lib/limits';
 import { availableTimezones, deviceTimezone, timezonesDiffer } from '../lib/timezone';
 import type { ActiveHoursWindow, DayName } from '../types/task';
 import type { BudgetEnforcement, UserSettings } from '../types/settings';
+import { TimeInput } from '../components/TimeInput';
 import {
   guideBudgetToDailyBudget,
   guideHoursToActiveHours,
@@ -300,23 +301,19 @@ export function HoursStep({
             );
           })}
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <input
-            type="time"
+        <div className="flex flex-wrap items-start gap-2">
+          <TimeInput
             aria-label="From"
             value={hours.start}
-            onChange={(event) => setHours((current) => ({ ...current, start: event.target.value }))}
+            onChange={(start) => setHours((current) => ({ ...current, start }))}
           />
-          <span>to</span>
-          <input
-            type="time"
+          <span className="pt-2">to</span>
+          <TimeInput
             aria-label="Until"
             value={hours.end}
-            onChange={(event) => setHours((current) => ({ ...current, end: event.target.value }))}
+            onChange={(end) => setHours((current) => ({ ...current, end }))}
           />
-          {hours.end < hours.start && (
-            <span className="text-sm text-text-muted">(ends next day)</span>
-          )}
+          {hours.end < hours.start && <span className="pt-2 text-sm text-text-muted">(ends next day)</span>}
         </div>
       </fieldset>
 

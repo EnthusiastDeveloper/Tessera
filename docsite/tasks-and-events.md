@@ -16,6 +16,12 @@ The template holds recurrence rules and defaults (name, priority, duration, dead
 | Bound by active hours / budget | No - never constrained by your scheduling window | Yes - the whole point of the setting |
 | Still counts against the daily budget | Yes - a fixed task's duration counts toward the day's cap even though it isn't *placed* by the algorithm | Yes |
 
+## The task form
+
+**New task** opens a form grouped into cards: **Task** (name, description, location), **Type** (flexible or fixed, each card saying what it means), **When** (start date, the time of day for a fixed task, how long it takes, whether it repeats, and a flexible task's deadline), **Priority**, **Reminders and hours** (the per-task active hours are under "Limit the hours for this task") and **Dependencies**. Save and Cancel stay at the bottom of the window as you scroll.
+
+Times are written on your clock (Settings → Display → time format). Type one either way - `17:30`, `1730`, `5:30pm` and `5 PM` all work - or press the clock button to pick from the day in 15-minute steps. A new time or deadline on a task's page is a date and a time side by side.
+
 ## Quick create from the Timeline
 
 In the Timeline's week or day view, click an empty time slot, or drag across several (on a phone, press and hold, then drag), and a small form opens beside it. A click selects half an hour; a drag selects in 15-minute steps. You can select any time from now on, within one day.

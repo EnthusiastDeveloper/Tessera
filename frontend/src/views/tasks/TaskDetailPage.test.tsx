@@ -177,4 +177,25 @@ describe('TaskDetailPage', () => {
       expect(screen.queryByRole('button', { name: /Remove dependency/ })).not.toBeInTheDocument();
     });
   });
+
+  it('reschedules a fixed task to a date and time typed in the user\'s formats (Rev 20)', async () => {
+    const instance = { ...BASE_INSTANCE, status: 'scheduled' as const, type: 'fixed' as const };
+    mockedInstances.rescheduleInstance.mockResolvedValue({ ...instance, scheduled_time: '2026-12-01T18:30:00Z' });
+    renderDetail([instance]);
+    await userEvent.click(await screen.findByRole('button', { name: 'Reschedule' }));
+    await userEvent.type(screen.getByLabelText('New time'), '01/12/2026');
+    await userEvent.type(screen.getByLabelText('New time time'), '18:30');
+    await userEvent.click(screen.getByRole('button', { name: 'Confirm reschedule' }));
+    await waitFor(() =>
+      expect(mockedInstances.rescheduleInstance).toHaveBeenCalledWith('instance-1', new Date(2026, 11, 1, 18, 30).toISOString())
+    );
+  });
+
+  it('shows when the task is and how long it takes', async () => {
+    renderDetail([{ ...BASE_INSTANCE, estimated_duration_minutes: 90 }]);
+    await screen.findByRole('heading', { name: 'Water the plants' });
+    expect(screen.getByText('Not on the Timeline')).toBeInTheDocument();
+    expect(screen.getByText('1h 30m')).toBeInTheDocument();
+  });
 });
+

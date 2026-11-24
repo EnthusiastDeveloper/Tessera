@@ -814,3 +814,216 @@ button.optimize-button--attention:hover:not(:disabled) {
 .teaching-note strong {
   color: var(--color-text);
 }
+
+/* The time picker's list (TimeInput, design doc 8.1b, Rev 20). A Radix popover, so it renders
+   in a portal and is styled here, like .menu. Plain buttons, restyled as list rows. */
+.time-picker {
+  z-index: 50;
+  padding: var(--space-1);
+  background-color: var(--color-surface-raised);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+}
+
+.time-picker__list {
+  display: flex;
+  flex-direction: column;
+  width: 120px;
+  max-height: 240px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.time-picker__item {
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+
+.time-picker__item:hover,
+.time-picker__item:focus-visible {
+  background-color: var(--color-border);
+  outline: none;
+}
+
+.time-picker__item[aria-pressed='true'] {
+  background-color: var(--color-accent);
+  color: var(--color-accent-contrast);
+  font-weight: 600;
+}
+
+/* The task form (design doc 8.1 screen 3, Rev 20): a column of cards, one per group of
+   fields, with the actions in a bar that stays in reach at the bottom of the window. */
+.task-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-width: 760px;
+}
+
+/* A card is a fieldset named by its legend. The legend is floated so it sits inside the
+   card as a heading instead of on its border. */
+.task-form .form-card,
+.task-form .form-card--plain > fieldset {
+  margin: 0;
+  padding: var(--space-4) var(--space-4) 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background-color: var(--color-surface);
+}
+
+.task-form .form-card--plain {
+  border: 0;
+  padding: 0;
+  background: none;
+}
+
+.task-form .form-card > legend,
+.task-form .form-card--plain > fieldset > legend {
+  float: left;
+  width: 100%;
+  padding: 0;
+  margin-bottom: var(--space-3);
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.task-form .form-card > legend + *,
+.task-form .form-card--plain > fieldset > legend + * {
+  clear: both;
+}
+
+.task-form .form-card > :last-child {
+  margin-bottom: var(--space-4);
+}
+
+.form-card__hint {
+  margin: calc(-1 * var(--space-2)) 0 var(--space-3);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+/* A group inside a card (Recurrence, Apply to, Active-hours override) reads as a labelled
+   block, not a box inside a box. */
+.task-form .form-card fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0 0 var(--space-4);
+}
+
+.task-form .form-card fieldset > legend {
+  padding: 0;
+  margin-bottom: var(--space-2);
+}
+
+/* The two task types, as cards to choose between. */
+.choice-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius);
+  background-color: var(--color-surface-raised);
+  cursor: pointer;
+  transition: border-color 120ms;
+}
+
+.choice-card:hover {
+  border-color: var(--color-text-muted);
+}
+
+.choice-card--on {
+  border-color: var(--color-accent);
+  box-shadow: inset 0 0 0 1px var(--color-accent);
+}
+
+.choice-card:has(input:focus-visible) {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.choice-card__hint {
+  font-size: var(--font-size-sm);
+  font-weight: 400;
+  color: var(--color-text-muted);
+}
+
+/* A row of exclusive options (priority). The radios are visually hidden; the label is the
+   button. */
+.segmented {
+  display: inline-flex;
+  flex-wrap: wrap;
+  margin-bottom: var(--space-4);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.segmented__option {
+  margin: 0;
+  padding: var(--space-2) var(--space-4);
+  font-weight: 500;
+  background-color: var(--color-surface-raised);
+  cursor: pointer;
+  user-select: none;
+}
+
+.segmented__option + .segmented__option {
+  border-left: 1px solid var(--color-border-strong);
+}
+
+.segmented__option:hover {
+  background-color: var(--color-border);
+}
+
+.segmented__option--on,
+.segmented__option--on:hover {
+  background-color: var(--color-accent);
+  color: var(--color-accent-contrast);
+  font-weight: 600;
+}
+
+.segmented__option:has(input:focus-visible) {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.form-details {
+  margin-bottom: var(--space-4);
+}
+
+.form-details > summary {
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--color-accent);
+  margin-bottom: var(--space-3);
+}
+
+/* Save and Cancel stay in reach on a long form. */
+.form-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--color-border);
+  background-color: var(--color-bg);
+}
+
+.task-form input[type='number'] {
+  width: 7rem;
+}

@@ -64,7 +64,7 @@ export function ScheduleRepairOverlay(): JSX.Element | null {
             Fixing the calendar ({running.done}/{running.total})…
           </p>
           <progress value={running.done} max={Math.max(running.total, 1)} />
-          <p style={{ color: 'var(--color-text-muted)', fontSize: 'var(--font-size-sm)' }}>
+          <p className="text-sm text-text-muted">
             Some scheduled tasks no longer fit your new scheduling window and are being placed again.
           </p>
         </div>

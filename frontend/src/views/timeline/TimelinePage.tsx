@@ -185,7 +185,7 @@ export function TimelinePage(): JSX.Element {
       {ready && !hasTasks && <EmptyTimelineNote />}
       <TimelineLegend />
       {state === 'loading' ? (
-        <p style={{ color: 'var(--color-text-muted)' }}>Loading...</p>
+        <p className="text-text-muted">Loading...</p>
       ) : (
         <FullCalendar
           ref={calendar}
