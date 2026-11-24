@@ -185,7 +185,18 @@ export function BacklogPage(): JSX.Element {
       {state === 'loading' && <p className="text-text-muted">Loading...</p>}
 
       {state === 'ready' && groups.length === 0 && (
-        <p className="text-text-muted">Nothing needs your attention. Every open task has a place on the Timeline.</p>
+        // Rev 19: say what would land here, so an empty Backlog reads as working, not broken.
+        <div className="teaching-note" role="note" aria-label="Your Backlog is empty">
+          <p>
+            <strong>Nothing needs your attention.</strong> Every open task has a place on the Timeline.
+          </p>
+          <p>A task is listed here when it has no place on the Timeline:</p>
+          <ul>
+            <li>its deadline passed before it was done,</li>
+            <li>it couldn't be fitted in before its deadline, or</li>
+            <li>it is waiting on another task to be done.</li>
+          </ul>
+        </div>
       )}
 
       {state === 'ready' &&

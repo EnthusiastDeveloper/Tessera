@@ -714,3 +714,103 @@ button.optimize-button--attention:hover:not(:disabled) {
 .optimize-hint--muted {
   color: var(--color-text-muted);
 }
+
+/* Timeline legend (design doc 8.1 screen 2, Rev 19). Each swatch copies the block it names,
+   from the .fc-event-* rules above, so the two can't be read differently. */
+.timeline-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  list-style: none;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.timeline-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  cursor: help;
+}
+
+.legend-swatch {
+  display: inline-block;
+  width: 14px;
+  height: 10px;
+  border-radius: 2px;
+  border: 1px solid transparent;
+}
+
+.legend-swatch--fixed {
+  background-color: var(--color-fixed);
+  border-color: var(--color-fixed);
+}
+
+.legend-swatch--flexible {
+  background-color: var(--color-flexible);
+  border-color: var(--color-flexible-strong);
+}
+
+.legend-swatch--waiting {
+  border: 2px dashed var(--color-fixed);
+  background-color: color-mix(in srgb, var(--color-fixed) 18%, transparent);
+}
+
+.legend-swatch--virtual {
+  border: 1px dashed var(--color-flexible-strong);
+  background-color: color-mix(in srgb, var(--color-flexible) 55%, transparent);
+  background-image: repeating-linear-gradient(
+    45deg,
+    rgb(255 255 255 / 12%),
+    rgb(255 255 255 / 12%) 2px,
+    transparent 2px,
+    transparent 4px
+  );
+}
+
+.legend-swatch--external {
+  background-color: var(--color-external);
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--color-external) 0 2px,
+    var(--color-external-stripe) 2px 4px
+  );
+  border: 1px dashed var(--color-border-strong);
+}
+
+.legend-swatch--blackout {
+  background-color: color-mix(in srgb, var(--color-danger) 12%, transparent);
+  border-color: color-mix(in srgb, var(--color-danger) 30%, transparent);
+}
+
+/* Empty states and the one-time Optimize note (Rev 19): a quiet panel, not a banner -
+   they explain, they don't warn. */
+.teaching-note {
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-accent);
+  border-radius: var(--radius);
+  background-color: var(--color-surface);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-3);
+  font-size: var(--font-size-sm);
+}
+
+.teaching-note p {
+  margin: 0 0 var(--space-2);
+}
+
+.teaching-note p:last-child,
+.teaching-note ul:last-child {
+  margin-bottom: 0;
+}
+
+.teaching-note ul {
+  margin: 0 0 var(--space-2);
+  padding-left: var(--space-6);
+}
+
+.teaching-note strong {
+  color: var(--color-text);
+}

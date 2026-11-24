@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { TimelinePage } from './TimelinePage';
@@ -107,6 +107,7 @@ describe('TimelinePage', () => {
     mockedTemplates.listProjections.mockResolvedValue([VIRTUAL_OCCURRENCE]);
     mockedExternalEvents.listExternalEvents.mockResolvedValue([EXTERNAL_EVENT]);
     mockedSettings.getSettings.mockResolvedValue(SETTINGS);
+    window.localStorage.clear();
   });
 
   it('requests scheduled instances, projections, external events, and settings on load', async () => {
@@ -172,5 +173,45 @@ describe('TimelinePage', () => {
     mockedInstances.listInstances.mockRejectedValue(new Error('network down'));
     renderTimeline();
     expect(await screen.findByText(/failed to load/i)).toBeInTheDocument();
+  });
+
+  it('names every kind of block in an always-visible legend (Rev 19)', async () => {
+    renderTimeline();
+    await screen.findByText('Water the plants');
+    const legend = screen.getByRole('list', { name: 'Legend' });
+    for (const label of ['Fixed task', 'Flexible task', 'Waiting', 'Upcoming repeat', 'Other calendar', 'Blackout day']) {
+      expect(within(legend).getByText(label)).toBeInTheDocument();
+    }
+  });
+
+  it('explains how work gets onto an empty Timeline, counting external events as empty', async () => {
+    mockedInstances.listInstances.mockResolvedValue([{ ...REAL_INSTANCE, status: 'pending', scheduled_time: null }]);
+    mockedTemplates.listProjections.mockResolvedValue([]);
+    renderTimeline();
+    const note = await screen.findByRole('note', { name: 'Your Timeline is empty' });
+    expect(within(note).getByText(/Click or drag across empty time/)).toBeInTheDocument();
+    expect(within(note).getByRole('link', { name: 'Backlog' })).toHaveAttribute('href', '/backlog');
+    // The external event is still drawn, and the one-time Optimize note waits for a task.
+    expect(await screen.findByText('Dentist')).toBeInTheDocument();
+    expect(screen.queryByRole('note', { name: 'About Optimize Schedule' })).not.toBeInTheDocument();
+  });
+
+  it('shows no empty-state note once there is a task, upcoming repeats included', async () => {
+    mockedInstances.listInstances.mockResolvedValue([]);
+    renderTimeline();
+    await screen.findByText('Weekly team sync');
+    expect(screen.queryByRole('note', { name: 'Your Timeline is empty' })).not.toBeInTheDocument();
+  });
+
+  it('explains Optimize Schedule once, until Got it is pressed', async () => {
+    const first = renderTimeline();
+    const note = await screen.findByRole('note', { name: 'About Optimize Schedule' });
+    await userEvent.click(within(note).getByRole('button', { name: 'Got it' }));
+    expect(screen.queryByRole('note', { name: 'About Optimize Schedule' })).not.toBeInTheDocument();
+    first.unmount();
+
+    renderTimeline();
+    await screen.findByText('Water the plants');
+    expect(screen.queryByRole('note', { name: 'About Optimize Schedule' })).not.toBeInTheDocument();
   });
 });

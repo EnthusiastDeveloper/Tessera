@@ -124,7 +124,20 @@ export function NotificationsPanel(): JSX.Element {
       )}
 
       {visibleRows.length === 0 ? (
-        <p style={{ color: 'var(--color-text-muted)' }}>No active notifications.</p>
+        // Rev 19: say what would appear here, and that most of it clears itself.
+        <div className="teaching-note" role="note" aria-label="No notifications">
+          <p>
+            <strong>No active notifications.</strong> Tessera tells you here when:
+          </p>
+          <ul>
+            <li>a reminder you set for a task is due,</li>
+            <li>a task's time passed without it being done,</li>
+            <li>a deadline is at risk because a task it waits on isn't done,</li>
+            <li>a task couldn't be scheduled, went over its day's budget or missed its deadline, or</li>
+            <li>a fixed task clashes with another commitment or a calendar event.</li>
+          </ul>
+          <p>Most of these clear themselves once the problem is fixed.</p>
+        </div>
       ) : (
         <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
           {visibleRows.map((row) => (

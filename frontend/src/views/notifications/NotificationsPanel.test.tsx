@@ -42,6 +42,8 @@ describe('NotificationsPanel', () => {
     mockedNotifications.listNotifications.mockResolvedValue([]);
     renderPanel();
     expect(await screen.findByText('No active notifications.')).toBeInTheDocument();
+    // Rev 19: the empty panel says what would appear here.
+    expect(screen.getByRole('note', { name: 'No notifications' })).toHaveTextContent(/a task's time passed/);
   });
 
   it('renders type, message, created_at, and a link to the related task for each notification', async () => {
