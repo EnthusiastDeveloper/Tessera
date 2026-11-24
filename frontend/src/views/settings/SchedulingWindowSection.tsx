@@ -167,17 +167,12 @@ export function SchedulingWindowSection({
       <fieldset className="field">
         <legend>Blackout dates</legend>
         {blackoutDates.length === 0 && (
-          <p style={{ color: 'var(--color-text-muted)' }}>No blackout dates.</p>
+          <p className="text-text-muted">No blackout dates.</p>
         )}
         {blackoutDates.map((blackout, index) => (
           <div
             key={`${blackout.start}-${blackout.end}-${index}`}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 'var(--space-2)',
-              marginBottom: 'var(--space-2)',
-            }}
+            className="mb-2 flex flex-wrap items-center gap-2"
           >
             <span>
               {formatIsoDate(blackout.start, dateFormat)} –{' '}
@@ -194,12 +189,7 @@ export function SchedulingWindowSection({
           </div>
         ))}
         <div
-          style={{
-            display: 'flex',
-            alignItems: 'flex-end',
-            gap: 'var(--space-2)',
-            flexWrap: 'wrap',
-          }}
+          className="flex flex-wrap items-end gap-2"
         >
           <div>
             <label htmlFor="blackout-start">Start</label>
@@ -244,12 +234,7 @@ export function SchedulingWindowSection({
           return (
             <>
               <label
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 'var(--space-1)',
-                  marginBottom: 0,
-                }}
+                className="mb-0 flex items-center gap-1"
               >
                 <input
                   type="checkbox"

@@ -58,7 +58,7 @@ export function TimezoneSection({ settings, onUpdated }: TimezoneSectionProps): 
             </option>
           ))}
         </select>
-        <p style={{ color: 'var(--color-text-muted)', fontSize: 'var(--font-size-sm)' }}>
+        <p className="text-sm text-text-muted">
           Changing this doesn’t move anything already scheduled. Tasks created or repeating after the change use the new
           timezone. This device is set to {deviceTimezone()}.
         </p>

@@ -44,16 +44,16 @@ export function DependenciesPicker({ selected, onChange, excludeId, note }: Depe
   return (
     <fieldset className="field">
       <legend>Dependencies</legend>
-      <p style={{ color: 'var(--color-text-muted)', fontSize: 'var(--font-size-sm)' }}>
+      <p className="text-sm text-text-muted">
         This task can&apos;t start until everything checked below is completed.
         {note ? ` ${note}` : ''}
       </p>
       {candidates === null && <p>Loading tasks…</p>}
       {candidates !== null && candidates.length === 0 && (
-        <p style={{ color: 'var(--color-text-muted)' }}>No other tasks to depend on yet.</p>
+        <p className="text-text-muted">No other tasks to depend on yet.</p>
       )}
       {candidates?.map((instance) => (
-        <label key={instance.id} style={{ display: 'block' }}>
+        <label key={instance.id} className="block">
           <input type="checkbox" checked={selected.includes(instance.id)} onChange={() => toggle(instance.id)} /> {instance.name}
         </label>
       ))}

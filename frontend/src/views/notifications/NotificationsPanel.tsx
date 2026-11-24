@@ -110,7 +110,7 @@ export function NotificationsPanel(): JSX.Element {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+      <div className="flex items-baseline justify-between">
         <h2>Notifications</h2>
         <button type="button" onClick={load}>
           Refresh
@@ -139,33 +139,23 @@ export function NotificationsPanel(): JSX.Element {
           <p>Most of these clear themselves once the problem is fixed.</p>
         </div>
       ) : (
-        <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+        <ul className="m-0 list-none p-0">
           {visibleRows.map((row) => (
             <li
               key={row.notification.id}
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'flex-start',
-                gap: 'var(--space-4)',
-                border: '1px solid var(--color-border)',
-                borderRadius: 'var(--radius)',
-                backgroundColor: 'var(--color-surface)',
-                padding: 'var(--space-4)',
-                marginBottom: 'var(--space-3)',
-              }}
+              className="mb-3 flex items-start justify-between gap-4 rounded-md border border-border bg-surface p-4"
             >
               <div>
                 <strong>{TYPE_LABELS[row.notification.type]}</strong>
-                <p style={{ margin: 'var(--space-1) 0' }}>{row.notification.message}</p>
-                <p style={{ margin: 0, color: 'var(--color-text-muted)', fontSize: 'var(--font-size-xs)' }}>
+                <p className="my-1">{row.notification.message}</p>
+                <p className="m-0 text-xs text-text-muted">
                   {formatDateTime(row.notification.created_at, dateFormat, timeFormat)}
                 </p>
                 <Link to={`/tasks/${row.notification.related_instance_id}`}>View task</Link>
               </div>
 
               {row.outcome === 'already_resolved' ? (
-                <p role="status" style={{ margin: 0, color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
+                <p role="status" className="m-0 whitespace-nowrap text-text-muted">
                   Already resolved
                 </p>
               ) : (

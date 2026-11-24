@@ -117,27 +117,18 @@ export function ExternalCalendarsSection({ justConnectedProvider }: ExternalCale
       {state !== 'loading' && (
         <>
           {connections.length === 0 ? (
-            <p style={{ color: 'var(--color-text-muted)' }}>No calendars connected.</p>
+            <p className="text-text-muted">No calendars connected.</p>
           ) : (
-            <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+            <ul className="m-0 list-none p-0">
               {connections.map((connection) => (
                 <li
                   key={connection.id}
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    gap: 'var(--space-4)',
-                    border: '1px solid var(--color-border)',
-                    borderRadius: 'var(--radius)',
-                    padding: 'var(--space-3) var(--space-4)',
-                    marginBottom: 'var(--space-2)',
-                  }}
+                  className="mb-2 flex flex-wrap items-center justify-between gap-4 rounded-md border border-border px-4 py-3"
                 >
                   <div>
                     <strong>{PROVIDER_LABELS[connection.provider]}</strong>
-                    {!connection.enabled && <span style={{ color: 'var(--color-text-muted)' }}> (disabled)</span>}
-                    <p style={{ margin: 'var(--space-1) 0 0', color: 'var(--color-text-muted)', fontSize: 'var(--font-size-sm)' }}>
+                    {!connection.enabled && <span className="text-text-muted"> (disabled)</span>}
+                    <p className="mt-1 mb-0 text-sm text-text-muted">
                       {formatLastSynced(connection.last_synced_at, dateFormat, timeFormat)} · Refresh interval:{' '}
                       {connection.refresh_interval_minutes} minutes (disconnect and reconnect to change)
                     </p>
@@ -155,7 +146,7 @@ export function ExternalCalendarsSection({ justConnectedProvider }: ExternalCale
             </ul>
           )}
 
-          <div style={{ display: 'flex', gap: 'var(--space-2)', marginTop: 'var(--space-4)' }}>
+          <div className="mt-4 flex gap-2">
             {CONNECTABLE_PROVIDERS.map((provider) => (
               <button
                 key={provider}

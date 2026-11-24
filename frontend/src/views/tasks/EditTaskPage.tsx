@@ -71,10 +71,18 @@ export function EditTaskPage(): JSX.Element {
         />
       ) : (
         <>
-          <TaskForm mode="edit" template={template} instance={instance} onSaved={() => navigate('/')} onCancel={() => navigate('/')} />
-          <button type="button" className="danger" onClick={() => setShowDelete(true)}>
-            Delete task
-          </button>
+          <TaskForm
+            mode="edit"
+            template={template}
+            instance={instance}
+            onSaved={() => navigate('/')}
+            onCancel={() => navigate('/')}
+            secondaryAction={
+              <button type="button" className="danger" onClick={() => setShowDelete(true)}>
+                Delete task
+              </button>
+            }
+          />
         </>
       )}
     </div>

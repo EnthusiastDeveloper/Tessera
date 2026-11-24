@@ -84,12 +84,7 @@ export function OptimizeControls({ introduce = false }: { introduce?: boolean })
   return (
     <>
       <div
-        style={{
-          display: 'flex',
-          gap: 'var(--space-2)',
-          alignItems: 'center',
-          marginBottom: 'var(--space-3)',
-        }}
+        className="mb-3 flex flex-wrap items-center gap-2"
       >
         <span
           className={worthwhile ? 'optimize-wrap optimize-wrap--attention' : 'optimize-wrap'}

@@ -86,6 +86,31 @@ describe('TaskForm', () => {
       expect(onSaved).toHaveBeenCalledWith({ template: BASE_TEMPLATE, instance: BASE_INSTANCE });
     });
 
+    it('sends the priority picked from the row of choices', async () => {
+      mockedTemplates.createTemplate.mockResolvedValue({ template: BASE_TEMPLATE, instance: BASE_INSTANCE });
+      render(<TaskForm mode="create" onSaved={vi.fn()} onCancel={vi.fn()} />);
+      await userEvent.type(screen.getByLabelText('Name'), 'File taxes');
+      expect(screen.getByRole('radio', { name: 'Medium' })).toBeChecked();
+      await userEvent.click(screen.getByRole('radio', { name: 'Critical' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(mockedTemplates.createTemplate).toHaveBeenCalled());
+      expect(mockedTemplates.createTemplate.mock.calls[0][0].priority).toBe('critical');
+    });
+
+    it('takes a fixed task\'s time of day as typed, on either clock', async () => {
+      mockedTemplates.createTemplate.mockResolvedValue({ template: BASE_TEMPLATE, instance: BASE_INSTANCE });
+      render(<TaskForm mode="create" onSaved={vi.fn()} onCancel={vi.fn()} />);
+      await userEvent.type(screen.getByLabelText('Name'), 'Dentist');
+      await userEvent.click(screen.getByRole('radio', { name: 'Fixed' }));
+      expect(screen.getByRole('radio', { name: 'Fixed' })).toHaveAccessibleDescription(/At a set time/);
+      const time = screen.getByLabelText('Time of day');
+      await userEvent.clear(time);
+      await userEvent.type(time, '2:15 pm');
+      await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(mockedTemplates.createTemplate).toHaveBeenCalled());
+      expect(mockedTemplates.createTemplate.mock.calls[0][0].fixed_time_of_day).toBe('14:15');
+    });
+
     it('asks for a start date, sends the chosen one, and shows invalid_start_date beside it', async () => {
       mockedTemplates.createTemplate.mockRejectedValue(
         new ApiError(422, 'invalid_start_date', "The start date can't be in the past.")
@@ -295,6 +320,25 @@ describe('TaskForm', () => {
       );
       expect(screen.getByText('Apply to')).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    });
+
+    it('edits this occurrence\'s deadline as a date and a time (design doc 8.1b, Rev 20)', async () => {
+      mockedInstances.patchInstanceThisOccurrence.mockResolvedValue(BASE_INSTANCE);
+      render(
+        <TaskForm mode="edit" template={recurringTemplate} instance={BASE_INSTANCE} onSaved={vi.fn()} onCancel={vi.fn()} />
+      );
+      await userEvent.click(screen.getByLabelText('This occurrence only'));
+      const date = screen.getByLabelText('Deadline');
+      await userEvent.clear(date);
+      await userEvent.type(date, '05/03/2026');
+      const time = screen.getByLabelText('Deadline time');
+      await userEvent.clear(time);
+      await userEvent.type(time, '6:30pm');
+      await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(mockedInstances.patchInstanceThisOccurrence).toHaveBeenCalled());
+      expect(mockedInstances.patchInstanceThisOccurrence.mock.calls[0][1].deadline).toBe(
+        new Date(2026, 2, 5, 18, 30).toISOString()
+      );
     });
 
     it('hides template-only fields once "this occurrence" is chosen, and patches the instance', async () => {

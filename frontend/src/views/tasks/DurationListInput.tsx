@@ -41,11 +41,11 @@ export function DurationListInput({ label, values, onChange }: DurationListInput
   return (
     <fieldset className="field">
       <legend>{label}</legend>
-      {values.length === 0 && <p style={{ color: 'var(--color-text-muted)' }}>No reminders set.</p>}
+      {values.length === 0 && <p className="text-text-muted">No reminders set.</p>}
       {values.map((minutes, index) => {
         const unit = unitOf(minutes);
         return (
-          <div key={index} style={{ display: 'flex', gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}>
+          <div key={index} className="mb-2 flex gap-2">
             {unit !== 'at_start' && (
               <input
                 type="number"

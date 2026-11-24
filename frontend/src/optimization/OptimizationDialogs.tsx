@@ -85,7 +85,7 @@ function Section({
   children: ReactNode;
 }): JSX.Element {
   return (
-    <section style={{ marginBottom: 'var(--space-3)' }}>
+    <section className="mb-3">
       <h4 style={tone === 'danger' ? { color: 'var(--color-danger)' } : undefined}>{title}</h4>
       <ul>{children}</ul>
     </section>
@@ -95,7 +95,7 @@ function Section({
 function Dialog({ label, children }: { label: string; children: ReactNode }): JSX.Element {
   return (
     <div className="overlay" role="dialog" aria-modal="true" aria-label={label}>
-      <div className="overlay__card" style={{ maxHeight: '85vh', overflowY: 'auto' }}>
+      <div className="overlay__card max-h-[85vh] overflow-y-auto">
         {children}
       </div>
     </div>
@@ -121,7 +121,7 @@ function ApprovalDialog({ optimization }: { optimization: ScheduleOptimization }
         )}
       </p>
       {optimization.summary && <SummaryBody summary={optimization.summary} />}
-      <div style={{ display: 'flex', gap: 'var(--space-2)', justifyContent: 'flex-end' }}>
+      <div className="flex justify-end gap-2">
         <button type="button" onClick={() => void decline()}>
           Cancel
         </button>
@@ -162,7 +162,7 @@ function ResultDialog({ optimization }: { optimization: ScheduleOptimization }):
     <Dialog label={heading}>
       <h3>{heading}</h3>
       {body}
-      <div style={{ display: 'flex', gap: 'var(--space-2)', justifyContent: 'flex-end' }}>
+      <div className="flex justify-end gap-2">
         {optimization.status === 'applied' && optimization.undo_available && (
           <button type="button" onClick={() => void undo()}>
             Undo
@@ -182,7 +182,7 @@ function ErrorDialog({ message }: { message: string }): JSX.Element {
     <Dialog label="Optimize Schedule - problem">
       <h3>Optimize Schedule</h3>
       <p role="alert">{message}</p>
-      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+      <div className="flex justify-end">
         <button type="button" className="primary" onClick={closeNotice}>
           Close
         </button>

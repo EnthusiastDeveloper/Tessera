@@ -22,14 +22,14 @@ export function DayOfWeekRows({ legend, hint, renderControl }: DayOfWeekRowsProp
     <fieldset className="field">
       <legend>{legend}</legend>
       {hint && (
-        <p style={{ color: 'var(--color-text-muted)', fontSize: 'var(--font-size-sm)' }}>{hint}</p>
+        <p className="text-sm text-text-muted">{hint}</p>
       )}
       {daysOfWeekFrom(firstDayOfWeek).map((day) => (
         <div
           key={day}
-          style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}
+          className="mb-2 flex items-center gap-2"
         >
-          <span style={{ width: '6rem' }}>{DAY_LABELS[day]}</span>
+          <span className="w-24 shrink-0">{DAY_LABELS[day]}</span>
           {renderControl(day)}
         </div>
       ))}

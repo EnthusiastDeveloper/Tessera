@@ -1,4 +1,5 @@
 import type { ActiveHoursWindow } from '../types/task';
+import { TimeInput } from './TimeInput';
 import { MAX_WINDOWS_PER_DAY } from '../lib/limits';
 
 const NEW_WINDOW: ActiveHoursWindow = { start: '18:00', end: '21:00' };
@@ -27,27 +28,21 @@ export function WindowListInput({
     index === 0 ? `${dayLabel} ${part}` : `${dayLabel} window ${index + 1} ${part}`;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+    <div className="flex flex-col gap-2">
       {windows.map((window, index) => (
-        <div key={index} style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-          <input
-            type="time"
+        <div key={index} className="flex flex-wrap items-start gap-2">
+          <TimeInput
             aria-label={labelFor(index, 'start')}
             value={window.start}
-            onChange={(event) => update(index, { start: event.target.value })}
+            onChange={(start) => update(index, { start })}
           />
-          <span>to</span>
-          <input
-            type="time"
+          <span className="pt-2">to</span>
+          <TimeInput
             aria-label={labelFor(index, 'end')}
             value={window.end}
-            onChange={(event) => update(index, { end: event.target.value })}
+            onChange={(end) => update(index, { end })}
           />
-          {window.end < window.start && (
-            <span style={{ color: 'var(--color-text-muted)', fontSize: 'var(--font-size-sm)' }}>
-              (ends next day)
-            </span>
-          )}
+          {window.end < window.start && <span className="pt-2 text-sm text-text-muted">(ends next day)</span>}
           {windows.length > 1 && (
             <button
               type="button"

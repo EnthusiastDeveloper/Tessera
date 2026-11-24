@@ -37,7 +37,7 @@ export function DurationInput({ id, label, initialMinutes, units, onChange, min 
   return (
     <div className="field">
       <label htmlFor={id}>{label}</label>
-      <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+      <div className="flex gap-2">
         <input
           id={id}
           type="number"

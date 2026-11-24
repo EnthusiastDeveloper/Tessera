@@ -24,7 +24,7 @@ export function ScopePrompt({
   return (
     <fieldset className="field">
       <legend>Apply to</legend>
-      <label style={{ display: 'block' }}>
+      <label className="block">
         <input
           type="radio"
           name={name}
@@ -34,7 +34,7 @@ export function ScopePrompt({
         />{' '}
         This occurrence only
       </label>
-      <label style={{ display: 'block' }}>
+      <label className="block">
         <input
           type="radio"
           name={name}

@@ -38,12 +38,12 @@ export function LoginScreen(): JSX.Element {
       <div className="auth-card">
         <h1>Tessera</h1>
         {justCompletedSetup && (
-          <p role="status" style={{ color: 'var(--color-success)' }}>
+          <p role="status" className="text-success">
             Account created. Log in below.
           </p>
         )}
         {sessionExpired && !justCompletedSetup && (
-          <p role="status" style={{ color: 'var(--color-warning)' }}>
+          <p role="status" className="text-warning">
             Your session expired. Log in again.
           </p>
         )}
