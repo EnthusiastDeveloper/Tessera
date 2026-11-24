@@ -1,8 +1,9 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { TimelinePage } from './TimelinePage';
+import { IntroductionsProvider } from '../../introductions/Introductions';
 import * as taskInstancesApi from '../../api/taskInstances';
 import * as taskTemplatesApi from '../../api/taskTemplates';
 import * as externalEventsApi from '../../api/externalEvents';
@@ -87,16 +88,19 @@ const SETTINGS: UserSettings = {
   date_format: 'DD/MM/YYYY',
   time_format: '24h',
   onboarding_completed: true,
+  introductions_seen: [],
 };
 
 function renderTimeline(): ReturnType<typeof render> {
   return render(
-    <MemoryRouter initialEntries={['/']}>
-      <Routes>
-        <Route path="/" element={<TimelinePage />} />
-        <Route path="/tasks/:instanceId" element={<div>Task detail screen</div>} />
-      </Routes>
-    </MemoryRouter>
+    <IntroductionsProvider>
+      <MemoryRouter initialEntries={['/']}>
+        <Routes>
+          <Route path="/" element={<TimelinePage />} />
+          <Route path="/tasks/:instanceId" element={<div>Task detail screen</div>} />
+        </Routes>
+      </MemoryRouter>
+    </IntroductionsProvider>
   );
 }
 
@@ -107,6 +111,7 @@ describe('TimelinePage', () => {
     mockedTemplates.listProjections.mockResolvedValue([VIRTUAL_OCCURRENCE]);
     mockedExternalEvents.listExternalEvents.mockResolvedValue([EXTERNAL_EVENT]);
     mockedSettings.getSettings.mockResolvedValue(SETTINGS);
+    mockedSettings.markIntroductionSeen.mockResolvedValue({ ...SETTINGS, introductions_seen: ['optimize_schedule'] });
   });
 
   it('requests scheduled instances, projections, external events, and settings on load', async () => {
@@ -173,4 +178,48 @@ describe('TimelinePage', () => {
     renderTimeline();
     expect(await screen.findByText(/failed to load/i)).toBeInTheDocument();
   });
+
+  it('names every kind of block in an always-visible legend (Rev 19)', async () => {
+    renderTimeline();
+    await screen.findByText('Water the plants');
+    const legend = screen.getByRole('list', { name: 'Legend' });
+    for (const label of ['Fixed task', 'Flexible task', 'Waiting', 'Upcoming repeat', 'Other calendar', 'Blackout day']) {
+      expect(within(legend).getByText(label)).toBeInTheDocument();
+    }
+  });
+
+  it('explains how work gets onto an empty Timeline, counting external events as empty', async () => {
+    mockedInstances.listInstances.mockResolvedValue([{ ...REAL_INSTANCE, status: 'pending', scheduled_time: null }]);
+    mockedTemplates.listProjections.mockResolvedValue([]);
+    renderTimeline();
+    const note = await screen.findByRole('note', { name: 'Your Timeline is empty' });
+    expect(within(note).getByText(/Click or drag across empty time/)).toBeInTheDocument();
+    expect(within(note).getByRole('link', { name: 'Backlog' })).toHaveAttribute('href', '/backlog');
+    // The external event is still drawn, and the one-time Optimize note waits for a task.
+    expect(await screen.findByText('Dentist')).toBeInTheDocument();
+    expect(screen.queryByRole('note', { name: 'About Optimize Schedule' })).not.toBeInTheDocument();
+  });
+
+  it('shows no empty-state note once there is a task, upcoming repeats included', async () => {
+    mockedInstances.listInstances.mockResolvedValue([]);
+    renderTimeline();
+    await screen.findByText('Weekly team sync');
+    expect(screen.queryByRole('note', { name: 'Your Timeline is empty' })).not.toBeInTheDocument();
+  });
+
+  it('introduces Optimize Schedule until Got it, and records that on the server (Rev 19)', async () => {
+    renderTimeline();
+    const note = await screen.findByRole('note', { name: 'About Optimize Schedule' });
+    await userEvent.click(within(note).getByRole('button', { name: 'Got it' }));
+    expect(screen.queryByRole('note', { name: 'About Optimize Schedule' })).not.toBeInTheDocument();
+    expect(mockedSettings.markIntroductionSeen).toHaveBeenCalledWith('optimize_schedule');
+  });
+
+  it('does not introduce Optimize Schedule again once the account has seen it, on any device', async () => {
+    mockedSettings.getSettings.mockResolvedValue({ ...SETTINGS, introductions_seen: ['optimize_schedule'] });
+    renderTimeline();
+    await screen.findByText('Water the plants');
+    expect(screen.queryByRole('note', { name: 'About Optimize Schedule' })).not.toBeInTheDocument();
+  });
+
 });

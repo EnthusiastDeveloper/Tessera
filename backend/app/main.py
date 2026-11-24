@@ -18,6 +18,7 @@ from app.api.v1.routes.calendar_connections import router as calendar_connection
 from app.api.v1.routes.external_events import router as external_events_router
 from app.api.v1.routes.notifications import router as notifications_router
 from app.api.v1.routes.schedule_optimizations import router as schedule_optimizations_router
+from app.api.v1.routes.settings import introductions_router
 from app.api.v1.routes.settings import router as settings_router
 from app.api.v1.routes.task_instances import router as task_instances_router
 from app.api.v1.routes.task_templates import router as task_templates_router
@@ -128,6 +129,7 @@ register_error_handlers(app)
 app.add_middleware(AuthGuardMiddleware)
 app.include_router(auth_router)
 app.include_router(settings_router)
+app.include_router(introductions_router)
 app.include_router(task_templates_router)
 app.include_router(task_instances_router)
 app.include_router(notifications_router)

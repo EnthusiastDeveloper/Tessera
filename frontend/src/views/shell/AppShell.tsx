@@ -4,6 +4,7 @@ import { useAuth } from '../../auth/AuthContext';
 import { MosaicMark } from '../../components/MosaicMark';
 import { ScheduleRepairOverlay } from '../../components/ScheduleRepairOverlay';
 import { DisplayPreferencesProvider } from '../../display/DisplayPreferences';
+import { IntroductionsProvider } from '../../introductions/Introductions';
 import { AccountMenu } from './AccountMenu';
 import { OptimizationDialogs } from '../../optimization/OptimizationDialogs';
 import { OptimizationProvider, useOptimization } from '../../optimization/OptimizationContext';
@@ -20,9 +21,11 @@ const NAV_ITEMS = [
 export function AppShell(): JSX.Element {
   return (
     <DisplayPreferencesProvider>
-      <OptimizationProvider>
-        <Shell />
-      </OptimizationProvider>
+      <IntroductionsProvider>
+        <OptimizationProvider>
+          <Shell />
+        </OptimizationProvider>
+      </IntroductionsProvider>
     </DisplayPreferencesProvider>
   );
 }

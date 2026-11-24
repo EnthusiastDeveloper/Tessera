@@ -20,6 +20,7 @@
 - `POST /api/v1/auth/setup` - first-run account creation; requires the setup token logged at startup; `410 Gone` once a user exists
 - `DELETE /api/v1/task-instances/{id}?scope=this_occurrence|this_and_future` - deletion scope mirrors edit scope (design-doc 3.8); required for recurring templates. `this_and_future` ends the series: **every open occurrence is deleted** (in-progress included), finished ones kept, template archived (Rev 11)
 - `GET /api/v1/settings/schedule-repair` - progress of the background repair a stricter settings save starts (design-doc 6.10)
+- `POST /api/v1/settings/introductions-seen` `{key}` - records a dismissed one-time introduction in `introductions_seen` (design-doc 3.7, Rev 19); idempotent append, not behind the optimization lock
 - `GET /api/v1/task-instances?view=backlog` - the Backlog view is a filter, not its own resource
 
 ### Error Envelope

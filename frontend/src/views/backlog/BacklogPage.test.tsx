@@ -102,6 +102,11 @@ describe('BacklogPage', () => {
   it('says so when nothing needs attention', async () => {
     setup([], [PREP]);
     expect(await screen.findByText(/Nothing needs your attention/)).toBeInTheDocument();
+    // Rev 19: and names the three ways a task lands here.
+    const note = screen.getByRole('note', { name: 'Your Backlog is empty' });
+    expect(note).toHaveTextContent(/deadline passed/);
+    expect(note).toHaveTextContent(/couldn't be fitted in/);
+    expect(note).toHaveTextContent(/waiting on another task/);
   });
 
   it('marks a task complete and reloads, since that can free tasks waiting on it', async () => {

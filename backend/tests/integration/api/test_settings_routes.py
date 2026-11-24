@@ -40,6 +40,7 @@ class TestGetSettings:
         assert body["date_format"] == "DD/MM/YYYY"
         assert body["time_format"] == "24h"
         assert body["onboarding_completed"] is False
+        assert body["introductions_seen"] == []
         assert body["blackout_dates"] == []
         assert body["active_hours"]["monday"] == [{"start": "09:00", "end": "17:00"}]
         assert body["daily_time_budget_minutes"]["monday"] is None
@@ -173,3 +174,42 @@ class TestScheduleRepair:
         assert (repair["done"], repair["total"], repair["moved"], repair["unschedulable"]) == (1, 1, 1, 0)
         moved = app_client.get("/api/v1/task-instances", params={"template_id": created["template"]["id"]}).json()[0]
         assert moved["scheduled_time"].startswith(f"{tomorrow.isoformat()}T10:00")
+
+
+class TestIntroductionsSeen:
+    """Design doc 3.7, 8.1 (Rev 19): one-time introductions are recorded on the server, so
+    each is shown once, not once per device."""
+
+    URL = "/api/v1/settings/introductions-seen"
+
+    def test_a_dismissed_introduction_is_recorded_and_kept(self, app_client: TestClient) -> None:
+        _login(app_client)
+        response = app_client.post(self.URL, json={"key": "optimize_schedule"})
+        assert response.status_code == 200, response.text
+        assert response.json()["introductions_seen"] == ["optimize_schedule"]
+        assert app_client.get("/api/v1/settings").json()["introductions_seen"] == ["optimize_schedule"]
+
+    def test_it_appends_and_is_idempotent(self, app_client: TestClient) -> None:
+        _login(app_client)
+        app_client.post(self.URL, json={"key": "optimize_schedule"})
+        app_client.post(self.URL, json={"key": "timeline.quick-create"})
+        response = app_client.post(self.URL, json={"key": "optimize_schedule"})
+        assert response.status_code == 200
+        assert response.json()["introductions_seen"] == ["optimize_schedule", "timeline.quick-create"]
+
+    def test_other_settings_leave_it_alone(self, app_client: TestClient) -> None:
+        _login(app_client)
+        app_client.post(self.URL, json={"key": "optimize_schedule"})
+        body = app_client.patch("/api/v1/settings", json={"first_day_of_week": "monday"}).json()
+        assert body["introductions_seen"] == ["optimize_schedule"]
+
+    def test_a_malformed_key_is_rejected(self, app_client: TestClient) -> None:
+        _login(app_client)
+        for key in ["", "Optimize", "1st", "has space", "x" * 65]:
+            response = app_client.post(self.URL, json={"key": key})
+            assert response.status_code == 422, key
+            assert response.json()["code"] == "invalid_field"
+
+    def test_it_needs_a_session(self, app_client: TestClient) -> None:
+        _complete_setup(app_client)
+        assert app_client.post(self.URL, json={"key": "optimize_schedule"}).status_code == 401

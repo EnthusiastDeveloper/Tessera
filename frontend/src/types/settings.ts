@@ -28,6 +28,8 @@ export interface UserSettings {
   time_format: TimeFormat;
   /** The setup guide has been finished or skipped (design doc 3.7, 8.1 screen 0a, Rev 16). */
   onboarding_completed: boolean;
+  /** Keys of the one-time introductions already dismissed (design doc 3.7, 8.1, Rev 19). */
+  introductions_seen: string[];
 }
 
 /** `GET /settings/schedule-repair` (design doc §6.10, Rev 11) - progress of the latest

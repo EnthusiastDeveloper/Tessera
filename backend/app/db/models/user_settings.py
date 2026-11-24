@@ -52,3 +52,7 @@ class UserSettingsORM(Base):
     )
     # Design doc 3.7, 8.1 (Rev 16): the first-run setup guide has been finished or skipped.
     onboarding_completed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Design doc 3.7, 8.1 (Rev 19): keys of the one-time introductions already shown and
+    # dismissed, e.g. ["optimize_schedule"]. On the server so each is shown once, not once
+    # per device. ["key", ...]
+    introductions_seen: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)

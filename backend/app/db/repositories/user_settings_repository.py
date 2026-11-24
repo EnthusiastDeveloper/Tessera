@@ -57,6 +57,7 @@ def _to_orm_kwargs(settings: UserSettings) -> dict[str, Any]:
         "date_format": settings.date_format,
         "time_format": settings.time_format,
         "onboarding_completed": settings.onboarding_completed,
+        "introductions_seen": list(settings.introductions_seen),
     }
 
 
@@ -72,4 +73,5 @@ def _to_domain(orm: UserSettingsORM) -> UserSettings:
         date_format=cast(DateFormat, orm.date_format),
         time_format=cast(TimeFormat, orm.time_format),
         onboarding_completed=orm.onboarding_completed,
+        introductions_seen=tuple(orm.introductions_seen),
     )

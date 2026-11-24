@@ -15,6 +15,12 @@ export function updateSettings(patch: Partial<UserSettings>): Promise<UserSettin
   return apiClient.patch<UserSettings>('/settings', patch);
 }
 
+/** `POST /settings/introductions-seen` - a one-time introduction was dismissed; it is never
+ * shown again, on any device (design doc 3.7, Rev 19). Idempotent. */
+export function markIntroductionSeen(key: string): Promise<UserSettings> {
+  return apiClient.post<UserSettings>('/settings/introductions-seen', { key });
+}
+
 /** The latest schedule repair, or `null` if there has never been one (design doc §6.10). */
 export function getScheduleRepair(): Promise<ScheduleRepair | null> {
   return apiClient.get<ScheduleRepair | null>('/settings/schedule-repair');

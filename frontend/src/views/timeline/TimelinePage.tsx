@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
@@ -15,8 +15,9 @@ import { listInstances } from '../../api/taskInstances';
 import { listProjections } from '../../api/taskTemplates';
 import { OptimizeControls } from '../../optimization/OptimizeControls';
 import { useOptimization } from '../../optimization/OptimizationContext';
-import { buildCalendarEvents, type TimelineExtendedProps } from './buildEvents';
+import { buildCalendarEvents, buildRealEvent, type TimelineExtendedProps } from './buildEvents';
 import { QuickCreatePanel } from './QuickCreatePanel';
+import { TimelineLegend } from './TimelineLegend';
 import { SNAP_MINUTES, selectedSlot, selectionAllowed, type SlotSelection } from './quickCreate';
 import type { BlackoutDate } from '../../types/settings';
 import type { DayName, TaskInstance } from '../../types/task';
@@ -57,6 +58,27 @@ function dayHeader(arg: DayHeaderContentArg, dateFormat: DateFormat): JSX.Elemen
       <span>{formatWeekday(arg.date)}</span> <span className="fc-day-head__date">{formatDayMonth(arg.date, dateFormat)}</span>
       <span className="fc-day-head__day">{arg.date.getDate()}</span>
     </span>
+  );
+}
+
+/** The empty Timeline (design doc 8.1 screen 2, Rev 19): how work gets onto it. Shown above
+ * the calendar, not instead of it, so quick create works from here. */
+function EmptyTimelineNote(): JSX.Element {
+  return (
+    <div className="teaching-note" role="note" aria-label="Your Timeline is empty">
+      <p>
+        <strong>Nothing on your Timeline yet.</strong> Click or drag across empty time below to add a task at that time,
+        or use <strong>New task</strong>.
+      </p>
+      <ul>
+        <li>A fixed task keeps the time you give it.</li>
+        <li>A flexible task gets a time from Tessera, inside your active hours and before its deadline.</li>
+        <li>
+          Work that has no place yet - waiting on another task, or not fitting before its deadline - is listed in the{' '}
+          <Link to="/backlog">Backlog</Link>.
+        </li>
+      </ul>
+    </div>
   );
 }
 
@@ -150,12 +172,18 @@ export function TimelinePage(): JSX.Element {
   }
 
   const events = buildCalendarEvents({ instances, projections, externalEvents, blackoutDates });
+  // A task of the user's own on the Timeline (Rev 19): external events and blackout days
+  // don't count - they are not something the user added here.
+  const hasTasks = projections.length > 0 || instances.some((instance) => buildRealEvent(instance) !== null);
+  const ready = state === 'ready';
 
   return (
     <div>
       <h2>Timeline</h2>
-      <OptimizeControls />
+      <OptimizeControls introduce={ready && hasTasks} />
       <TimezoneNotice settingsTimezone={settingsTimezone} />
+      {ready && !hasTasks && <EmptyTimelineNote />}
+      <TimelineLegend />
       {state === 'loading' ? (
         <p style={{ color: 'var(--color-text-muted)' }}>Loading...</p>
       ) : (

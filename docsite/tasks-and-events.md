@@ -27,6 +27,19 @@ In the Timeline's week or day view, click an empty time slot, or drag across sev
 
 The quick form creates a one-time task through the same rules as the full form, so a fixed task that collides with another is refused and the reason is shown right there. Press **Escape**, **Cancel** or click elsewhere to close it without creating anything.
 
+## Reading the Timeline
+
+A legend under the Timeline's toolbar names every kind of block it draws:
+
+- **Fixed task** (solid amber) - keeps the time you gave it.
+- **Flexible task** (navy) - Tessera picked this time for it.
+- **Waiting** (dashed amber outline) - a fixed task that holds its time while it waits on another task.
+- **Upcoming repeat** (hatched, faded) - a future occurrence of a repeating task, not created yet; it can't be opened.
+- **Other calendar** (hatched gray) - an event from a connected calendar, read only.
+- **Blackout day** (tinted red) - nothing is scheduled on this day.
+
+Hover a label for a one-line explanation. While you have no task on the Timeline, a note above it says how to add one; it goes away once you do. The first time you see the Timeline with a task on it, a short note explains **Optimize Schedule**; press **Got it** to hide it. That is remembered for your account, so it won't come back on another browser or device. New features that get an introduction like this show it once, the same way. The Backlog and Notifications pages say what would appear there when they're empty.
+
 ## Recurrence
 
 Templates support four patterns: `one_time`, `daily`, `weekly` and `monthly`. Every repeating pattern takes an interval ("every 3 days", "every 2 weeks"), and weekly/monthly also take a day of the week or month. A monthly task set to the 29th-31st lands on the last day of any shorter month, then returns to its day the month after.
